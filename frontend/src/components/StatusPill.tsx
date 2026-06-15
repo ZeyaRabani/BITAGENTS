@@ -1,7 +1,7 @@
 import { STATUS_LABELS, type TaskStatus } from "@bitagents/shared";
 
 const styles: Record<TaskStatus, string> = {
-  created: "border-slate-500/50 bg-slate-500/10 text-slate-200",
+  created: "border-slate-500/50 bg-slate-500/10 text-foreground",
   paid_pending: "border-skybit/50 bg-skybit/10 text-skybit",
   assigned: "border-mint/50 bg-mint/10 text-mint",
   computing: "border-coral/60 bg-coral/10 text-coral",

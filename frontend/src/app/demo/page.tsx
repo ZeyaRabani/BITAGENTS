@@ -83,11 +83,11 @@ export default function DemoPage() {
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="text-sm font-black uppercase text-ember">Admin demo monitor</p>
-          <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">Full BIT Agents flow</h1>
-          <p className="mt-3 max-w-2xl text-slate-300">Watch providers, task statuses, devnet signatures, worker results, and payout settlement.</p>
+          <h1 className="mt-2 text-3xl font-black text-foreground sm:text-5xl">Full BIT Agents flow</h1>
+          <p className="mt-3 max-w-2xl text-muted-foreground">Watch providers, task statuses, devnet signatures, worker results, and payout settlement.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <button onClick={() => refresh().catch((err) => setError((err as Error).message))} className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-panel px-4 py-2 font-black text-white transition hover:border-ember">
+          <button onClick={() => refresh().catch((err) => setError((err as Error).message))} className="inline-flex items-center justify-center gap-2 rounded-md border border-line bg-panel px-4 py-2 font-black text-foreground transition hover:border-ember">
             <RefreshCw size={17} /> Refresh
           </button>
           <WalletMultiButton />
@@ -108,24 +108,24 @@ export default function DemoPage() {
           <div className="flex items-center gap-3 border-b border-line pb-4">
             <ClipboardList className="text-ember" size={21} />
             <div>
-              <p className="font-black text-white">Registered providers</p>
-              <p className="text-sm text-slate-400">Worker wallets must match these entries</p>
+              <p className="font-black text-foreground">Registered providers</p>
+              <p className="text-sm text-muted-foreground">Worker wallets must match these entries</p>
             </div>
           </div>
           <div className="mt-5 space-y-3">
             {providers.length === 0 ? (
-              <p className="rounded-md border border-line bg-ink/70 p-4 text-sm text-slate-400">Register a provider to enable assignment.</p>
+              <p className="rounded-md border border-line bg-ink/70 p-4 text-sm text-muted-foreground">Register a provider to enable assignment.</p>
             ) : (
               providers.map((provider) => (
                 <div key={provider.id} className="rounded-md border border-line bg-ink/70 p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="break-words font-black text-white">{provider.name}</p>
-                      <p className="mt-1 font-mono text-xs text-slate-500">{shortAddress(provider.walletAddress)}</p>
+                      <p className="break-words font-black text-foreground">{provider.name}</p>
+                      <p className="mt-1 font-mono text-xs text-muted-foreground">{shortAddress(provider.walletAddress)}</p>
                     </div>
-                    <span className={`rounded-md border px-2 py-1 text-xs font-black uppercase ${provider.status === "online" ? "border-mint/50 bg-mint/10 text-mint" : "border-slate-600 bg-slate-500/10 text-slate-300"}`}>{provider.status}</span>
+                    <span className={`rounded-md border px-2 py-1 text-xs font-black uppercase ${provider.status === "online" ? "border-mint/50 bg-mint/10 text-mint" : "border-slate-600 bg-slate-500/10 text-muted-foreground"}`}>{provider.status}</span>
                   </div>
-                  <p className="mt-3 text-sm text-slate-400">{provider.computeType.replace("_", " ")} at {provider.pricePerTaskSol.toFixed(4)} SOL</p>
+                  <p className="mt-3 text-sm text-muted-foreground">{provider.computeType.replace("_", " ")} at {provider.pricePerTaskSol.toFixed(4)} SOL</p>
                 </div>
               ))
             )}
@@ -134,15 +134,15 @@ export default function DemoPage() {
 
         <div className="space-y-4">
           {tasks.length === 0 ? (
-            <div className="rounded-md border border-line bg-panel/80 p-8 text-center text-slate-400">No task history yet.</div>
+            <div className="rounded-md border border-line bg-panel/80 p-8 text-center text-muted-foreground">No task history yet.</div>
           ) : (
             tasks.map((task) => (
               <article key={task.id} className="rounded-md border border-line bg-panel/80 p-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div className="min-w-0">
                     <p className="text-xs font-black uppercase text-ember">{AGENT_LABELS[task.type]}</p>
-                    <h2 className="mt-1 break-words text-xl font-black text-white">{taskInputLabel(task)}</h2>
-                    <p className="mt-2 font-mono text-xs text-slate-500">{task.id}</p>
+                    <h2 className="mt-1 break-words text-xl font-black text-foreground">{taskInputLabel(task)}</h2>
+                    <p className="mt-2 font-mono text-xs text-muted-foreground">{task.id}</p>
                   </div>
                   <StatusPill status={task.status} />
                 </div>
@@ -184,8 +184,8 @@ export default function DemoPage() {
 function HeroStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-line bg-panel/80 p-4">
-      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
-      <p className="mt-2 text-3xl font-black text-white">{value}</p>
+      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-2 text-3xl font-black text-foreground">{value}</p>
     </div>
   );
 }
@@ -193,15 +193,15 @@ function HeroStat({ label, value }: { label: string; value: string }) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0 rounded-md border border-line bg-ink/70 p-3">
-      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
-      <p className="mt-1 break-words font-black text-white">{value}</p>
+      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words font-black text-foreground">{value}</p>
     </div>
   );
 }
 
 function TxLink({ label, signature }: { label: string; signature: string }) {
   return (
-    <a className="inline-flex items-center gap-2 rounded-md border border-skybit/45 bg-skybit/10 px-4 py-2 text-sm font-black text-skybit transition hover:border-white hover:text-white" href={makeExplorerTxUrl(signature)} target="_blank" rel="noreferrer">
+    <a className="inline-flex items-center gap-2 rounded-md border border-skybit/45 bg-skybit/10 px-4 py-2 text-sm font-black text-skybit transition hover:border-white hover:text-foreground" href={makeExplorerTxUrl(signature)} target="_blank" rel="noreferrer">
       {label} <ArrowRight size={15} />
     </a>
   );

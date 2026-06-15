@@ -116,8 +116,8 @@ export default function DashboardPage() {
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="text-sm font-black uppercase text-ember">User dashboard</p>
-          <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">Create an agent task</h1>
-          <p className="mt-3 max-w-2xl text-slate-300">Pay a provider on Solana devnet, then watch the worker run real off-chain computation.</p>
+          <h1 className="mt-2 text-3xl font-black text-foreground sm:text-5xl">Create an agent task</h1>
+          <p className="mt-3 max-w-2xl text-muted-foreground">Pay a provider on Solana devnet, then watch the worker run real off-chain computation.</p>
         </div>
         <WalletMultiButton />
       </div>
@@ -130,17 +130,17 @@ export default function DashboardPage() {
             <AgentButton active={agentType === "benchmark"} icon={Cpu} label="Benchmark" onClick={() => setAgentType("benchmark")} />
           </div>
 
-          <label className="mt-6 block text-sm font-black text-slate-200" htmlFor="agent-input">
+          <label className="mt-6 block text-sm font-black text-foreground" htmlFor="agent-input">
             {formHint}
           </label>
           {agentType === "wallet_watcher" && (
-            <input id="agent-input" value={walletAddress} onChange={(event) => setWalletAddress(event.target.value)} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 font-mono text-sm text-white outline-none transition focus:border-ember" placeholder="Devnet wallet address" />
+            <input id="agent-input" value={walletAddress} onChange={(event) => setWalletAddress(event.target.value)} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 font-mono text-sm text-foreground outline-none transition focus:border-ember" placeholder="Devnet wallet address" />
           )}
           {agentType === "research" && (
-            <input id="agent-input" value={keyword} onChange={(event) => setKeyword(event.target.value)} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 text-sm text-white outline-none transition focus:border-ember" placeholder="Project or keyword" />
+            <input id="agent-input" value={keyword} onChange={(event) => setKeyword(event.target.value)} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 text-sm text-foreground outline-none transition focus:border-ember" placeholder="Project or keyword" />
           )}
           {agentType === "benchmark" && (
-            <input id="agent-input" type="number" min={12} max={220} value={size} onChange={(event) => setSize(Number(event.target.value))} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 text-sm text-white outline-none transition focus:border-ember" />
+            <input id="agent-input" type="number" min={12} max={220} value={size} onChange={(event) => setSize(Number(event.target.value))} className="mt-2 w-full rounded-md border border-line bg-ink px-3 py-3 text-sm text-foreground outline-none transition focus:border-ember" />
           )}
 
           <div className="mt-5 grid gap-3 rounded-md border border-line bg-ink/70 p-4 sm:grid-cols-3">
@@ -160,15 +160,15 @@ export default function DashboardPage() {
 
         <div className="space-y-4">
           {tasks.length === 0 ? (
-            <div className="rounded-md border border-line bg-panel/75 p-8 text-center text-slate-400">No tasks yet. Create one to start the provider loop.</div>
+            <div className="rounded-md border border-line bg-panel/75 p-8 text-center text-muted-foreground">No tasks yet. Create one to start the provider loop.</div>
           ) : (
             tasks.map((task) => (
               <article key={task.id} className="rounded-md border border-line bg-panel/80 p-5">
                 <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
                   <div className="min-w-0">
                     <p className="text-xs font-black uppercase text-ember">{AGENT_LABELS[task.type]}</p>
-                    <h2 className="mt-1 break-words text-xl font-black text-white">{taskInputLabel(task)}</h2>
-                    <p className="mt-2 font-mono text-xs text-slate-500">{task.id}</p>
+                    <h2 className="mt-1 break-words text-xl font-black text-foreground">{taskInputLabel(task)}</h2>
+                    <p className="mt-2 font-mono text-xs text-muted-foreground">{task.id}</p>
                   </div>
                   <StatusPill status={task.status} />
                 </div>
@@ -181,7 +181,7 @@ export default function DashboardPage() {
                   <Metric label="Payment" value={task.paymentSignature ? "Recorded" : "Pending"} />
                 </div>
                 {task.paymentSignature && (
-                  <a className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-skybit hover:text-white" href={makeExplorerTxUrl(task.paymentSignature)} target="_blank" rel="noreferrer">
+                  <a className="mt-4 inline-flex items-center gap-2 text-sm font-bold text-skybit hover:text-foreground" href={makeExplorerTxUrl(task.paymentSignature)} target="_blank" rel="noreferrer">
                     View payment <ArrowRight size={15} />
                   </a>
                 )}
@@ -199,7 +199,7 @@ export default function DashboardPage() {
 
 function AgentButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: typeof WalletCards; label: string; onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className={`flex min-h-[88px] flex-col items-start justify-between rounded-md border p-3 text-left transition ${active ? "border-ember bg-ember text-ink" : "border-line bg-ink text-slate-300 hover:border-coral"}`}>
+    <button type="button" onClick={onClick} className={`flex min-h-[88px] flex-col items-start justify-between rounded-md border p-3 text-left transition ${active ? "border-ember bg-ember text-ink" : "border-line bg-ink text-muted-foreground hover:border-coral"}`}>
       <Icon size={21} />
       <span className="text-sm font-black">{label}</span>
     </button>
@@ -209,8 +209,8 @@ function AgentButton({ active, icon: Icon, label, onClick }: { active: boolean; 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-xs font-bold uppercase text-slate-500">{label}</p>
-      <p className="mt-1 break-words font-black text-white">{value}</p>
+      <p className="text-xs font-bold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 break-words font-black text-foreground">{value}</p>
     </div>
   );
 }

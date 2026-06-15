@@ -6,11 +6,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const appLinks = [
-  { href: "/marketplace", label: "Marketplace" },
   { href: "/provider", label: "Provider" },
-  // { href: "/vaults", label: "Vaults" },
-  { href: "/agents", label: "Agents" },
-  { href: "/analytics", label: "Analytics" }
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/demo", label: "Demo" }
 ];
 
 const marketingLinks = [
@@ -48,7 +46,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
                 ))}
               </nav>
               <Link
-                href="/marketplace"
+                href="/dashboard"
                 className="inline-flex items-center justify-center gap-2 rounded-md bg-[#d76545] px-4 py-2 text-sm font-black text-[#fff8ef] transition hover:bg-[#bd5134]"
               >
                 Launch App <ArrowUpRight size={16} />

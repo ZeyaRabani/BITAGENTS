@@ -6,7 +6,8 @@ import {
   type ComputeProvider,
   type TaskStatus
 } from "@bitagents/shared";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 const EMPTY_DB: BitagentsDb = {
@@ -32,21 +33,31 @@ function dbPath() {
 }
 
 export async function readDb(): Promise<BitagentsDb> {
-  try {
-    const raw = await readFile(dbPath(), "utf8");
-    return JSON.parse(raw) as BitagentsDb;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      const raw = await readFile(dbPath(), "utf8");
+      if (raw.length === 0) {
+        throw new SyntaxError("Empty database file");
+      }
+      return JSON.parse(raw) as BitagentsDb;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return structuredClone(EMPTY_DB);
+      }
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 15));
     }
-    return structuredClone(EMPTY_DB);
   }
+  throw lastError;
 }
 
 export async function writeDb(db: BitagentsDb) {
   const file = dbPath();
   await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(db, null, 2)}\n`, "utf8");
+  await rename(tmp, file);
 }
 
 export async function updateDb<T>(mutator: (db: BitagentsDb) => T | Promise<T>): Promise<T> {

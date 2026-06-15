@@ -39,7 +39,7 @@ export function Roadmap() {
             AI agents should be as accessible and composable as any other piece of crypto infrastructure. BIT Agents is the marketplace that makes it so.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <a href="/marketplace" className="bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
+            <a href="/dashboard" className="bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
               Launch the App →
             </a>
             <a href="#product" className="border border-grid px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] transition hover:border-signal">

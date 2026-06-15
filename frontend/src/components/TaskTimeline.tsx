@@ -15,7 +15,7 @@ export function TaskTimeline({ task }: { task: AgentTask }) {
                 done ? "bg-ember" : active ? "bg-coral" : "bg-slate-700"
               }`}
             />
-            <p className={`mt-2 truncate text-xs font-bold ${done || active ? "text-white" : "text-slate-500"}`}>
+            <p className={`mt-2 truncate text-xs font-bold ${done || active ? "text-foreground" : "text-muted-foreground"}`}>
               {STATUS_LABELS[status]}
             </p>
           </div>

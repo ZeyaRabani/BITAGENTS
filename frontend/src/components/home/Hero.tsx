@@ -14,11 +14,11 @@ export function Hero() {
                         BIT Agents lets users run specialized agents for wallet monitoring, research, automation, and on-chain workflows - powered by a decentralized compute network.
                     </p>
                     <div id="hero-cta" className="mt-10 flex flex-wrap gap-3">
-                        <a href="/marketplace" className="group inline-flex items-center gap-2 bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
-                            Trade Compute <span className="transition group-hover:translate-x-0.5">→</span>
+                        <a href="/dashboard" className="group inline-flex items-center gap-2 bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
+                            Launch App <span className="transition group-hover:translate-x-0.5">→</span>
                         </a>
-                        <a href="/vaults" className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
-                            Fund a Vault
+                        <a href="/provider" className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
+                            Register Compute
                         </a>
                     </div>
                     <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-grid pt-8">
