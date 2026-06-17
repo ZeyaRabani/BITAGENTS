@@ -70,8 +70,8 @@ SOLANA_CLUSTER = os.environ.get(
     "SOLANA_CLUSTER",
     os.environ.get("NEXT_PUBLIC_SOLANA_CLUSTER", "devnet"),
 )
-JUPITER_QUOTE_API = os.environ.get("JUPITER_QUOTE_API", "https://quote-api.jup.ag/v6/quote")
-JUPITER_SWAP_API = os.environ.get("JUPITER_SWAP_API", "https://quote-api.jup.ag/v6/swap")
+JUPITER_QUOTE_API = os.environ.get("JUPITER_QUOTE_API", "https://lite-api.jup.ag/swap/v1/quote")
+JUPITER_SWAP_API = os.environ.get("JUPITER_SWAP_API", "https://lite-api.jup.ag/swap/v1/swap")
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 
 _plans_path = os.environ.get("DCA_PLANS_FILE", "").strip()
@@ -107,7 +107,12 @@ TOKEN_MINTS = {
     "PYTH": {"mint": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",  "decimals": 6,  "coingecko_id": "pyth-network"},
     "JTO":  {"mint": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",  "decimals": 9,  "coingecko_id": "jito-governance-token"},
     "RENDER": {"mint": "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", "decimals": 8, "coingecko_id": "render-token"},
+    "BITAGENTS": {"mint": "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY", "decimals": 6, "coingecko_id": None},
 }
+
+# A base58 Solana mint/contract address (no 0, O, I, l), 32-44 chars.
+_MINT_ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+_mint_decimals_cache: dict = {}
 
 _scheduler_lock = threading.Lock()
 _scheduler_running = False
@@ -185,12 +190,37 @@ def sol_rpc(method: str, params: list, timeout: int = 30) -> Any:
     return data.get("result")
 
 
+def _fetch_mint_decimals(mint: str) -> int:
+    """Read an SPL mint's decimals from chain. Falls back to 6 on RPC error."""
+    if mint in _mint_decimals_cache:
+        return _mint_decimals_cache[mint]
+    decimals = 6
+    try:
+        resp = sol_rpc("getTokenSupply", [mint])
+        decimals = int(resp["value"]["decimals"])
+    except Exception:
+        pass
+    _mint_decimals_cache[mint] = decimals
+    return decimals
+
+
 def resolve_token(symbol: str) -> dict:
-    sym = symbol.strip().upper()
-    if sym not in TOKEN_MINTS:
-        return {"error": f"Unknown token '{symbol}'. Supported: {', '.join(sorted(TOKEN_MINTS))}"}
-    info = TOKEN_MINTS[sym]
-    return {"symbol": sym, **info}
+    raw = symbol.strip()
+    sym = raw.upper()
+    if sym in TOKEN_MINTS:
+        return {"symbol": sym, **TOKEN_MINTS[sym]}
+    # Accept any raw base58 mint address (e.g. a token's contract address).
+    if _MINT_ADDRESS_RE.match(raw):
+        return {
+            "symbol": raw,
+            "mint": raw,
+            "decimals": _fetch_mint_decimals(raw),
+            "coingecko_id": None,
+        }
+    return {
+        "error": f"Unknown token '{symbol}'. Supported: {', '.join(sorted(TOKEN_MINTS))} "
+                 f"(or paste a token's mint/contract address)."
+    }
 
 
 def _lamports(amount: float, decimals: int) -> int:
@@ -247,7 +277,8 @@ def get_wallet_status() -> dict:
             "note": "Set DCA_WALLET_PRIVATE_KEY (base58 or JSON array) to enable live swaps.",
         }
     try:
-        lamports = sol_rpc("getBalance", [pubkey])
+        resp = sol_rpc("getBalance", [pubkey])
+        lamports = resp.get("value", 0) if isinstance(resp, dict) else resp
         balance = lamports / 1e9
         return {
             "wallet_configured": True,
@@ -268,6 +299,13 @@ def get_token_price(symbol: str) -> dict:
     tok = resolve_token(symbol)
     if "error" in tok:
         return tok
+    if not tok.get("coingecko_id"):
+        return {
+            "symbol": tok["symbol"],
+            "price_usd": None,
+            "note": "No CoinGecko price feed for this token; execution uses live Jupiter quotes.",
+            "fetched_at": _fmt_ts(datetime.now(timezone.utc)),
+        }
     try:
         r = requests.get(
             f"{COINGECKO_API}/simple/price",
@@ -297,8 +335,17 @@ def get_jupiter_quote(
     slippage_bps: int = 100,
 ) -> dict:
     """Get a Jupiter swap quote (mainnet only)."""
-    amount = float(amount)
-    slippage_bps = int(slippage_bps)
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return {"error": "Amount must be a number greater than 0."}
+    # Small LLMs sometimes omit/null slippage; fall back to a sane default.
+    try:
+        slippage_bps = int(slippage_bps) if slippage_bps is not None else 100
+    except (TypeError, ValueError):
+        slippage_bps = 100
+    if amount <= 0:
+        return {"error": "Amount must be greater than 0."}
 
     if not _is_mainnet():
         return {
