@@ -1,10 +1,16 @@
+// =====================================================================
+// BITAGENTS shared types and helpers
+// Used by the Next.js frontend (browser + server) and the optional worker.
+// Keep this file free of Node-only imports so it can be bundled for the
+// browser. Real computation lives in server-only modules.
+// =====================================================================
+
 export const TASK_STATUSES = [
   "created",
-  "paid_pending",
+  "paid",
   "assigned",
   "computing",
   "completed",
-  "paid_out",
   "failed"
 ] as const;
 
@@ -12,14 +18,19 @@ export type TaskStatus = (typeof TASK_STATUSES)[number];
 
 export const AGENT_TYPES = [
   "wallet_watcher",
-  "research",
-  "benchmark"
+  "token_research",
+  "market_research"
 ] as const;
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
-export type ComputeType = "CPU" | "GPU_SIMULATED" | "GENERAL";
+export const SOLANA_NETWORKS = ["devnet", "mainnet"] as const;
+export type SolanaNetwork = (typeof SOLANA_NETWORKS)[number];
+
+export type ComputeType = "CPU" | "GPU_SIMULATED" | "LLM";
 export type ProviderStatus = "online" | "offline";
+
+export type ComputeEngine = "deterministic" | "ollama" | "openai" | "anthropic";
 
 export interface StatusEvent {
   status: TaskStatus;
@@ -34,83 +45,119 @@ export interface ComputeProvider {
   computeType: ComputeType;
   pricePerTaskSol: number;
   status: ProviderStatus;
+  tasksCompleted: number;
+  reputation: number;
+  endpoint?: string;
+  registrationSignature?: string;
+  registrationMessage?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+// ---------------------------------------------------------------------
+// Agent inputs
+// ---------------------------------------------------------------------
 
 export interface WalletWatcherInput {
   walletAddress: string;
 }
 
-export interface ResearchInput {
-  keyword: string;
+export interface TokenResearchInput {
+  query: string;
 }
 
-export interface BenchmarkInput {
-  size: number;
+export interface MarketResearchInput {
+  query: string;
 }
 
-export type AgentInput = WalletWatcherInput | ResearchInput | BenchmarkInput;
+export type AgentInput = WalletWatcherInput | TokenResearchInput | MarketResearchInput;
+
+// ---------------------------------------------------------------------
+// Shared compute metadata attached to every result
+// ---------------------------------------------------------------------
+
+export interface ComputeMeta {
+  computedAt: string;
+  runtimeMs: number;
+  resultHash: string;
+  engine: ComputeEngine;
+  network: SolanaNetwork;
+  rpcUrl: string;
+}
+
+// ---------------------------------------------------------------------
+// Agent results
+// ---------------------------------------------------------------------
 
 export interface WalletSignatureSummary {
   signature: string;
   slot: number;
   blockTime: number | null;
-  err: unknown;
+  err: boolean;
 }
 
-export interface WalletWatcherResult {
+export interface WalletWatcherResult extends ComputeMeta {
   type: "wallet_watcher";
   walletAddress: string;
   solBalance: number;
   tokenAccountsCount: number;
   latestSignatures: WalletSignatureSummary[];
   summary: string;
-  rpcUrl: string;
-  computedAt: string;
+  riskNotes: string[];
 }
 
-export interface ResearchResult {
-  type: "research";
-  keyword: string;
-  computedAt: string;
-  wordCount: number;
-  uniqueTermCount: number;
-  characterCount: number;
-  sentimentScore: number;
-  keywordHash: string;
-  structuredSummary: {
-    headline: string;
-    marketContext: string;
-    technicalAngle: string;
-    risks: string[];
-    nextQuestions: string[];
+export interface TokenResearchResult extends ComputeMeta {
+  type: "token_research";
+  query: string;
+  mintAddress: string | null;
+  resolvedFromMint: boolean;
+  overview: string;
+  onchain: {
+    supply: number | null;
+    decimals: number | null;
+    holdersNote: string;
+    liquidityNote: string;
+    mintAuthorityActive: boolean | null;
+    freezeAuthorityActive: boolean | null;
   };
+  risks: string[];
+  bullCase: string[];
+  bearCase: string[];
+  disclaimer: string;
 }
 
-export interface BenchmarkResult {
-  type: "benchmark";
-  size: number;
-  iterations: number;
-  runtimeMs: number;
-  checksum: number;
-  resultHash: string;
-  computedAt: string;
+export interface MarketResearchResult extends ComputeMeta {
+  type: "market_research";
+  query: string;
+  meaning: string;
+  useCases: string[];
+  risks: string[];
+  opportunities: string[];
+  thingsToMonitor: string[];
+  sentimentScore: number;
+  disclaimer: string;
 }
 
-export type AgentResult = WalletWatcherResult | ResearchResult | BenchmarkResult;
+export type AgentResult = WalletWatcherResult | TokenResearchResult | MarketResearchResult;
+
+// ---------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------
 
 export interface AgentTask {
   id: string;
   type: AgentType;
   input: AgentInput;
-  requesterWallet: string;
+  network: SolanaNetwork;
+  requesterWallet: string | null;
+  free: boolean;
   status: TaskStatus;
   priceSol: number;
   assignedProviderId?: string;
   assignedProviderWallet?: string;
+  assignedProviderName?: string;
   paymentSignature?: string;
-  payoutSignature?: string;
+  runtimeMs?: number;
   result?: AgentResult;
   error?: string;
   createdAt: string;
@@ -123,33 +170,48 @@ export interface BitagentsDb {
   tasks: AgentTask[];
 }
 
+// ---------------------------------------------------------------------
+// Labels and ordering
+// ---------------------------------------------------------------------
+
 export const AGENT_LABELS: Record<AgentType, string> = {
   wallet_watcher: "Wallet Watcher Agent",
-  research: "Research Agent",
-  benchmark: "Compute Benchmark Agent"
+  token_research: "Token Research Agent",
+  market_research: "Market Research Agent"
+};
+
+export const AGENT_DESCRIPTIONS: Record<AgentType, string> = {
+  wallet_watcher:
+    "Inspect any Solana wallet: SOL balance, token accounts, recent activity, plus an AI summary and behavior notes.",
+  token_research:
+    "Produce a structured research report for a token mint or project, with on-chain notes, bull/bear cases, and risks.",
+  market_research:
+    "Turn a keyword, ticker, or narrative into a structured research brief: meaning, use cases, risks, and opportunities."
 };
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   created: "Created",
-  paid_pending: "Paid pending",
+  paid: "Paid",
   assigned: "Assigned",
   computing: "Computing",
   completed: "Completed",
-  paid_out: "Paid out",
   failed: "Failed"
 };
 
 export const STATUS_ORDER: TaskStatus[] = [
   "created",
-  "paid_pending",
+  "paid",
   "assigned",
   "computing",
-  "completed",
-  "paid_out"
+  "completed"
 ];
 
-export const DEFAULT_TASK_PRICE_SOL = 0.01;
+export const DEFAULT_TASK_PRICE_SOL = 0.001;
 export const LAMPORTS_PER_SOL_NUMBER = 1_000_000_000;
+
+// ---------------------------------------------------------------------
+// Guards and helpers
+// ---------------------------------------------------------------------
 
 export function isAgentType(value: string): value is AgentType {
   return (AGENT_TYPES as readonly string[]).includes(value);
@@ -157,6 +219,10 @@ export function isAgentType(value: string): value is AgentType {
 
 export function isTaskStatus(value: string): value is TaskStatus {
   return (TASK_STATUSES as readonly string[]).includes(value);
+}
+
+export function isSolanaNetwork(value: string): value is SolanaNetwork {
+  return (SOLANA_NETWORKS as readonly string[]).includes(value);
 }
 
 export function solToLamports(sol: number): number {
@@ -167,8 +233,14 @@ export function lamportsToSol(lamports: number): number {
   return lamports / LAMPORTS_PER_SOL_NUMBER;
 }
 
-export function makeExplorerTxUrl(signature: string, cluster = "devnet"): string {
+export function makeExplorerTxUrl(signature: string, network: SolanaNetwork = "devnet"): string {
+  const cluster = network === "mainnet" ? "mainnet-beta" : "devnet";
   return `https://explorer.solana.com/tx/${signature}?cluster=${cluster}`;
+}
+
+export function makeExplorerAddressUrl(address: string, network: SolanaNetwork = "devnet"): string {
+  const cluster = network === "mainnet" ? "mainnet-beta" : "devnet";
+  return `https://explorer.solana.com/address/${address}?cluster=${cluster}`;
 }
 
 export function shortAddress(address: string): string {
@@ -182,17 +254,17 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function networkLabel(network: SolanaNetwork): string {
+  return network === "mainnet" ? "Mainnet Read Mode" : "Devnet Demo Mode";
+}
+
 export function taskInputLabel(task: Pick<AgentTask, "type" | "input">): string {
   if (task.type === "wallet_watcher" && "walletAddress" in task.input) {
     return task.input.walletAddress;
   }
 
-  if (task.type === "research" && "keyword" in task.input) {
-    return task.input.keyword;
-  }
-
-  if (task.type === "benchmark" && "size" in task.input) {
-    return `matrix ${task.input.size}x${task.input.size}`;
+  if ((task.type === "token_research" || task.type === "market_research") && "query" in task.input) {
+    return task.input.query;
   }
 
   return "Unknown input";

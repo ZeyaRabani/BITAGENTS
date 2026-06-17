@@ -1,4 +1,4 @@
-import { chooseProvider, recordStatus, updateDb } from "@/server/db";
+import { recordStatus, updateDb } from "@/server/db";
 import { requirePublicKey, requireString } from "@/server/validation";
 
 export const runtime = "nodejs";
@@ -22,16 +22,7 @@ export async function POST(request: Request, { params }: { params: { taskId: str
       }
 
       found.paymentSignature = paymentSignature;
-      recordStatus(found, "paid_pending", "Devnet payment signature recorded.");
-
-      const provider = chooseProvider(db);
-      if (provider) {
-        found.assignedProviderId = provider.id;
-        found.assignedProviderWallet = provider.walletAddress;
-        found.priceSol = provider.pricePerTaskSol;
-        recordStatus(found, "assigned", `Assigned to ${provider.name}.`);
-      }
-
+      recordStatus(found, "paid", "Devnet payment signature recorded.");
       return found;
     });
 

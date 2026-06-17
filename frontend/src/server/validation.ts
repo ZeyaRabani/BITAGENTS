@@ -1,4 +1,12 @@
-import { AGENT_TYPES, type AgentInput, type AgentType, type ComputeType, type ProviderStatus } from "@bitagents/shared";
+import {
+  AGENT_TYPES,
+  isSolanaNetwork,
+  type AgentInput,
+  type AgentType,
+  type ComputeType,
+  type ProviderStatus,
+  type SolanaNetwork
+} from "@bitagents/shared";
 import { PublicKey } from "@solana/web3.js";
 
 export function requireString(value: unknown, field: string, maxLength = 180): string {
@@ -12,6 +20,13 @@ export function requireString(value: unknown, field: string, maxLength = 180): s
   }
 
   return trimmed;
+}
+
+export function optionalString(value: unknown, field: string, maxLength = 180): string | undefined {
+  if (value === undefined || value === null || (typeof value === "string" && value.trim().length === 0)) {
+    return undefined;
+  }
+  return requireString(value, field, maxLength);
 }
 
 export function requirePublicKey(value: unknown, field: string): string {
@@ -31,6 +46,13 @@ export function parseAgentType(value: unknown): AgentType {
   return value as AgentType;
 }
 
+export function parseNetwork(value: unknown): SolanaNetwork {
+  if (typeof value === "string" && isSolanaNetwork(value)) {
+    return value;
+  }
+  return "devnet";
+}
+
 export function parseAgentInput(type: AgentType, raw: unknown): AgentInput {
   const input = (raw ?? {}) as Record<string, unknown>;
 
@@ -38,24 +60,16 @@ export function parseAgentInput(type: AgentType, raw: unknown): AgentInput {
     return { walletAddress: requirePublicKey(input.walletAddress, "wallet address") };
   }
 
-  if (type === "research") {
-    return { keyword: requireString(input.keyword, "keyword", 90) };
-  }
-
-  const sizeValue = Number(input.size);
-  if (!Number.isInteger(sizeValue) || sizeValue < 12 || sizeValue > 220) {
-    throw new Error("benchmark size must be an integer between 12 and 220.");
-  }
-
-  return { size: sizeValue };
+  // token_research and market_research both take a free-text query.
+  return { query: requireString(input.query, "query", 120) };
 }
 
 export function parseComputeType(value: unknown): ComputeType {
-  if (value === "CPU" || value === "GPU_SIMULATED" || value === "GENERAL") {
+  if (value === "CPU" || value === "GPU_SIMULATED" || value === "LLM") {
     return value;
   }
 
-  throw new Error("compute type must be CPU, GPU_SIMULATED, or GENERAL.");
+  throw new Error("compute type must be CPU, GPU_SIMULATED, or LLM.");
 }
 
 export function parseProviderStatus(value: unknown): ProviderStatus {
@@ -68,7 +82,7 @@ export function parseProviderStatus(value: unknown): ProviderStatus {
 
 export function parsePriceSol(value: unknown): number {
   const price = Number(value);
-  if (!Number.isFinite(price) || price <= 0 || price > 5) {
+  if (!Number.isFinite(price) || price < 0 || price > 5) {
     throw new Error("price per task must be between 0 and 5 SOL.");
   }
   return Number(price.toFixed(6));

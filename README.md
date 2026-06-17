@@ -1,258 +1,202 @@
 # BITAGENTS
 
-BITAGENTS is an AI Agent Marketplace powered by a decentralized compute marketplace.
+**Run crypto AI agents without setup.**
 
-The MVP proves the full loop on Solana devnet:
+BITAGENTS is a crypto AI agent platform. Connect a Solana wallet, choose an
+agent, submit a task, watch it run real computation, and get a useful on-chain
+result — no infrastructure, API keys, or boilerplate required.
 
-1. A compute provider registers available compute.
-2. A user requests an AI agent task.
-3. The user pays the task fee in devnet SOL to a treasury wallet.
-4. The backend assigns the paid task to an online provider.
-5. A provider worker polls, claims, and runs real local computation.
-6. The result is returned to the user interface.
-7. A provider payout transaction is recorded and shown on Solana Explorer.
+The MVP ships three working agents, a compute-provider marketplace, a full task
+lifecycle, and a Solana **devnet** payment flow.
 
-## Architecture
+- **Mainnet is read-only.** It is used only to fetch public on-chain data.
+- **Devnet handles everything that moves funds** — task fees, payments, and
+  provider registration. The UI labels this **Devnet Demo Mode** (the default).
 
-```text
-+------------------+          +---------------------+
-| Phantom wallet   |          | Provider worker     |
-| user/admin       |          | Node.js process     |
-+--------+---------+          +----------+----------+
-         |                               |
-         | devnet SOL transfer          | poll/claim/result
-         v                               v
-+--------+------------------------------------------------+
-| frontend                                                |
-| Next.js 14 UI + API routes                              |
-| - /marketplace shows compute listings and cGPU orders   |
-| - /vaults and /agents show vault and agent dashboards    |
-| - /dashboard creates tasks and records payment sigs      |
-| - local JSON DB stores providers/tasks                  |
-+--------+------------------------------------------------+
-         |
-         | @solana/web3.js
-         v
-+--------+---------+
-| Solana devnet    |
-| payment/payout   |
-+------------------+
+---
+
+## What BITAGENTS is
+
+| Agent | Input | Output |
+| --- | --- | --- |
+| **Wallet Watcher** | Solana wallet address | SOL balance, token-account count, latest 5 signatures, AI summary, risk/behavior notes |
+| **Token Research** | Token mint address or project name | On-chain overview, supply/authorities, holder/liquidity notes, bull/bear case, risks, disclaimer |
+| **Market Research** | Keyword, ticker, or narrative | What it means, crypto use cases, opportunities, risks, things to monitor |
+
+Every run performs **real work**: Solana RPC fetches, data normalization,
+deterministic scoring, report generation, result hashing (SHA-256),
+timestamping, and runtime measurement. If an LLM is configured (Ollama,
+OpenAI, or Anthropic) it enriches the narrative; otherwise agents fall back to
+deterministic local generation. **No paid API is required.**
+
+---
+
+## Tech stack
+
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS v4
+- **Wallet:** `@solana/wallet-adapter` (Phantom)
+- **Chain:** `@solana/web3.js`, `@solana/spl-token`
+- **Compute:** server-side modules in `frontend/src/server/agents` (runs on Vercel — no separate worker needed)
+- **Storage:** local JSON database (`.data/bitagents.json`)
+- **Shared types:** `@bitagents/shared`
+
+```
+frontend/                 Next.js app (UI + API routes + server-side compute)
+  src/app                 pages: / /app /agents /compute /tasks /utility + /api/*
+  src/server/agents       real agent compute (solana, llm, walletWatcher, …)
+shared/                   shared TypeScript types
+workers/provider-worker   OPTIONAL remote provider heartbeat (not required)
 ```
 
-## Repository layout
-
-This repository intentionally avoids an npm-workspace monorepo setup. Each major app/package has its own folder, package file, dependencies, and code.
-
-```text
-/frontend                 Next.js app, API routes, wallet UI, marketplace, vaults, agents, analytics
-/workers/provider-worker  Node worker that polls tasks and runs provider computation
-/shared                   Shared task/provider/result types and helpers used by the apps
-.env.example              Environment template
-```
-
-The root `package.json` only provides convenience scripts for running the separate folders together.
-
-## Agent task types
-
-### Wallet Watcher Agent
-
-Input: Solana wallet address.
-
-The worker uses Solana devnet RPC to fetch:
-
-- SOL balance
-- SPL token account count
-- latest 5 signatures
-- a concise computed summary
-
-### Research Agent
-
-Input: keyword or project name.
-
-The worker runs deterministic local text analysis:
-
-- word count
-- unique term count
-- sentiment score from local term sets
-- SHA-256 keyword hash
-- structured summary, risks, and next questions
-
-### Compute Benchmark Agent
-
-Input: matrix size from 12 to 220.
-
-The worker runs real CPU work:
-
-- deterministic matrix multiplication
-- runtime measurement
-- checksum
-- SHA-256 result hash
+---
 
 ## Install
 
-Install the lightweight root orchestration dependencies, then install each standalone package folder:
+Requires **Node.js ≥ 18.18** (Node 20/22 recommended).
 
 ```bash
-npm install
-npm --prefix shared install
+git clone https://github.com/ZeyaRabani/BITAGENTS.git
+cd BITAGENTS
+npm install            # root
 npm --prefix frontend install
-npm --prefix workers/provider-worker install
+npm --prefix workers/provider-worker install   # optional
 ```
 
-Each folder now keeps its own `package.json` and `package-lock.json`.
+---
 
-## Environment
-
-Copy the example file:
+## Run locally
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env.local     # optional — defaults work out of the box
+npm run dev:frontend           # http://localhost:3000
 ```
 
-Set at least these values:
+`npm run dev:frontend` is all you need. (`npm run dev` also starts the optional
+provider worker.)
+
+Useful scripts (run from the repo root):
 
 ```bash
-NEXT_PUBLIC_TREASURY_PUBLIC_KEY=YOUR_DEVNET_TREASURY_PUBLIC_KEY
-PROVIDER_WALLET=YOUR_REGISTERED_PROVIDER_PUBLIC_KEY
+npm run typecheck     # shared + frontend + worker
+npm run lint          # frontend ESLint
+npm run build         # production build of all packages
 ```
 
-`NEXT_PUBLIC_SOLANA_RPC_URL` and `SOLANA_RPC_URL` default to `https://api.devnet.solana.com`.
+---
 
-## Create and fund devnet wallets
+## Configure devnet
 
-Install the Solana CLI if you do not already have it, then create a treasury keypair:
+The app defaults to **Devnet Demo Mode**. To accept real devnet payments, set a
+treasury wallet in `.env.local`:
 
 ```bash
-solana-keygen new --outfile treasury.json
-solana-keygen pubkey treasury.json
-solana airdrop 2 YOUR_TREASURY_PUBLIC_KEY --url devnet
+NEXT_PUBLIC_SOLANA_NETWORK=devnet
+TREASURY_WALLET=<your devnet wallet public key>
 ```
 
-You can also use Phantom:
+If `TREASURY_WALLET` is blank, every task simply runs as a **free demo** — the
+app stays fully functional.
 
-1. Open Phantom settings.
-2. Enable developer settings.
-3. Switch network to Devnet.
-4. Copy the wallet address into the app or `.env.local`.
-5. Fund it with a devnet faucet or the Solana CLI.
+### Fund a devnet wallet
 
-## Run the MVP
+1. Install Phantom and switch it to **Devnet** (Settings → Developer Settings → Testnet Mode / Change Network → Devnet).
+2. Copy your wallet address.
+3. Airdrop devnet SOL:
+   - Web faucet: <https://faucet.solana.com> (paste your address, pick Devnet), or
+   - CLI: `solana airdrop 2 <ADDRESS> --url https://api.devnet.solana.com`
+4. You now have devnet SOL to pay the 0.001 SOL task fee.
 
-Run the frontend and worker together from the repository root:
+To create a treasury wallet:
 
 ```bash
-npm run dev
+solana-keygen new --no-bip39-passphrase --outfile treasury.json
+solana address -k treasury.json      # paste this into TREASURY_WALLET
 ```
 
-Or run each standalone folder separately:
+---
 
-```bash
-npm --prefix frontend run dev
-npm --prefix workers/provider-worker run dev
-```
+## How to run each agent
 
-You can also `cd` into `frontend`, `workers/provider-worker`, or `shared` and use that folder's own `package.json` scripts directly.
+1. Open <http://localhost:3000> and click **Launch App** (or go to `/agents`).
+2. Pick an agent and enter its input (or click **use example**):
+   - **Wallet Watcher** → a Solana wallet address
+   - **Token Research** → a token mint address or project name
+   - **Market Research** → a keyword, ticker, or narrative (e.g. `DePIN`)
+3. Choose how to run:
+   - **Pay 0.001 SOL & run** — requires a connected wallet, Devnet Demo Mode, and a configured treasury.
+   - **Run free demo** — no wallet/payment needed.
+4. Watch the task move through its lifecycle and read the result.
 
-The web app runs at:
+Switch the **Devnet Demo / Mainnet Read** toggle in the nav to choose which
+network the agent reads from. Mainnet is read-only; payments only happen on
+devnet.
 
-```text
-http://localhost:3000
-```
+---
 
-The API is served by the same Next.js app through `/api/*` routes.
+## How devnet payment works
 
-## Register a provider
+1. You submit a task → the API creates it with status `created` and assigns a
+   provider (or the built-in **BITAGENTS Local Compute** fallback).
+2. The app sends a **0.001 SOL devnet transfer** from your wallet to
+   `TREASURY_WALLET` using the wallet adapter (connection is hard-pinned to
+   devnet for safety).
+3. The signature is saved and the task moves to `paid`. A **Solana Explorer
+   (devnet)** link is shown.
+4. The task runs (`computing` → `completed`) and the hashed, timestamped result
+   is stored and displayed.
 
-1. Go to `http://localhost:3000/provider`.
-2. Connect Phantom on devnet or paste a provider wallet address.
-3. Enter provider name, compute type, price per task, and status `online`.
-4. Save the provider.
-5. Put the same wallet address into `.env.local` as `PROVIDER_WALLET`.
-6. Start or restart the provider worker.
+Task statuses: `created → paid → assigned → computing → completed` (or `failed`).
 
-## Create a task
+---
 
-1. Go to `http://localhost:3000/dashboard`.
-2. Connect Phantom on devnet.
-3. Select Wallet Watcher, Research, or Benchmark.
-4. Fill the input.
-5. Click `Create and pay task`.
-6. Approve the devnet SOL transfer to the treasury wallet.
-7. The API records the payment signature and assigns the task to an online provider.
+## How compute provider registration works
 
-## Complete the task through the worker
+Open `/compute`:
 
-The worker polls:
+1. Connect a wallet.
+2. Enter a provider name, pick a compute type (**CPU**, **GPU (simulated)**, or
+   **LLM endpoint**), set a price per task, and a status (online/offline).
+3. Click **Sign & register** — the wallet signs a registration message proving
+   ownership (no funds move). The provider is upserted into the local DB and
+   appears in the marketplace with wallet, type, price, status, tasks
+   completed, and a reputation score.
 
-```text
-GET /api/worker/tasks?providerWallet=...
-```
+When a task is created, an online provider is selected (cheapest first);
+otherwise the built-in local provider handles it so the demo always works. The
+optional `workers/provider-worker` process can register a remote provider and
+keep it online via heartbeat.
 
-When it finds an assigned task it calls:
+---
 
-```text
-POST /api/tasks/:taskId/claim
-POST /api/tasks/:taskId/result
-```
+## Demo script
 
-The UI polls the API, so the task should move from `assigned` to `computing` to `completed` automatically.
+See [DEMO.md](./DEMO.md) for the exact click-by-click golden path.
 
-## Provider payout
+---
 
-Go to `http://localhost:3000/demo` after a task is completed.
+## Deploy to Vercel
 
-For the browser payout flow:
+- Root directory: `frontend`
+- Build command: `npm run build` (default)
+- Set the same environment variables from `.env.example` in the Vercel project.
 
-1. Connect the treasury/admin wallet in Phantom.
-2. Click `Pay provider` on a completed task.
-3. Approve the devnet SOL transfer to the provider wallet.
-4. The payout signature is stored and linked to Solana Explorer.
+**Known limitation:** the local JSON DB is **ephemeral** on Vercel/serverless
+(it writes to the OS temp dir, which is not persisted across invocations). The
+deployed demo is fully functional per request, but task/provider history is not
+durable. For persistence, swap `frontend/src/server/db.ts` for a real database
+(e.g. Postgres, Upstash Redis, or Vercel KV).
 
-Optional API payout:
+---
 
-Set `TREASURY_SECRET_KEY` in `.env.local` to a devnet keypair secret. The API route `/api/tasks/:taskId/payout` can then send payout when called with `{ "serverPayout": true }`.
+## Known limitations
 
-## View Solana devnet transactions
+- Devnet payments only; mainnet is read-only by design.
+- JSON file storage is not durable on serverless (see above).
+- Token/holder/liquidity data is limited to what public RPC exposes; the agent
+  always returns a useful structured report regardless.
+- LLM narrative is optional; without it, output is deterministic.
 
-The UI links payment and payout signatures to Solana Explorer with `?cluster=devnet`.
+## Disclaimer
 
-Manual format:
-
-```text
-https://explorer.solana.com/tx/YOUR_SIGNATURE?cluster=devnet
-```
-
-## Local data
-
-The MVP stores providers and tasks in:
-
-```text
-.data/bitagents.json
-```
-
-Set `BITAGENTS_DATA_DIR` to use another local directory.
-
-## Hackathon demo script
-
-## Build and checks
-
-From the repository root:
-
-```bash
-npm run typecheck
-npm run build
-```
-
-Or run checks inside a single folder:
-
-```bash
-npm --prefix frontend run typecheck
-npm --prefix workers/provider-worker run typecheck
-npm --prefix shared run typecheck
-```
-
-## Notes
-
-- The MVP uses SOL on Solana devnet for hackathon simplicity.
-- The code is structured so a future Anchor escrow program can replace direct Web3.js transfers.
-- Core computation is not faked: wallet data comes from devnet RPC, research is deterministic local analysis, and benchmark tasks run CPU work.
+BITAGENTS provides research and educational tooling only. Nothing in the app or
+its token utility is financial advice or a promise of returns.

@@ -1,118 +1,52 @@
-import type { Metadata } from "next";
-import { AppShell, Panel } from "@/components/AppShell";
-
-export const metadata: Metadata = {
-    title: "Agent Monitoring — ComputeVault",
-    description:
-        "Live monitoring of autonomous AI trading agents consuming compute.",
-};
-
-type Agent = {
-    name: string;
-    budget: number;
-    used: number;
-    status: "Running" | "Idle";
-    task: string;
-    strategy: string;
-};
-
-const agents: Agent[] = [
-    {
-        name: "Momentum Agent",
-        budget: 50,
-        used: 32,
-        status: "Running",
-        task: "Analyzing SOL",
-        strategy: "trend-follow",
-    },
-    {
-        name: "Meme Rotation Agent",
-        budget: 20,
-        used: 14,
-        status: "Running",
-        task: "Scanning BONK, WIF, POPCAT",
-        strategy: "rotation",
-    },
-    {
-        name: "Mean Reversion Agent",
-        budget: 35,
-        used: 28,
-        status: "Running",
-        task: "Rebalancing JUP",
-        strategy: "mean-revert",
-    },
-    {
-        name: "Arbitrage Agent",
-        budget: 45,
-        used: 11,
-        status: "Idle",
-        task: "Waiting for spread > 0.4%",
-        strategy: "cross-dex",
-    },
-];
+import { AgentRunner } from "@/components/AgentRunner";
+import { PageShell, Panel } from "@/components/primitives";
+import { AGENTS } from "@/lib/agents";
 
 export default function AgentsPage() {
-    return (
-        <AppShell
-            title="Agent Monitoring"
-            subtitle="The demand side. Every signal, every trade burns cGPU."
-        >
-            <div className="grid gap-6 md:grid-cols-2">
-                {agents.map((agent) => {
-                    const pct = (agent.used / agent.budget) * 100;
-                    const running = agent.status === "Running";
+  return (
+    <PageShell
+      eyebrow="Agents"
+      title="Crypto AI agents"
+      description="Three working agents backed by real Solana RPC compute. Pick one, submit a task, and pay a small devnet fee or run a free demo."
+    >
+      <div className="space-y-10">
+        <AgentRunner />
 
-                    return (
-                        <Panel
-                            key={agent.name}
-                            title={`// ${agent.strategy}`}
-                            action={
-                                <span
-                                    className={`inline-flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] ${running
-                                            ? "text-signal"
-                                            : "text-muted-foreground"
-                                        }`}
-                                >
-                                    <span
-                                        className={`h-1.5 w-1.5 rounded-full ${running
-                                                ? "bg-signal animate-pulse-dot"
-                                                : "bg-muted-foreground"
-                                            }`}
-                                    />
-                                    {agent.status}
-                                </span>
-                            }
-                        >
-                            <div className="font-display text-xl font-bold">
-                                {agent.name}
-                            </div>
-
-                            <div className="mt-1 font-mono text-xs text-muted-foreground">
-                                ↳ {agent.task}
-                            </div>
-
-                            <div className="mt-5">
-                                <div className="flex justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-                                    <span>Compute Budget</span>
-
-                                    <span className="tabular-nums text-foreground">
-                                        {agent.used} / {agent.budget} cGPU
-                                    </span>
-                                </div>
-
-                                <div className="mt-1.5 h-2 w-full bg-surface-2">
-                                    <div
-                                        className="h-full bg-signal transition-all duration-500"
-                                        style={{
-                                            width: `${pct}%`,
-                                        }}
-                                    />
-                                </div>
-                            </div>
-                        </Panel>
-                    );
-                })}
-            </div>
-        </AppShell>
-    );
+        <section className="space-y-4">
+          <h2 className="font-display text-lg font-semibold text-foreground">What each agent does</h2>
+          <div className="grid gap-4 md:grid-cols-3">
+            {AGENTS.map((agent) => {
+              const Icon = agent.icon;
+              return (
+                <Panel key={agent.type} title={agent.type}>
+                  <div className="space-y-3">
+                    <span className="pixel-corners flex h-10 w-10 items-center justify-center border border-signal/40 bg-signal/10 text-signal">
+                      <Icon size={18} />
+                    </span>
+                    <h3 className="font-display text-base font-semibold text-foreground">{agent.label}</h3>
+                    <p className="text-sm text-muted-foreground">{agent.description}</p>
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">input</p>
+                      <p className="mt-1 text-sm text-foreground/80">{agent.inputLabel}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">output</p>
+                      <ul className="mt-1 space-y-1">
+                        {agent.outputs.map((output) => (
+                          <li key={output} className="flex items-center gap-2 text-sm text-foreground/80">
+                            <span className="h-1 w-1 bg-signal" />
+                            {output}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                </Panel>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </PageShell>
+  );
 }

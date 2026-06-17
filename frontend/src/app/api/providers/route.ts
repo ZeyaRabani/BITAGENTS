@@ -1,12 +1,24 @@
-import { nowIso } from "@bitagents/shared";
+import { nowIso, type ComputeProvider } from "@bitagents/shared";
 import { randomUUID } from "node:crypto";
 import { updateDb } from "@/server/db";
-import { parseComputeType, parsePriceSol, parseProviderStatus, requirePublicKey, requireString } from "@/server/validation";
+import {
+  optionalString,
+  parseComputeType,
+  parsePriceSol,
+  parseProviderStatus,
+  requirePublicKey,
+  requireString
+} from "@/server/validation";
 
 export const runtime = "nodejs";
 
 export async function GET() {
-  const providers = await updateDb((db) => db.providers);
+  const providers = await updateDb((db) =>
+    [...db.providers].sort((a, b) => {
+      if (a.status !== b.status) return a.status === "online" ? -1 : 1;
+      return b.reputation - a.reputation;
+    })
+  );
   return Response.json({ providers });
 }
 
@@ -18,8 +30,11 @@ export async function POST(request: Request) {
     const computeType = parseComputeType(body.computeType);
     const pricePerTaskSol = parsePriceSol(body.pricePerTaskSol);
     const status = parseProviderStatus(body.status);
+    const endpoint = optionalString(body.endpoint, "endpoint", 200);
+    const registrationSignature = optionalString(body.registrationSignature, "signature", 200);
+    const registrationMessage = optionalString(body.registrationMessage, "message", 600);
 
-    const provider = await updateDb((db) => {
+    const provider = await updateDb<ComputeProvider>((db) => {
       const existing = db.providers.find((item) => item.walletAddress === walletAddress);
       const at = nowIso();
 
@@ -28,17 +43,25 @@ export async function POST(request: Request) {
         existing.computeType = computeType;
         existing.pricePerTaskSol = pricePerTaskSol;
         existing.status = status;
+        existing.endpoint = endpoint ?? existing.endpoint;
+        existing.registrationSignature = registrationSignature ?? existing.registrationSignature;
+        existing.registrationMessage = registrationMessage ?? existing.registrationMessage;
         existing.updatedAt = at;
         return existing;
       }
 
-      const created = {
+      const created: ComputeProvider = {
         id: randomUUID(),
         name,
         walletAddress,
         computeType,
         pricePerTaskSol,
         status,
+        tasksCompleted: 0,
+        reputation: 100,
+        endpoint,
+        registrationSignature,
+        registrationMessage,
         createdAt: at,
         updatedAt: at
       };

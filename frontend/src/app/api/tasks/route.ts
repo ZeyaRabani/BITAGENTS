@@ -1,7 +1,8 @@
 import { nowIso, type AgentTask } from "@bitagents/shared";
 import { randomUUID } from "node:crypto";
-import { providerPriceOrDefault, readDb, updateDb } from "@/server/db";
-import { parseAgentInput, parseAgentType, requirePublicKey } from "@/server/validation";
+import { LOCAL_PROVIDER, chooseProvider, providerPriceOrDefault, readDb, updateDb } from "@/server/db";
+import { optionalString, parseAgentInput, parseAgentType, parseNetwork } from "@/server/validation";
+import { requirePublicKey } from "@/server/validation";
 
 export const runtime = "nodejs";
 
@@ -26,23 +27,35 @@ export async function POST(request: Request) {
     const body = (await request.json()) as Record<string, unknown>;
     const type = parseAgentType(body.type);
     const input = parseAgentInput(type, body.input);
-    const requesterWallet = requirePublicKey(body.requesterWallet, "requester wallet");
+    const network = parseNetwork(body.network);
+    const requesterRaw = optionalString(body.requesterWallet, "requester wallet", 80);
+    const requesterWallet = requesterRaw ? requirePublicKey(requesterRaw, "requester wallet") : null;
+    const free = body.free === true || requesterWallet === null;
 
     const task = await updateDb<AgentTask>((db) => {
-      const cheapestOnlineProvider = db.providers
-        .filter((provider) => provider.status === "online")
-        .sort((a, b) => a.pricePerTaskSol - b.pricePerTaskSol)[0];
+      const provider = chooseProvider(db) ?? LOCAL_PROVIDER;
       const at = nowIso();
       const created: AgentTask = {
         id: randomUUID(),
         type,
         input,
+        network,
         requesterWallet,
+        free,
         status: "created",
-        priceSol: providerPriceOrDefault(cheapestOnlineProvider),
+        priceSol: free ? 0 : providerPriceOrDefault(provider),
+        assignedProviderId: provider.id,
+        assignedProviderWallet: provider.walletAddress,
+        assignedProviderName: provider.name,
         createdAt: at,
         updatedAt: at,
-        history: [{ status: "created", at, note: "Task created and awaiting devnet payment." }]
+        history: [
+          {
+            status: "created",
+            at,
+            note: free ? "Free demo task created." : "Task created, awaiting devnet payment."
+          }
+        ]
       };
       db.tasks.push(created);
       return created;
