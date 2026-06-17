@@ -1,202 +1,232 @@
-# BITAGENTS
+# BITAGENTS — DCA Agent
 
-**Run crypto AI agents without setup.**
+**Create DCA bots with AI.**
 
-BITAGENTS is a crypto AI agent platform. Connect a Solana wallet, choose an
-agent, submit a task, watch it run real computation, and get a useful on-chain
-result — no infrastructure, API keys, or boilerplate required.
+Tell BITAGENTS what token to buy, how much to spend, and how often. The DCA
+Agent turns your message into a structured, recurring on-chain buy plan that you
+review and confirm before anything happens.
 
-The MVP ships three working agents, a compute-provider marketplace, a full task
-lifecycle, and a Solana **devnet** payment flow.
+```
+> buy BITAGENTS every 10 minutes with 0.01 SOL
+> total budget: 1 SOL
+> agent: planning 100 recurring buys
+> status: ready for confirmation
+```
 
-- **Mainnet is read-only.** It is used only to fetch public on-chain data.
-- **Devnet handles everything that moves funds** — task fees, payments, and
-  provider registration. The UI labels this **Devnet Demo Mode** (the default).
+The agent only automates the instruction you give it. **It never picks tokens
+for you, never promises profit, and never recommends trades.** Every real
+mainnet transaction requires your wallet signature.
 
 ---
 
-## What BITAGENTS is
+## How it works
 
-| Agent | Input | Output |
+1. **Describe your buy** in plain English on `/app`.
+2. **The agent plans it** — it parses your message into a `DcaPlan` (token,
+   per-buy amount, total budget, interval, number of buys, estimated duration).
+3. **You confirm.** Nothing is created until you click **Create DCA Agent**.
+4. **It runs on-chain** in one of the modes below.
+
+### Network modes
+
+| Mode | When | What happens |
 | --- | --- | --- |
-| **Wallet Watcher** | Solana wallet address | SOL balance, token-account count, latest 5 signatures, AI summary, risk/behavior notes |
-| **Token Research** | Token mint address or project name | On-chain overview, supply/authorities, holder/liquidity notes, bull/bear case, risks, disclaimer |
-| **Market Research** | Keyword, ticker, or narrative | What it means, crypto use cases, opportunities, risks, things to monitor |
+| **Mainnet Safe Mode** | **Default.** Mainnet wallet connected (`NEXT_PUBLIC_ENABLE_MAINNET_DCA=true`, the default) | Creates a real **Jupiter Recurring** (time-based) order. You sign the create + cancel transactions. No custody, no server-held keys. |
+| **Devnet Demo Mode** | When you flip the toggle to Devnet (or set `NEXT_PUBLIC_DEFAULT_NETWORK=devnet`) | Simulates scheduled executions every ~10s using **real** mainnet reference prices, hashes + timestamps each fill, and clearly labels it `Devnet simulation — no real token purchase`. |
+| **Experimental Agent Wallet Mode** | `ENABLE_AGENT_WALLET_MODE=true` + allowlisted user | A server-scheduled, encrypted, capped agent wallet signs swaps for you. **Disabled by default**, behind a flag, with hard caps. Opt-in only. |
 
-Every run performs **real work**: Solana RPC fetches, data normalization,
-deterministic scoring, report generation, result hashing (SHA-256),
-timestamping, and runtime measurement. If an LLM is configured (Ollama,
-OpenAI, or Anthropic) it enriches the narrative; otherwise agents fall back to
-deterministic local generation. **No paid API is required.**
-
----
-
-## Tech stack
-
-- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS v4
-- **Wallet:** `@solana/wallet-adapter` (Phantom)
-- **Chain:** `@solana/web3.js`, `@solana/spl-token`
-- **Compute:** server-side modules in `frontend/src/server/agents` (runs on Vercel — no separate worker needed)
-- **Storage:** local JSON database (`.data/bitagents.json`)
-- **Shared types:** `@bitagents/shared`
-
-```
-frontend/                 Next.js app (UI + API routes + server-side compute)
-  src/app                 pages: / /app /agents /compute /tasks /utility + /api/*
-  src/server/agents       real agent compute (solana, llm, walletWatcher, …)
-shared/                   shared TypeScript types
-workers/provider-worker   OPTIONAL remote provider heartbeat (not required)
-```
+> **Why two modes?** Jupiter Recurring is **mainnet-only** and enforces a
+> minimum order value (≈ **50 USDC per buy** at the time of writing). Small
+> buys like `0.01 SOL` are rejected, so the agent falls back to Devnet Demo
+> Mode (or asks you to increase the order size). See
+> [Jupiter limitations](#jupiter-limitations).
 
 ---
 
 ## Install
 
-Requires **Node.js ≥ 18.18** (Node 20/22 recommended).
+Requirements: Node `>= 18.18`, npm.
 
 ```bash
 git clone https://github.com/ZeyaRabani/BITAGENTS.git
 cd BITAGENTS
-npm install            # root
+npm install
 npm --prefix frontend install
-npm --prefix workers/provider-worker install   # optional
+npm --prefix workers/provider-worker install   # optional remote worker
+cp .env.example .env.local                      # all keys optional for the demo
 ```
-
----
 
 ## Run locally
 
 ```bash
-cp .env.example .env.local     # optional — defaults work out of the box
-npm run dev:frontend           # http://localhost:3000
+npm run dev:frontend     # Next.js app on http://localhost:3000
 ```
 
-`npm run dev:frontend` is all you need. (`npm run dev` also starts the optional
-provider worker.)
+Open http://localhost:3000 → **Launch DCA Agent**. The app defaults to
+**Mainnet Safe Mode** (real Jupiter Recurring orders you sign in your wallet).
+Flip the network toggle to **Devnet Demo** to simulate the full flow with no
+wallet, RPC, or API keys — the deterministic parser handles the example prompts
+out of the box.
 
-Useful scripts (run from the repo root):
+To advance Devnet Demo plans automatically while developing, run the local
+scheduler in a second terminal:
 
 ```bash
-npm run typecheck     # shared + frontend + worker
-npm run lint          # frontend ESLint
-npm run build         # production build of all packages
+npm run dca:worker       # polls POST /api/cron/dca every 10s
 ```
 
----
-
-## Configure devnet
-
-The app defaults to **Devnet Demo Mode**. To accept real devnet payments, set a
-treasury wallet in `.env.local`:
+## Verify
 
 ```bash
-NEXT_PUBLIC_SOLANA_NETWORK=devnet
-TREASURY_WALLET=<your devnet wallet public key>
-```
-
-If `TREASURY_WALLET` is blank, every task simply runs as a **free demo** — the
-app stays fully functional.
-
-### Fund a devnet wallet
-
-1. Install Phantom and switch it to **Devnet** (Settings → Developer Settings → Testnet Mode / Change Network → Devnet).
-2. Copy your wallet address.
-3. Airdrop devnet SOL:
-   - Web faucet: <https://faucet.solana.com> (paste your address, pick Devnet), or
-   - CLI: `solana airdrop 2 <ADDRESS> --url https://api.devnet.solana.com`
-4. You now have devnet SOL to pay the 0.001 SOL task fee.
-
-To create a treasury wallet:
-
-```bash
-solana-keygen new --no-bip39-passphrase --outfile treasury.json
-solana address -k treasury.json      # paste this into TREASURY_WALLET
+npm run typecheck        # shared + frontend + worker
+npm run lint
+npm run build
+npm test                 # vitest: parser, plan math, Jupiter, scheduler
 ```
 
 ---
 
-## How to run each agent
+## Environment variables
 
-1. Open <http://localhost:3000> and click **Launch App** (or go to `/agents`).
-2. Pick an agent and enter its input (or click **use example**):
-   - **Wallet Watcher** → a Solana wallet address
-   - **Token Research** → a token mint address or project name
-   - **Market Research** → a keyword, ticker, or narrative (e.g. `DePIN`)
-3. Choose how to run:
-   - **Pay 0.001 SOL & run** — requires a connected wallet, Devnet Demo Mode, and a configured treasury.
-   - **Run free demo** — no wallet/payment needed.
-4. Watch the task move through its lifecycle and read the result.
+Everything is optional for the demo. See [`.env.example`](.env.example) for the
+full annotated list. The most important ones:
 
-Switch the **Devnet Demo / Mainnet Read** toggle in the nav to choose which
-network the agent reads from. Mainnet is read-only; payments only happen on
-devnet.
+| Variable | Purpose |
+| --- | --- |
+| `NEXT_PUBLIC_DEFAULT_NETWORK` | `mainnet` (default) or `devnet` for the initial UI network. |
+| `NEXT_PUBLIC_ENABLE_MAINNET_DCA` | Allow real Jupiter Recurring orders. Default `true`; set `false` to force Devnet Demo Mode. |
+| `NEXT_PUBLIC_BITAGENTS_MINT` / `NEXT_PUBLIC_BITAGENTS_SYMBOL` | The `BITAGENTS` token alias used by the parser. |
+| `JUPITER_API_KEY` / `JUPITER_API_BASE` | Blank = free `lite-api.jup.ag` (no key). A key switches to the pro host. |
+| `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | Optional LLM parsing. Tried OpenRouter → Ollama → OpenAI → Anthropic → deterministic fallback. |
+| `CRON_SECRET` | Secures `/api/cron/dca` in production. |
+| `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` | Use Upstash Redis instead of the local JSON store (recommended on Vercel). |
+| `NEXT_PUBLIC_ENABLE_AGENT_WALLET_MODE` / `ENABLE_AGENT_WALLET_MODE`, `AGENT_WALLET_*`, `MAX_AGENT_WALLET_*`, `MIN_INTERVAL_SECONDS` | Experimental agent wallet mode + its caps/encryption/allowlist. |
 
----
+### Configure a Jupiter API key (optional)
 
-## How devnet payment works
-
-1. You submit a task → the API creates it with status `created` and assigns a
-   provider (or the built-in **BITAGENTS Local Compute** fallback).
-2. The app sends a **0.001 SOL devnet transfer** from your wallet to
-   `TREASURY_WALLET` using the wallet adapter (connection is hard-pinned to
-   devnet for safety).
-3. The signature is saved and the task moves to `paid`. A **Solana Explorer
-   (devnet)** link is shown.
-4. The task runs (`computing` → `completed`) and the hashed, timestamped result
-   is stored and displayed.
-
-Task statuses: `created → paid → assigned → computing → completed` (or `failed`).
+The free **lite** host (`https://lite-api.jup.ag`) needs no key and is used by
+default. For higher rate limits, create a key at
+[portal.jup.ag](https://portal.jup.ag) and set `JUPITER_API_KEY` — the app then
+automatically targets the pro host `https://api.jup.ag`.
 
 ---
 
-## How compute provider registration works
+## Mainnet Safe Mode (Jupiter Recurring)
 
-Open `/compute`:
+1. Connect a **mainnet** Phantom wallet (Mainnet Safe Mode is the default; `NEXT_PUBLIC_ENABLE_MAINNET_DCA=true`).
+2. Describe a buy whose **per-order value is ≥ ~50 USDC** (the Jupiter minimum).
+3. Confirm the plan. The server calls Jupiter `recurring/v1/createOrder` and
+   returns an **unsigned** transaction.
+4. Your wallet signs it; the server submits it via `recurring/v1/execute`.
+5. Jupiter's own keepers execute the recurring buys on-chain on schedule.
+6. Cancel any time from **My Plans** — that produces another transaction **you
+   sign**.
 
-1. Connect a wallet.
-2. Enter a provider name, pick a compute type (**CPU**, **GPU (simulated)**, or
-   **LLM endpoint**), set a price per task, and a status (online/offline).
-3. Click **Sign & register** — the wallet signs a registration message proving
-   ownership (no funds move). The provider is upserted into the local DB and
-   appears in the marketplace with wallet, type, price, status, tasks
-   completed, and a reputation score.
+BITAGENTS never holds your keys and never moves mainnet funds without your
+signature in this mode.
 
-When a task is created, an online provider is selected (cheapest first);
-otherwise the built-in local provider handles it so the demo always works. The
-optional `workers/provider-worker` process can register a remote provider and
-keep it online via heartbeat.
+### Jupiter limitations
+
+- **Minimum order value ≈ 50 USDC per buy.** A `0.01 SOL` order (~$0.74) is
+  rejected with `Each order valued at … USDC, minimum is 50.00 USDC`. The UI
+  detects this and offers: increase the order size, switch to Devnet Demo Mode,
+  or (if enabled) use Experimental Agent Wallet Mode.
+- **Mainnet only** — there is no Jupiter Recurring on devnet, which is why
+  Devnet Demo Mode simulates instead.
+- **No integrator fee.** Jupiter charges a 0.1% protocol fee and does **not**
+  let integrators add their own fee, so BITAGENTS takes **no** fee on recurring
+  orders. The business model is a separate subscription / agent-service fee
+  (see `/utility`).
+- The **BITAGENTS mint** (`iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY`) **is
+  routeable** on Jupiter (Meteora DAMM v2), so plans build fine — they are only
+  rejected on the order-size minimum, not on routing.
+
+## Devnet Demo Mode
+
+When mainnet DCA is off (the default), confirming a plan:
+
+1. Creates an `active` plan stored in the database.
+2. The scheduler executes one simulated order per tick (Vercel Cron or the local
+   `dca:worker`), spaced by the plan interval.
+3. Each execution fetches **real** mainnet reference prices to derive a realistic
+   fill, hashes the result (SHA-256), records runtime + timestamp, and labels it
+   `Devnet simulation — no real token purchase`.
+4. Watch progress, execution history, and cancel from **My Plans**.
+
+No real tokens are ever purchased in this mode.
+
+## Why Agent Wallet Mode is disabled by default
+
+Agent Wallet Mode lets the server sign swaps without per-buy user approval,
+which requires holding an (encrypted) private key. That is powerful but riskier,
+so it ships **off**: it is gated behind `ENABLE_AGENT_WALLET_MODE`, restricted to
+an `AGENT_WALLET_ALLOWED_USERS` allowlist, capped
+(`MAX_AGENT_WALLET_TOTAL_SOL`, `MAX_AGENT_WALLET_ORDERS`, `MIN_INTERVAL_SECONDS`),
+and refuses to start without `AGENT_WALLET_ENCRYPTION_KEY`. Keys are encrypted
+with AES-256-GCM and never logged.
 
 ---
 
-## Demo script
+## Scheduling
 
-See [DEMO.md](./DEMO.md) for the exact click-by-click golden path.
+The scheduler advances Devnet Demo (and agent-wallet) plans. Jupiter Recurring
+plans are **not** driven here — Jupiter's keepers run those on-chain.
+
+- **Local:** `npm run dca:worker` polls `POST /api/cron/dca` every
+  `INTERVAL_MS` (default 10s).
+- **Vercel Cron:** add a cron to `vercel.json` that hits `/api/cron/dca` and set
+  `CRON_SECRET` (Vercel sends it as a Bearer token). Example:
+
+  ```json
+  {
+    "crons": [{ "path": "/api/cron/dca", "schedule": "* * * * *" }]
+  }
+  ```
+
+  > Sub-daily cron schedules require a paid Vercel plan; Hobby runs daily. For
+  > frequent demo execution, run the local worker or trigger the endpoint
+  > manually: `curl -X POST $URL/api/cron/dca -H "Authorization: Bearer $CRON_SECRET"`.
+
+## Database
+
+The store is pluggable (`frontend/src/server/dca/store.ts`):
+
+- `UPSTASH_REDIS_REST_URL` (+ token) → Upstash Redis (serverless-safe).
+- `DATABASE_URL` → Postgres (documented extension point; no driver bundled, so
+  it currently falls back to JSON and logs a warning).
+- otherwise → local JSON file (`./.data/bitagents-dca.json`).
+
+On Vercel the JSON file lives in an ephemeral temp dir, so use **Upstash** for
+durable plan history in production.
 
 ---
 
-## Deploy to Vercel
+## Project layout
 
-- Root directory: `frontend`
-- Build command: `npm run build` (default)
-- Set the same environment variables from `.env.example` in the Vercel project.
+```
+frontend/                 Next.js 14 app (UI + API routes + server compute)
+  src/app/                /, /app, /plans, /utility, /docs, /api/*
+  src/components/dca/     DcaAgent, PlanPreview, PlanCard, MyPlans
+  src/server/dca/         parse, plan, jupiter, scheduler, store, agentWallet, config
+  src/_archive/           legacy MVP pages (not routed, excluded from build)
+shared/                   @bitagents/shared — DcaPlan types + math helpers
+workers/provider-worker/  optional remote worker (not required)
+```
 
-**Known limitation:** the local JSON DB is **ephemeral** on Vercel/serverless
-(it writes to the OS temp dir, which is not persisted across invocations). The
-deployed demo is fully functional per request, but task/provider history is not
-durable. For persistence, swap `frontend/src/server/db.ts` for a real database
-(e.g. Postgres, Upstash Redis, or Vercel KV).
+The previous multi-agent marketplace pages (agents, compute, tasks, vaults) are
+**archived** under `frontend/src/_archive/` — kept for reference, removed from
+navigation, and excluded from TypeScript + ESLint + the build.
 
 ---
 
-## Known limitations
+## Testing
 
-- Devnet payments only; mainnet is read-only by design.
-- JSON file storage is not durable on serverless (see above).
-- Token/holder/liquidity data is limited to what public RPC exposes; the agent
-  always returns a useful structured report regardless.
-- LLM narrative is optional; without it, output is deterministic.
+`npm test` runs Vitest over the pure logic that matters:
 
-## Disclaimer
+- prompt parsing (the three example prompts, intervals, slippage),
+- plan math (number of buys, per-order amount, duration),
+- validation + execution-mode selection,
+- Jupiter request construction + minimum-order rejection + cancel,
+- the Devnet Demo plan lifecycle and scheduler idempotency.
 
-BITAGENTS provides research and educational tooling only. Nothing in the app or
-its token utility is financial advice or a promise of returns.
+See [`DEMO.md`](DEMO.md) for a step-by-step walkthrough of the four demos.

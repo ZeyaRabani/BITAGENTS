@@ -28,6 +28,9 @@ interface NetworkContextValue {
   rpcUrl: string;
   config: PublicConfig;
   configLoaded: boolean;
+  // DCA: mainnet "Safe Mode" is only available when the deployment enables it.
+  mainnetDcaEnabled: boolean;
+  dcaModeLabel: string;
 }
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -35,7 +38,10 @@ const NetworkContext = createContext<NetworkContextValue | null>(null);
 export function NetworkProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<PublicConfig>(FALLBACK_CONFIG);
   const [configLoaded, setConfigLoaded] = useState(false);
-  const [network, setNetworkState] = useState<SolanaNetwork>("devnet");
+  // Start on the deployment's configured default so the first paint matches it
+  // (no flash of the wrong network). A saved user choice or the live /api/config
+  // response below can still override this.
+  const [network, setNetworkState] = useState<SolanaNetwork>(FALLBACK_CONFIG.defaultNetwork);
   const [userPicked, setUserPicked] = useState(false);
 
   // Restore an explicit user choice from a previous visit.
@@ -86,7 +92,10 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       paymentsEnabled: network === "devnet",
       rpcUrl: rpcUrlFor(config, network),
       config,
-      configLoaded
+      configLoaded,
+      mainnetDcaEnabled: config.enableMainnetDca,
+      dcaModeLabel:
+        network === "mainnet" && config.enableMainnetDca ? "Mainnet Safe Mode" : "Devnet Demo Mode"
     }),
     [network, setNetwork, toggleNetwork, config, configLoaded]
   );

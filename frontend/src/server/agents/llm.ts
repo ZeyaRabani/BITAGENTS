@@ -82,6 +82,37 @@ async function tryOpenAi(req: NarrativeRequest): Promise<string | null> {
   });
 }
 
+async function tryOpenRouter(req: NarrativeRequest): Promise<string | null> {
+  const apiKey = clean(process.env.OPENROUTER_API_KEY);
+  if (!apiKey) return null;
+  const model = clean(process.env.OPENROUTER_MODEL) ?? "openai/gpt-4o-mini";
+  const baseUrl = clean(process.env.OPENROUTER_BASE_URL) ?? "https://openrouter.ai/api/v1";
+
+  return withTimeout(async (signal) => {
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.4,
+        messages: [
+          { role: "system", content: req.system },
+          { role: "user", content: req.prompt }
+        ]
+      }),
+      signal
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    return clean(data.choices?.[0]?.message?.content) ?? null;
+  });
+}
+
 async function tryAnthropic(req: NarrativeRequest): Promise<string | null> {
   const apiKey = clean(process.env.ANTHROPIC_API_KEY);
   if (!apiKey) return null;
@@ -122,7 +153,13 @@ export async function generateNarrative(req: NarrativeRequest): Promise<Narrativ
     ["anthropic", tryAnthropic]
   ];
 
-  for (const [engine, run] of providers) {
+  // OpenRouter shares the OpenAI-compatible shape; reported as "openai" engine.
+  const all: Array<[ComputeEngine, (r: NarrativeRequest) => Promise<string | null>]> = [
+    ["openai", tryOpenRouter],
+    ...providers
+  ];
+
+  for (const [engine, run] of all) {
     try {
       const text = await run(req);
       if (text) {
@@ -138,8 +175,47 @@ export async function generateNarrative(req: NarrativeRequest): Promise<Narrativ
 
 export function llmConfigured(): boolean {
   return Boolean(
-    clean(process.env.OLLAMA_BASE_URL) ||
+    clean(process.env.OPENROUTER_API_KEY) ||
+      clean(process.env.OLLAMA_BASE_URL) ||
       clean(process.env.OPENAI_API_KEY) ||
       clean(process.env.ANTHROPIC_API_KEY)
   );
+}
+
+function extractJsonObject(text: string): unknown | null {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask any configured model to return a JSON object. Returns null when no model
+ * is configured or all of them fail, so callers always have a deterministic
+ * fallback. Used by the DCA natural-language parser as an optional enhancer.
+ */
+export async function completeJson(system: string, prompt: string): Promise<unknown | null> {
+  if (!llmConfigured()) return null;
+  const jsonReq: NarrativeRequest = {
+    system: `${system}\nRespond with a single minified JSON object and nothing else.`,
+    prompt,
+    fallback: ""
+  };
+  const runners = [tryOpenRouter, tryOpenAi, tryAnthropic, tryOllama];
+  for (const run of runners) {
+    try {
+      const text = await run(jsonReq);
+      if (text) {
+        const parsed = extractJsonObject(text);
+        if (parsed) return parsed;
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return null;
 }

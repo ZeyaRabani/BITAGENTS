@@ -1,15 +1,33 @@
-import { ArrowRight, Cpu, Wallet, Zap } from "lucide-react";
+import { ArrowRight, MessageSquare, ShieldCheck, Repeat, Wallet } from "lucide-react";
 import { LinkButton, Panel, SectionLabel, Tag } from "@/components/primitives";
-import { Roadmap } from "@/components/Roadmap";
-import { TokenUtilitySection } from "@/components/TokenUtilitySection";
-import { AGENTS } from "@/lib/agents";
 
 const STEPS = [
-  { icon: Wallet, title: "Connect wallet", body: "Connect Phantom on Solana. Devnet Demo Mode is on by default." },
-  { icon: Zap, title: "Choose an agent", body: "Pick Wallet Watcher, Token Research, or Market Research." },
-  { icon: Cpu, title: "Pay devnet fee", body: "Pay a 0.001 SOL devnet fee, or run a free demo with no wallet." },
-  { icon: ArrowRight, title: "Get a real result", body: "Real Solana RPC compute, hashed and timestamped, with an explorer link." }
+  {
+    icon: MessageSquare,
+    title: "Describe your buy",
+    body: "Type a plain-English instruction like \"buy BITAGENTS every 10 minutes with 0.01 SOL\"."
+  },
+  {
+    icon: Repeat,
+    title: "Agent plans it",
+    body: "The agent parses your message into a structured recurring-buy plan: per-buy amount, interval, and count."
+  },
+  {
+    icon: ShieldCheck,
+    title: "You confirm",
+    body: "Review the exact plan and risk warnings. Nothing is created until you confirm — and sign, on mainnet."
+  },
+  {
+    icon: Wallet,
+    title: "It runs on-chain",
+    body: "Mainnet Safe Mode uses Jupiter Recurring (you sign, no custody). Devnet Demo Mode simulates the schedule."
+  }
 ];
+
+const HERO_TERMINAL = `> buy BITAGENTS every 10 minutes with 0.01 SOL
+> total budget: 1 SOL
+> agent: planning 100 recurring buys
+> status: ready for confirmation`;
 
 export default function LandingPage() {
   return (
@@ -17,79 +35,43 @@ export default function LandingPage() {
       <section className="mx-auto w-full max-w-6xl px-4 pb-16 pt-14 sm:px-6 sm:pb-20 sm:pt-20">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
           <div className="space-y-6">
-            <SectionLabel>Crypto AI agent platform</SectionLabel>
+            <SectionLabel>DCA Agent on Solana</SectionLabel>
             <h1 className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-foreground sm:text-6xl">
-              Run crypto AI agents <span className="text-signal">without setup</span>.
+              Create DCA bots <span className="text-signal">with AI</span>.
             </h1>
             <p className="max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
-              Connect a Solana wallet, choose an agent, submit a task, and get a real, useful on-chain result. No
-              infrastructure, no API keys, no boilerplate.
+              Tell BITAGENTS what token to buy, how much to spend, and how often. The DCA Agent turns your message into
+              a recurring on-chain buy plan.
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <LinkButton href="/app">
-                Launch app <ArrowRight size={15} />
+                Launch DCA Agent <ArrowRight size={15} />
               </LinkButton>
-              <LinkButton href="/agents" variant="outline">
-                Explore agents
+              <LinkButton href="/docs" variant="outline">
+                How it works
               </LinkButton>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Tag>Solana wallet adapter</Tag>
-              <Tag>Devnet payments</Tag>
-              <Tag>Mainnet read-only</Tag>
-              <Tag>Real RPC compute</Tag>
+              <Tag>Natural-language planning</Tag>
+              <Tag>You confirm every order</Tag>
+              <Tag>Non-custodial</Tag>
+              <Tag>Jupiter Recurring</Tag>
             </div>
           </div>
 
-          <Panel title="bitagents@solana ~ wallet_watcher" className="glow-signal">
+          <Panel title="bitagents@solana ~ dca.agent" className="glow-signal">
             <pre className="overflow-x-auto font-mono text-[12px] leading-relaxed text-foreground/90">
-              <span className="text-muted-foreground">$</span> bitagents run wallet_watcher \{"\n"}
-              {"  "}--address So111…1112 --network devnet{"\n\n"}
-              <span className="text-signal">›</span> task created      <span className="text-muted-foreground">id=2f9a…</span>
-              {"\n"}
-              <span className="text-signal">›</span> devnet payment    <span className="text-success">0.001 SOL ✓</span>
-              {"\n"}
-              <span className="text-signal">›</span> provider assigned <span className="text-muted-foreground">BITAGENTS Local Compute</span>
-              {"\n"}
-              <span className="text-signal">›</span> computing…        <span className="text-muted-foreground">real RPC fetch</span>
-              {"\n\n"}
-              <span className="text-success">✓ completed</span> in 842ms{"\n"}
-              {"  "}sol_balance      = 12.4071{"\n"}
-              {"  "}token_accounts   = 7{"\n"}
-              {"  "}recent_sigs      = 5{"\n"}
-              {"  "}result_hash      = 7c1f…a9{"\n"}
-              {"  "}engine           = deterministic{"\n"}
+              {HERO_TERMINAL}
             </pre>
+            <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 font-mono text-[11px] text-muted-foreground">
+              <span className="h-1.5 w-1.5 animate-pulse-dot bg-success" />
+              awaiting your confirmation — no funds move until you approve
+            </div>
           </Panel>
         </div>
       </section>
 
-      <Section id="agents" eyebrow="Agents" title="Three working agents, real output">
-        <div className="grid gap-4 md:grid-cols-3">
-          {AGENTS.map((agent) => {
-            const Icon = agent.icon;
-            return (
-              <div key={agent.type} className="pixel-corners flex flex-col border border-border bg-surface p-5">
-                <span className="pixel-corners flex h-10 w-10 items-center justify-center border border-signal/40 bg-signal/10 text-signal">
-                  <Icon size={18} />
-                </span>
-                <h3 className="mt-4 font-display text-lg font-semibold text-foreground">{agent.label}</h3>
-                <p className="mt-1.5 text-sm text-muted-foreground">{agent.description}</p>
-                <ul className="mt-4 space-y-1.5">
-                  {agent.outputs.map((output) => (
-                    <li key={output} className="flex items-center gap-2 font-mono text-xs text-foreground/75">
-                      <span className="h-1 w-1 bg-signal" />
-                      {output}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-        </div>
-      </Section>
-
-      <Section id="how" eyebrow="How it works" title="From wallet to result in four steps">
+      <Section id="how" eyebrow="How it works" title="From a message to a recurring buy">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {STEPS.map((step, index) => {
             const Icon = step.icon;
@@ -109,59 +91,58 @@ export default function LandingPage() {
         </div>
       </Section>
 
-      <Section id="compute" eyebrow="Compute marketplace" title="Bring your own compute">
-        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:items-center">
-          <div className="space-y-4">
-            <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-              Providers can register a compute profile, choose a type (CPU, simulated GPU, or an LLM endpoint), set a
-              price per task, and sign a message proving wallet ownership. Tasks are routed to an online provider, and a
-              built-in local provider keeps the demo running when none are registered.
+      <Section id="modes" eyebrow="Two safe modes" title="Mainnet Safe Mode or Devnet Demo Mode">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="pixel-corners border border-border bg-surface p-6">
+            <Tag className="border-success/40 text-success">Mainnet Safe Mode</Tag>
+            <h3 className="mt-3 font-display text-lg font-semibold text-foreground">Real recurring buys, you sign</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Orders are created through Jupiter&apos;s Recurring (DCA) program. You sign the order in your own wallet —
+              BITAGENTS never custodies your funds or holds your keys. Jupiter&apos;s keepers run the schedule on-chain.
             </p>
-            <div className="flex flex-wrap gap-2">
-              <Tag>CPU</Tag>
-              <Tag>GPU (simulated)</Tag>
-              <Tag>LLM endpoint</Tag>
-              <Tag>Signed registration</Tag>
-              <Tag>Reputation</Tag>
-            </div>
-            <LinkButton href="/compute" variant="outline" size="sm">
-              Open compute marketplace <ArrowRight size={14} />
-            </LinkButton>
           </div>
-          <Panel title="provider.register">
-            <pre className="overflow-x-auto font-mono text-[12px] leading-relaxed text-foreground/90">
-              {`{
-  "name": "edge-node-01",
-  "computeType": "LLM",
-  "pricePerTaskSol": 0.001,
-  "status": "online",
-  "signature": "5h2k…verified ✓"
-}`}
-            </pre>
-          </Panel>
+          <div className="pixel-corners border border-border bg-surface p-6">
+            <Tag className="border-signal/40 text-signal">Devnet Demo Mode</Tag>
+            <h3 className="mt-3 font-display text-lg font-semibold text-foreground">Simulated, end-to-end</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              The agent parses your instruction, builds a plan, and simulates each scheduled buy with real price reads.
+              Executions are clearly labelled as simulations — no real tokens are purchased. Perfect for trying the flow.
+            </p>
+          </div>
         </div>
       </Section>
 
-      <Section id="token-utility" eyebrow="Token utility" title="What the token is designed to do">
-        <TokenUtilitySection />
-        <p className="mt-4 max-w-3xl text-xs italic text-muted-foreground">
-          Forward-looking and subject to change. Nothing here is a promise of revenue share, profit, or guaranteed
-          returns, and none of it is financial advice.
-        </p>
-      </Section>
-
-      <Section id="roadmap" eyebrow="Roadmap" title="Where BITAGENTS is going">
-        <Roadmap />
+      <Section id="safety" eyebrow="Safety first" title="The agent automates — it never advises">
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {[
+            "You choose the token and every parameter. The agent only turns your instruction into a plan.",
+            "Nothing is created until you confirm; mainnet orders require your wallet signature.",
+            "No profit promises. DCA does not guarantee returns and tokens can lose value.",
+            "Small or new tokens can be illiquid — slippage and minimum-order limits may apply.",
+            "You can cancel an active plan at any time.",
+            "This is not financial advice."
+          ].map((line) => (
+            <li
+              key={line}
+              className="pixel-corners flex items-start gap-2.5 border border-border bg-surface p-4 text-sm text-foreground/80"
+            >
+              <ShieldCheck size={15} className="mt-0.5 shrink-0 text-signal" />
+              {line}
+            </li>
+          ))}
+        </ul>
       </Section>
 
       <section className="mx-auto w-full max-w-6xl px-4 pb-20 sm:px-6">
         <div className="pixel-corners glow-signal flex flex-col items-start gap-4 border border-signal/40 bg-surface p-7 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-display text-2xl font-bold text-foreground">Ready to run your first agent?</h2>
-            <p className="mt-1 text-sm text-muted-foreground">Devnet Demo Mode is on by default. No mainnet funds at risk.</p>
+            <h2 className="font-display text-2xl font-bold text-foreground">Ready to plan your first DCA?</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Mainnet Safe Mode is on by default — no funds move without your wallet signature. Switch to Devnet Demo Mode anytime to simulate first.
+            </p>
           </div>
           <LinkButton href="/app">
-            Launch app <ArrowRight size={15} />
+            Launch DCA Agent <ArrowRight size={15} />
           </LinkButton>
         </div>
       </section>

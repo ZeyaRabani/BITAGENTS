@@ -269,3 +269,305 @@ export function taskInputLabel(task: Pick<AgentTask, "type" | "input">): string 
 
   return "Unknown input";
 }
+
+// =====================================================================
+// BITAGENTS DCA Agent
+// The primary product: turn a natural-language instruction into a safe
+// recurring on-chain buy plan. Everything below is pure (browser-safe) so it
+// can be shared between the parser, the UI, the API routes, and tests.
+// =====================================================================
+
+export const WSOL_MINT = "So11111111111111111111111111111111111111112";
+export const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+export const USDT_MINT = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+
+export interface TokenInfo {
+  symbol: string;
+  mint: string;
+  decimals: number;
+  aliases: string[];
+}
+
+// Base registry of well-known tokens. The BITAGENTS token is injected at
+// runtime from NEXT_PUBLIC_BITAGENTS_MINT so it stays deploy-configurable.
+export const KNOWN_TOKENS: TokenInfo[] = [
+  { symbol: "SOL", mint: WSOL_MINT, decimals: 9, aliases: ["sol", "solana", "wsol", "wrapped sol"] },
+  { symbol: "USDC", mint: USDC_MINT, decimals: 6, aliases: ["usdc", "usd coin"] },
+  { symbol: "USDT", mint: USDT_MINT, decimals: 6, aliases: ["usdt", "tether"] }
+];
+
+export const DCA_EXECUTION_MODES = ["jupiter_recurring", "agent_wallet", "devnet_demo"] as const;
+export type DcaExecutionMode = (typeof DCA_EXECUTION_MODES)[number];
+
+export const DCA_PLAN_STATUSES = [
+  "draft",
+  "needs_confirmation",
+  "creating",
+  "active",
+  "completed",
+  "cancelled",
+  "failed"
+] as const;
+export type DcaPlanStatus = (typeof DCA_PLAN_STATUSES)[number];
+
+export const DCA_EXECUTION_STATUSES = ["pending", "success", "failed", "skipped"] as const;
+export type DcaExecutionStatus = (typeof DCA_EXECUTION_STATUSES)[number];
+
+export const DCA_PLAN_STATUS_LABELS: Record<DcaPlanStatus, string> = {
+  draft: "Draft",
+  needs_confirmation: "Needs confirmation",
+  creating: "Creating",
+  active: "Active",
+  completed: "Completed",
+  cancelled: "Cancelled",
+  failed: "Failed"
+};
+
+export const EXECUTION_MODE_LABELS: Record<DcaExecutionMode, string> = {
+  jupiter_recurring: "Jupiter Recurring (mainnet)",
+  agent_wallet: "Experimental Agent Wallet",
+  devnet_demo: "Devnet Demo (simulated)"
+};
+
+// The exact plan schema requested in the product spec, plus additive
+// bookkeeping fields used to track execution progress.
+export interface DcaPlan {
+  id: string;
+  userWallet: string;
+  inputMint: string;
+  outputMint: string;
+  inputSymbol: string;
+  outputSymbol: string;
+  inputDecimals: number;
+  outputDecimals: number;
+  totalInputAmountUi: number;
+  perOrderAmountUi: number;
+  numberOfOrders: number;
+  intervalSeconds: number;
+  startAt: number | null;
+  slippageBps: number;
+  estimatedDurationSeconds: number;
+  network: SolanaNetwork;
+  executionMode: DcaExecutionMode;
+  status: DcaPlanStatus;
+  warnings: string[];
+  createdAt: string;
+  updatedAt: string;
+  // Execution bookkeeping
+  ordersExecuted: number;
+  spentInputUi: number;
+  receivedOutputUi: number;
+  lastExecutedAt: string | null;
+  nextExecutionAt: string | null;
+  jupiterOrderAccount: string | null;
+  jupiterRequestId: string | null;
+  createSignature: string | null;
+  cancelSignature: string | null;
+  agentWalletAddress: string | null;
+  error: string | null;
+}
+
+export interface DcaExecution {
+  id: string;
+  planId: string;
+  orderIndex: number;
+  status: DcaExecutionStatus;
+  network: SolanaNetwork;
+  executionMode: DcaExecutionMode;
+  simulated: boolean;
+  inputAmountUi: number;
+  outputAmountUi: number | null;
+  priceUsd: number | null;
+  signature: string | null;
+  runtimeMs: number;
+  resultHash: string;
+  note: string;
+  scheduledFor: string;
+  executedAt: string;
+}
+
+export interface DcaChatMessage {
+  id: string;
+  role: "user" | "agent";
+  text: string;
+  planId?: string;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------
+// DCA math + parsing helpers (pure)
+// ---------------------------------------------------------------------
+
+const INTERVAL_UNIT_SECONDS: Record<string, number> = {
+  second: 1,
+  sec: 1,
+  s: 1,
+  minute: 60,
+  min: 60,
+  m: 60,
+  hour: 3600,
+  hr: 3600,
+  h: 3600,
+  day: 86_400,
+  d: 86_400,
+  week: 604_800,
+  wk: 604_800,
+  w: 604_800
+};
+
+/**
+ * Parse a human interval phrase into seconds.
+ * Supports "10 minutes", "every 10 min", "1 hour", "hourly", "daily",
+ * "every day", "30s", "1h", "2 weeks". Returns null when nothing matches.
+ */
+export function parseIntervalToSeconds(input: string): number | null {
+  const text = input.toLowerCase().trim();
+  if (!text) return null;
+
+  const named: Record<string, number> = {
+    secondly: 1,
+    minutely: 60,
+    hourly: 3600,
+    daily: 86_400,
+    weekly: 604_800,
+    "every second": 1,
+    "every minute": 60,
+    "every hour": 3600,
+    "every day": 86_400,
+    "every week": 604_800
+  };
+  for (const [phrase, seconds] of Object.entries(named)) {
+    if (text.includes(phrase)) return seconds;
+  }
+
+  // "every 10 minutes", "10 min", "1h", "30 s", "2 weeks", and bare units
+  // like "day" / "hour" (an implied count of 1, e.g. from "every day").
+  const match = text.match(
+    /(?:every\s+)?(\d+(?:\.\d+)?)?\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|wks?|w)\b/
+  );
+  if (!match) return null;
+  const value = match[1] ? Number(match[1]) : 1;
+  const unitRaw = match[2];
+  const unit =
+    unitRaw.replace(/s$/, "") === ""
+      ? unitRaw
+      : unitRaw.startsWith("sec")
+        ? "sec"
+        : unitRaw.startsWith("min")
+          ? "min"
+          : unitRaw.startsWith("hour") || unitRaw.startsWith("hr")
+            ? "hour"
+            : unitRaw.startsWith("day")
+              ? "day"
+              : unitRaw.startsWith("week") || unitRaw.startsWith("wk")
+                ? "week"
+                : unitRaw;
+  const seconds = INTERVAL_UNIT_SECONDS[unit] ?? INTERVAL_UNIT_SECONDS[unitRaw];
+  if (!seconds || !Number.isFinite(value) || value <= 0) return null;
+  return Math.round(value * seconds);
+}
+
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "0m";
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const parts: string[] = [];
+  if (days) parts.push(`${days}d`);
+  if (hours) parts.push(`${hours}h`);
+  if (minutes) parts.push(`${minutes}m`);
+  if (!parts.length) parts.push(`${seconds}s`);
+  return parts.join(" ");
+}
+
+export function formatInterval(seconds: number): string {
+  return formatDuration(seconds);
+}
+
+// Jupiter defines "total time to complete" as numberOfOrders * interval.
+export function estimateDurationSeconds(numberOfOrders: number, intervalSeconds: number): number {
+  return Math.max(0, Math.round(numberOfOrders * intervalSeconds));
+}
+
+export function computePerOrderAmount(totalInputAmountUi: number, numberOfOrders: number): number {
+  if (numberOfOrders <= 0) return 0;
+  return totalInputAmountUi / numberOfOrders;
+}
+
+export function uiAmountToRawAmount(uiAmount: number, decimals: number): number {
+  return Math.round(uiAmount * 10 ** decimals);
+}
+
+export function rawAmountToUiAmount(rawAmount: number, decimals: number): number {
+  return rawAmount / 10 ** decimals;
+}
+
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** Lightweight base58 pubkey shape check (no curve validation). */
+export function looksLikeMintAddress(value: string): boolean {
+  return BASE58_RE.test(value.trim());
+}
+
+export interface DcaValidation {
+  errors: string[];
+  warnings: string[];
+}
+
+export const DCA_RISK_WARNINGS: string[] = [
+  "This is not financial advice. You choose the token and all parameters.",
+  "The agent only automates the instruction you give it — it never picks tokens for you.",
+  "Small or new tokens can be illiquid; slippage may cause worse execution.",
+  "Recurring buys can fail due to liquidity, routing, or minimum-order limits.",
+  "Mainnet orders move real funds and require your wallet signature.",
+  "Dollar-cost averaging does not guarantee profit and tokens can lose value."
+];
+
+/**
+ * Validate a (possibly partial) DCA plan. Pure so it runs in the UI, the API,
+ * and tests identically.
+ */
+export function validateDcaPlan(plan: Partial<DcaPlan>): DcaValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  if (!plan.outputMint || !looksLikeMintAddress(plan.outputMint)) {
+    errors.push("Output token mint is missing or invalid.");
+  }
+  if (!plan.inputMint || !looksLikeMintAddress(plan.inputMint)) {
+    errors.push("Input token mint is missing or invalid.");
+  }
+  if (plan.inputMint && plan.outputMint && plan.inputMint === plan.outputMint) {
+    errors.push("Input and output tokens must be different.");
+  }
+  if (!plan.totalInputAmountUi || plan.totalInputAmountUi <= 0) {
+    errors.push("Total budget must be greater than zero.");
+  }
+  if (!plan.numberOfOrders || plan.numberOfOrders < 1) {
+    errors.push("Number of buys must be at least 1.");
+  }
+  if (plan.numberOfOrders && plan.numberOfOrders > 2000) {
+    warnings.push("Very large number of buys — consider fewer, larger orders.");
+  }
+  if (!plan.intervalSeconds || plan.intervalSeconds < 1) {
+    errors.push("Interval must be at least 1 second.");
+  }
+  if (plan.slippageBps != null && (plan.slippageBps < 0 || plan.slippageBps > 5000)) {
+    warnings.push("Slippage looks unusual (outside 0–50%).");
+  }
+  if (plan.perOrderAmountUi != null && plan.perOrderAmountUi <= 0) {
+    errors.push("Per-buy amount must be greater than zero.");
+  }
+
+  return { errors, warnings };
+}
+
+// Jupiter Recurring enforces a minimum USDC value per order (≈ 50 USDC at the
+// time of writing). Used to warn before a likely-rejected mainnet order.
+export const JUPITER_MIN_ORDER_USD = 50;
+export const JUPITER_RECURRING_FEE_BPS = 10; // 0.1%
+
+export function dcaPlanProgress(plan: Pick<DcaPlan, "ordersExecuted" | "numberOfOrders">): number {
+  if (plan.numberOfOrders <= 0) return 0;
+  return Math.min(1, plan.ordersExecuted / plan.numberOfOrders);
+}

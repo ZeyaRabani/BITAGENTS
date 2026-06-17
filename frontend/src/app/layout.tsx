@@ -6,9 +6,9 @@ import { SolanaProviders } from "@/components/SolanaProviders";
 import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
-  title: "BITAGENTS — Run crypto AI agents without setup",
+  title: "BITAGENTS — Create DCA bots with AI",
   description:
-    "Connect a Solana wallet, choose an agent, and get a real on-chain result. Wallet Watcher, Token Research, and Market Research agents with real Solana RPC compute. Devnet demo payments; mainnet read-only.",
+    "Tell BITAGENTS what token to buy, how much to spend, and how often. The DCA Agent turns your message into a recurring on-chain buy plan you confirm. Mainnet Safe Mode via Jupiter Recurring; Devnet Demo Mode for simulation.",
   icons: { icon: "/bit-agents-logo-transparent.png" }
 };
 

@@ -1,7 +1,12 @@
 import type { SolanaNetwork } from "@bitagents/shared";
 
 const DEFAULT_DEVNET_RPC = "https://api.devnet.solana.com";
-const DEFAULT_MAINNET_RPC = "https://api.mainnet-beta.solana.com";
+// Solana's public mainnet-beta endpoint returns 403 ("Access forbidden") for
+// browser-origin requests, which breaks client-side signing (fetching a
+// blockhash, sending swaps). PublicNode is a free, keyless RPC that allows
+// browser CORS + websockets, so it works from the dapp. Override with
+// NEXT_PUBLIC_MAINNET_RPC to point at a dedicated provider in production.
+const DEFAULT_MAINNET_RPC = "https://solana-rpc.publicnode.com";
 
 function clean(value: string | undefined): string | undefined {
   const trimmed = value?.trim();

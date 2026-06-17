@@ -4,7 +4,7 @@ import { useNetwork } from "@/components/NetworkProvider";
 import { cn } from "@/lib/utils";
 
 export function NetworkToggle({ className }: { className?: string }) {
-  const { network, setNetwork } = useNetwork();
+  const { network, setNetwork, mainnetDcaEnabled } = useNetwork();
 
   return (
     <div
@@ -25,13 +25,16 @@ export function NetworkToggle({ className }: { className?: string }) {
       </button>
       <button
         type="button"
-        onClick={() => setNetwork("mainnet")}
+        disabled={!mainnetDcaEnabled}
+        title={mainnetDcaEnabled ? undefined : "Mainnet Safe Mode is disabled on this deployment (ENABLE_MAINNET_DCA=false)."}
+        onClick={() => mainnetDcaEnabled && setNetwork("mainnet")}
         className={cn(
           "px-2.5 py-1 transition",
-          network === "mainnet" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground"
+          network === "mainnet" ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground",
+          !mainnetDcaEnabled && "cursor-not-allowed opacity-40 hover:text-muted-foreground"
         )}
       >
-        Mainnet Read
+        Mainnet Safe
       </button>
     </div>
   );

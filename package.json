@@ -9,7 +9,8 @@
     "dev:worker": "npm --prefix workers/provider-worker run dev",
     "build": "npm --prefix shared run build && npm --prefix frontend run build && npm --prefix workers/provider-worker run build",
     "typecheck": "npm --prefix shared run typecheck && npm --prefix frontend run typecheck && npm --prefix workers/provider-worker run typecheck",
-    "lint": "npm --prefix frontend run lint"
+    "lint": "npm --prefix frontend run lint",
+    "test": "npm --prefix frontend run test"
   },
   "devDependencies": {
     "concurrently": "^8.2.2"

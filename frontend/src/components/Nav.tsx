@@ -10,10 +10,10 @@ import { WalletButton } from "@/components/WalletButton";
 import { cn } from "@/lib/utils";
 
 const LINKS = [
-  { href: "/agents", label: "Agents" },
-  { href: "/compute", label: "Compute" },
-  { href: "/tasks", label: "Tasks" },
-  { href: "/utility", label: "Utility" }
+  { href: "/app", label: "DCA Agent" },
+  { href: "/plans", label: "My Plans" },
+  { href: "/utility", label: "Utility" },
+  { href: "/docs", label: "Docs" }
 ];
 
 export function Nav({ children }: { children: React.ReactNode }) {
@@ -118,18 +118,21 @@ function SiteFooter() {
           </span>
         </div>
         <p className="max-w-md font-mono text-[11px] leading-relaxed text-muted-foreground">
-          Run crypto AI agents without setup. Devnet demo for payments; mainnet used read-only. Research and educational
-          tools only — not financial advice.
+          Turn a plain-English instruction into a recurring on-chain buy plan. You choose the token and parameters; the
+          agent only automates them. Not financial advice.
         </p>
         <div className="flex flex-wrap gap-4 font-mono text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-          <Link href="/agents" className="hover:text-foreground">
-            Agents
+          <Link href="/app" className="hover:text-foreground">
+            DCA Agent
           </Link>
-          <Link href="/compute" className="hover:text-foreground">
-            Compute
+          <Link href="/plans" className="hover:text-foreground">
+            My Plans
           </Link>
           <Link href="/utility" className="hover:text-foreground">
             Utility
+          </Link>
+          <Link href="/docs" className="hover:text-foreground">
+            Docs
           </Link>
         </div>
       </div>
