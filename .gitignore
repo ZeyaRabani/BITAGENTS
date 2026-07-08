@@ -15,3 +15,4 @@ temp
 __pycache__
 dca_plans.json
 user_deposits.json
+.claude

@@ -9,6 +9,7 @@ import {
   type KickstartHealth,
 } from "@/lib/kickstartCopilotClient";
 import { KICKSTART_COPILOT, KICKSTART_EXAMPLE_PROMPTS } from "@/lib/kickstartCopilotConfig";
+import { EasyaTradingDeposit } from "@/components/agents/EasyaTradingDeposit";
 import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import type { AgentAction } from "@/lib/dcaAgentClient";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -161,6 +162,8 @@ export function KickstartCopilotConsole() {
           Connect your wallet to sign in and chat with the copilot.
         </div>
       )}
+
+      <EasyaTradingDeposit authToken={token} refreshTick={messages.length} />
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Panel className="lg:col-span-2">

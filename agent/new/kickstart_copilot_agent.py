@@ -686,6 +686,57 @@ def compare_watchlist(user_wallet: str) -> dict[str, Any]:
     return compare_tokens(tokens)
 
 
+def get_easya_trading_wallet(user_wallet: str = "") -> dict[str, Any]:
+    from easya_trading_ledger import get_easya_agent_wallet_info, get_easya_user_balances
+
+    info = get_easya_agent_wallet_info()
+    if user_wallet and user_wallet.strip():
+        info["balances"] = get_easya_user_balances(user_wallet.strip()).get("balances", [])
+    return info
+
+
+def get_easya_trading_balance(user_wallet: str) -> dict[str, Any]:
+    from easya_trading_ledger import get_easya_user_balances
+
+    return get_easya_user_balances(user_wallet)
+
+
+def place_market_buy(user_wallet: str, token: str, amount_sol: float, slippage_bps: int = 100) -> dict[str, Any]:
+    from easya_trading import place_market_buy_order
+
+    return place_market_buy_order(user_wallet, token, float(amount_sol), int(slippage_bps))
+
+
+def place_limit_buy(
+    user_wallet: str,
+    token: str,
+    amount_sol: float,
+    limit_price_usd: float,
+    slippage_bps: int = 100,
+) -> dict[str, Any]:
+    from easya_trading import place_limit_buy_order
+
+    return place_limit_buy_order(
+        user_wallet,
+        token,
+        float(amount_sol),
+        float(limit_price_usd),
+        int(slippage_bps),
+    )
+
+
+def list_trading_orders(user_wallet: str, active_only: bool = False) -> dict[str, Any]:
+    from easya_trading import list_easya_orders
+
+    return list_easya_orders(user_wallet, active_only=active_only)
+
+
+def cancel_trading_order(user_wallet: str, order_id: str) -> dict[str, Any]:
+    from easya_trading import cancel_easya_order
+
+    return cancel_easya_order(user_wallet, order_id)
+
+
 TOOLS = [
     {"type": "function", "function": {"name": "list_verified_kickstart_tokens", "description": "List tokens from EASY Screener (verified Kickstart sample or search by query).", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "category": {"type": "string"}, "tag": {"type": "string"}}, "required": []}}},
     {"type": "function", "function": {"name": "search_tokens", "description": "Search EASY Screener for tokens by name, symbol, or keyword.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "limit": {"type": "integer"}, "verified_only": {"type": "boolean"}, "tag": {"type": "string"}, "category": {"type": "string"}}, "required": ["query"]}}},
@@ -703,6 +754,12 @@ TOOLS = [
     {"type": "function", "function": {"name": "remove_from_watchlist", "description": "Remove token from watchlist.", "parameters": {"type": "object", "properties": {"token": {"type": "string"}, "user_wallet": {"type": "string"}}, "required": ["token"]}}},
     {"type": "function", "function": {"name": "get_watchlist", "description": "List user watchlist tokens.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}}, "required": []}}},
     {"type": "function", "function": {"name": "compare_watchlist", "description": "Compare all tokens on user watchlist.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}}, "required": []}}},
+    {"type": "function", "function": {"name": "get_easya_trading_wallet", "description": "Deposit address and SOL balance for Jupiter trading (0.1% fee per fill).", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}}, "required": []}}},
+    {"type": "function", "function": {"name": "get_easya_trading_balance", "description": "User SOL balance deposited for EasyA trading.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}}, "required": []}}},
+    {"type": "function", "function": {"name": "place_market_buy", "description": "Market buy token with deposited SOL via Jupiter (one-time, 0.1% platform fee).", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}, "token": {"type": "string"}, "amount_sol": {"type": "number"}, "slippage_bps": {"type": "integer"}}, "required": ["token", "amount_sol"]}}},
+    {"type": "function", "function": {"name": "place_limit_buy", "description": "Limit buy: spend amount_sol when token price_usd <= limit_price_usd.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}, "token": {"type": "string"}, "amount_sol": {"type": "number"}, "limit_price_usd": {"type": "number"}, "slippage_bps": {"type": "integer"}}, "required": ["token", "amount_sol", "limit_price_usd"]}}},
+    {"type": "function", "function": {"name": "list_trading_orders", "description": "List user's market/limit buy orders.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}, "active_only": {"type": "boolean"}}, "required": []}}},
+    {"type": "function", "function": {"name": "cancel_trading_order", "description": "Cancel a pending/active limit order.", "parameters": {"type": "object", "properties": {"user_wallet": {"type": "string"}, "order_id": {"type": "string"}}, "required": ["order_id"]}}},
 ]
 
 TOOL_MAP = {
@@ -722,6 +779,12 @@ TOOL_MAP = {
     "remove_from_watchlist": remove_from_watchlist,
     "get_watchlist": get_watchlist,
     "compare_watchlist": compare_watchlist,
+    "get_easya_trading_wallet": get_easya_trading_wallet,
+    "get_easya_trading_balance": get_easya_trading_balance,
+    "place_market_buy": place_market_buy,
+    "place_limit_buy": place_limit_buy,
+    "list_trading_orders": list_trading_orders,
+    "cancel_trading_order": cancel_trading_order,
 }
 
 WALLET_SCOPED = {
@@ -729,6 +792,12 @@ WALLET_SCOPED = {
     "remove_from_watchlist",
     "get_watchlist",
     "compare_watchlist",
+    "get_easya_trading_wallet",
+    "get_easya_trading_balance",
+    "place_market_buy",
+    "place_limit_buy",
+    "list_trading_orders",
+    "cancel_trading_order",
 }
 
 SYSTEM_PROMPT = """You are **EasyA Analysis Agent** on Solana - free token research powered by **EASY Screener**.
@@ -740,8 +809,16 @@ SYSTEM_PROMPT = """You are **EasyA Analysis Agent** on Solana - free token resea
 - Numeric nulls mean missing upstream data - never treat null as zero.
 
 ## Pricing
-- **Free** for authenticated users (wallet sign-in required).
-- You do **not** execute on-chain transactions.
+- **Analysis:** free for authenticated users (wallet sign-in required).
+- **Trading:** deposit SOL to the EasyA Analysis Agent wallet; market/limit buys via Jupiter.
+- **Platform fee:** 0.1% on each successful buy (swap amount + fee debited from deposit).
+
+## Trading (Jupiter)
+- Users must deposit SOL first (`get_easya_trading_wallet` shows the address).
+- **Market buy:** `place_market_buy(token, amount_sol)` — executes immediately.
+- **Limit buy:** `place_limit_buy(token, amount_sol, limit_price_usd)` — fills when EASY Screener price <= limit.
+- One-time orders only (not recurring DCA). Use `list_trading_orders` / `cancel_trading_order` for limit orders.
+- Always confirm deposit balance before placing orders. Never invent tx signatures.
 
 ## Scope
 - Analyze any token indexed on EASY Screener (use get_token_overview, search_tokens, or list_verified_kickstart_tokens).

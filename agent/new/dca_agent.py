@@ -1352,13 +1352,14 @@ def send_tokens_to_user(
     mint_address: str,
     amount: float,
     decimals: int,
+    signing_keypair: Optional["Keypair"] = None,
 ) -> dict:
     """Transfer SOL or SPL tokens from the agent wallet to a user wallet."""
     user_wallet = user_wallet.strip()
     if not user_wallet:
         return {"error": "User wallet address is required."}
 
-    keypair = load_keypair()
+    keypair = signing_keypair or load_keypair()
     if not keypair:
         return {"error": "AI Agent wallet is not configured on the server."}
     if not HAS_SOLDERS:

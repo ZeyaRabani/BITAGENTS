@@ -186,6 +186,34 @@ SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_user_watchlists_wallet ON user_watchlists (user_wallet)",
     """
+    CREATE TABLE IF NOT EXISTS easya_orders (
+        id              VARCHAR(16) PRIMARY KEY,
+        user_wallet     VARCHAR(64) NOT NULL,
+        order_type      VARCHAR(10) NOT NULL,
+        input_token     VARCHAR(32) NOT NULL DEFAULT 'SOL',
+        output_token    VARCHAR(32) NOT NULL,
+        input_mint      VARCHAR(64) NOT NULL,
+        output_mint     VARCHAR(64) NOT NULL,
+        amount_input    DOUBLE PRECISION NOT NULL,
+        limit_price_usd DOUBLE PRECISION,
+        slippage_bps    INTEGER NOT NULL DEFAULT 100,
+        status          VARCHAR(20) NOT NULL DEFAULT 'pending',
+        platform_fee    DOUBLE PRECISION,
+        output_amount   DOUBLE PRECISION,
+        signature       VARCHAR(128),
+        error_message   TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        filled_at       TIMESTAMPTZ,
+        cancelled_at    TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_easya_orders_user ON easya_orders (user_wallet)",
+    "CREATE INDEX IF NOT EXISTS idx_easya_orders_status ON easya_orders (status)",
+    """
+    CREATE INDEX IF NOT EXISTS idx_easya_orders_active_limit ON easya_orders (created_at)
+        WHERE status = 'active' AND order_type = 'limit'
+    """,
+    """
     CREATE TABLE IF NOT EXISTS user_agents (
         id              VARCHAR(36) PRIMARY KEY,
         owner_wallet    VARCHAR(64) NOT NULL,

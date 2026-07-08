@@ -70,6 +70,21 @@ from dca_agent import (
     update_dca_plan_status,
 )
 from easya_screener_client import CACHE_TTL_SECONDS, screener_configured
+from easya_trading import (
+    cancel_easya_order,
+    list_easya_orders,
+    place_limit_buy_order,
+    place_market_buy_order,
+    start_easya_order_scheduler,
+    EASYA_ORDER_POLL_SECONDS,
+)
+from easya_trading_ledger import (
+    get_easya_agent_wallet_info,
+    get_easya_user_balances,
+    get_easya_wallet_pubkey,
+    verify_and_record_easya_deposit,
+    withdraw_easya_tokens,
+)
 from kickstart_copilot_agent import (
     KICKSTART_MODEL,
     list_verified_kickstart_tokens,
@@ -233,6 +248,8 @@ def _startup() -> None:
         print(f"  ⏱️  DCA scheduler started (every {SCHEDULER_POLL_SECONDS}s)")
     if start_metrics_scheduler():
         print("  📊 Platform metrics scheduler started (refresh every 24h)")
+    if start_easya_order_scheduler():
+        print(f"  📈 EasyA limit-order scheduler started (every {EASYA_ORDER_POLL_SECONDS}s)")
     print("  🤖 Agents: DCA, Kickstart Token Copilot")
 
 
@@ -251,7 +268,7 @@ def health() -> dict[str, Any]:
             "kickstart-copilot": {
                 "path_prefix": "/kickstart",
                 "chat": "/kickstart/chat",
-                "pricing": "free",
+                "pricing": "free analysis · 0.1% per Jupiter buy",
             },
         },
         "llm": "openrouter",
@@ -274,17 +291,21 @@ def health() -> dict[str, Any]:
 
 @app.get("/kickstart/health")
 def kickstart_health() -> dict[str, Any]:
+    easya_wallet = get_easya_wallet_pubkey()
     return {
         "status": "ok",
         "agent": "EasyA Analysis Agent",
         "model": KICKSTART_MODEL,
-        "pricing": "free",
+        "pricing": "free analysis · 0.1% per successful Jupiter buy",
         "auth_required": True,
         "data_source": "easy_screener",
         "easy_screener_configured": screener_configured(),
         "cache_ttl_seconds": CACHE_TTL_SECONDS,
         "openrouter_configured": bool(OPEN_ROUTER_API),
         "cluster": SOLANA_CLUSTER,
+        "trading_wallet_configured": bool(easya_wallet),
+        "trading_wallet": easya_wallet,
+        "platform_fee_rate": 0.001,
     }
 
 
@@ -580,6 +601,114 @@ def kickstart_verified_tokens(
         active_only=True,
         query=query,
     )
+
+
+class EasyaDepositVerifyRequest(BaseModel):
+    signature: str = Field(min_length=32)
+
+
+class EasyaWithdrawRequest(BaseModel):
+    token: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+
+
+class EasyaMarketOrderRequest(BaseModel):
+    token: str = Field(min_length=1)
+    amount_sol: float = Field(gt=0)
+    slippage_bps: int = Field(default=100, ge=1, le=5000)
+
+
+class EasyaLimitOrderRequest(BaseModel):
+    token: str = Field(min_length=1)
+    amount_sol: float = Field(gt=0)
+    limit_price_usd: float = Field(gt=0)
+    slippage_bps: int = Field(default=100, ge=1, le=5000)
+
+
+@app.get("/kickstart/wallet/agent")
+def kickstart_wallet_agent(_: None = Depends(require_internal_key)) -> dict[str, Any]:
+    return get_easya_agent_wallet_info()
+
+
+@app.get("/kickstart/wallet/balance")
+def kickstart_wallet_balance(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return get_easya_user_balances(auth_wallet)
+
+
+@app.post("/kickstart/wallet/deposit/verify")
+def kickstart_deposit_verify(
+    body: EasyaDepositVerifyRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = verify_and_record_easya_deposit(body.signature.strip(), auth_wallet)
+    if result.get("error") and result.get("status") != "already_recorded":
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/kickstart/wallet/withdraw")
+def kickstart_wallet_withdraw(
+    body: EasyaWithdrawRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = withdraw_easya_tokens(auth_wallet, body.token.strip(), body.amount)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/kickstart/orders")
+def kickstart_list_orders(
+    auth_wallet: str = Depends(require_wallet_session),
+    active_only: bool = Query(False),
+) -> dict[str, Any]:
+    return list_easya_orders(auth_wallet, active_only=active_only)
+
+
+@app.post("/kickstart/orders/market")
+def kickstart_market_order(
+    body: EasyaMarketOrderRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = place_market_buy_order(
+        auth_wallet,
+        body.token.strip(),
+        body.amount_sol,
+        body.slippage_bps,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/kickstart/orders/limit")
+def kickstart_limit_order(
+    body: EasyaLimitOrderRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = place_limit_buy_order(
+        auth_wallet,
+        body.token.strip(),
+        body.amount_sol,
+        body.limit_price_usd,
+        body.slippage_bps,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/kickstart/orders/{order_id}/cancel")
+def kickstart_cancel_order(
+    order_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = cancel_easya_order(auth_wallet, order_id)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ─── Custom (user-created) agents ──────────────────────────────────────────────
