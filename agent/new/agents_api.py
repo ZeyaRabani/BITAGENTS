@@ -37,13 +37,18 @@ from deposit_ledger import (
     verify_and_record_deposit,
     withdraw_user_tokens,
 )
+from custom_agent import CUSTOM_AGENT_DEFAULT_MODEL, run_custom_agent
 from db import (
     append_chat_messages,
     assert_chat_session_access,
+    create_user_agent,
     db_configured,
     delete_chat_session,
+    delete_user_agent,
     get_platform_metrics,
+    get_user_agent,
     init_db,
+    list_user_agents,
     list_watchlist,
     load_chat_history,
 )
@@ -153,6 +158,22 @@ class WithdrawRequest(BaseModel):
 
 class PlanStatusRequest(BaseModel):
     action: str = Field(min_length=3)
+
+
+class CreateCustomAgentRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    description: Optional[str] = Field(default=None, max_length=280)
+    system_prompt: str = Field(min_length=1, max_length=4000)
+    model: Optional[str] = None
+
+
+class CustomAgentChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    history: Optional[list[dict[str, str]]] = None
+
+
+class CustomAgentChatResponse(BaseModel):
+    reply: str
 
 
 def _redact_rpc_url(rpc_url: str) -> str:
@@ -559,6 +580,84 @@ def kickstart_verified_tokens(
         active_only=True,
         query=query,
     )
+
+
+# ─── Custom (user-created) agents ──────────────────────────────────────────────
+
+@app.post("/custom/agents", response_model=None)
+def create_custom_agent(
+    body: CreateCustomAgentRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = create_user_agent(
+        auth_wallet,
+        body.name,
+        body.description,
+        body.system_prompt,
+        body.model,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/custom/agents")
+def list_custom_agents(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return list_user_agents(auth_wallet)
+
+
+@app.get("/custom/agents/{agent_id}")
+def get_custom_agent(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    agent = get_user_agent(agent_id)
+    if not agent or agent["owner_wallet"] != auth_wallet:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return agent
+
+
+@app.delete("/custom/agents/{agent_id}")
+def remove_custom_agent(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, bool]:
+    deleted = delete_user_agent(agent_id, auth_wallet)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return {"ok": True}
+
+
+@app.post("/custom/agents/{agent_id}/chat", response_model=CustomAgentChatResponse)
+def custom_agent_chat(
+    agent_id: str,
+    body: CustomAgentChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> CustomAgentChatResponse:
+    agent = get_user_agent(agent_id)
+    if not agent or agent["owner_wallet"] != auth_wallet:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    try:
+        reply = run_custom_agent(
+            agent["system_prompt"],
+            body.message,
+            body.history,
+            model=agent.get("model") or CUSTOM_AGENT_DEFAULT_MODEL,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Cannot reach OpenRouter API. Check your network connection.",
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return CustomAgentChatResponse(reply=reply)
 
 
 if __name__ == "__main__":

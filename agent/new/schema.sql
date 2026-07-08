@@ -91,6 +91,18 @@ CREATE TABLE IF NOT EXISTS wallet_sessions (
 CREATE INDEX IF NOT EXISTS idx_wallet_sessions_wallet ON wallet_sessions (user_wallet);
 CREATE INDEX IF NOT EXISTS idx_wallet_sessions_expires ON wallet_sessions (expires_at);
 
+CREATE TABLE IF NOT EXISTS user_agents (
+    id              VARCHAR(36) PRIMARY KEY,
+    owner_wallet    VARCHAR(64) NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    system_prompt   TEXT NOT NULL,
+    model           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_agents_owner_wallet ON user_agents (owner_wallet);
+
 CREATE TABLE IF NOT EXISTS dca_platform_metrics (
     id                  VARCHAR(32) PRIMARY KEY DEFAULT 'global',
     total_plans         INTEGER NOT NULL DEFAULT 0,

@@ -2,9 +2,9 @@ export const KICKSTART_COPILOT = {
   id: "kickstart-copilot",
   name: "EasyA Analysis Agent",
   slug: "kickstart-copilot",
-  tagline: "Solana token analysis · powered by EASY Screener",
+  tagline: "Solana token analysis",
   description:
-    "AI agent for live Solana token research - price, liquidity, holders, risk checks, health scores, and diligence summaries using EASY Screener data.",
+    "price, liquidity, holders, risk checks, health scores, and diligence summaries.",
   status: "Running" as const,
   model: "meta-llama/llama-3.3-70b-instruct",
   cluster: "mainnet-beta",

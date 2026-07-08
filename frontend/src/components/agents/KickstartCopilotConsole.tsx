@@ -140,37 +140,6 @@ export function KickstartCopilotConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-signal">
-          Powered by{" "}
-          <a
-            href={KICKSTART_COPILOT.dataSourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline underline-offset-2 hover:text-foreground"
-          >
-            EASY Screener
-          </a>
-        </p>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {KICKSTART_COPILOT.description} Connect your wallet (free) and ask about token overview,
-          analytics, health scores, risks, comparisons, and launch operations.
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-        <span className={`inline-flex items-center gap-2 ${agentOnline ? "text-signal" : "text-warn"}`}>
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${agentOnline ? "bg-signal animate-pulse-dot" : "bg-warn"}`}
-          />
-          {agentOnline ? "API online" : "API offline"}
-        </span>
-        <span>·</span>
-        <span>{health?.model ?? KICKSTART_COPILOT.model}</span>
-        <span>·</span>
-        <span className="text-signal">Free · wallet sign-in required</span>
-      </div>
-
       {error && (
         <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
       )}
@@ -194,12 +163,12 @@ export function KickstartCopilotConsole() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="EasyA Analysis Agent" className="lg:col-span-2">
+        <Panel className="lg:col-span-2">
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
                 Ask for token overviews, live analytics, health scores, risk analysis, comparisons,
-                and launch guidance. Market data is fetched live from EASY Screener.
+                and launch guidance.
               </p>
             )}
             {messages.map((msg) => (

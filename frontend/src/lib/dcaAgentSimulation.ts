@@ -230,7 +230,7 @@ export const DCA_AGENT = {
   id: "dca",
   name: "DCA Agent",
   slug: "dca",
-  tagline: "Recurring buys · Jupiter swaps",
+  tagline: "Recurring buys",
   description:
     "Set up dollar-cost averaging on Solana.",
   status: "Running" as const,

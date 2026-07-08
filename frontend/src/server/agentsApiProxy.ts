@@ -222,4 +222,54 @@ export async function proxyDcaMetrics(refresh = false): Promise<Response> {
   });
 }
 
+export async function proxyListCustomAgents(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/custom/agents`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyCreateCustomAgent(
+  body: { name: string; description?: string; system_prompt: string; model?: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/custom/agents`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyGetCustomAgent(
+  agentId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/custom/agents/${encodeURIComponent(agentId)}`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyDeleteCustomAgent(
+  agentId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/custom/agents/${encodeURIComponent(agentId)}`, {
+    method: "DELETE",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyCustomAgentChat(
+  agentId: string,
+  body: { message: string; history?: { role: "user" | "assistant"; content: string }[] },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/custom/agents/${encodeURIComponent(agentId)}/chat`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export { getAuthToken, getAgentsBaseUrl, buildHeaders };

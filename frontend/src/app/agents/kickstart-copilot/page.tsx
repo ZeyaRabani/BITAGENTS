@@ -6,7 +6,7 @@ import { KICKSTART_COPILOT } from "@/lib/kickstartCopilotConfig";
 export const metadata: Metadata = {
   title: "EasyA Analysis Agent - BIT Agents",
   description:
-    "Solana token analysis agent powered by EASY Screener - live price, liquidity, holders, health scores, and risk checks.",
+    "Solana token analysis agent - live price, liquidity, holders, health scores, and risk checks.",
 };
 
 export default function KickstartCopilotPage() {

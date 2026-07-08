@@ -185,6 +185,18 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_user_watchlists_wallet ON user_watchlists (user_wallet)",
+    """
+    CREATE TABLE IF NOT EXISTS user_agents (
+        id              VARCHAR(36) PRIMARY KEY,
+        owner_wallet    VARCHAR(64) NOT NULL,
+        name            TEXT NOT NULL,
+        description     TEXT,
+        system_prompt   TEXT NOT NULL,
+        model           TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_user_agents_owner_wallet ON user_agents (owner_wallet)",
 ]
 
 MIGRATION_STATEMENTS = [
@@ -875,3 +887,107 @@ def list_watchlist(user_wallet: str) -> dict[str, Any]:
 
 def compare_watchlist_tokens(user_wallet: str) -> dict[str, Any]:
     return list_watchlist(user_wallet)
+
+
+# ─── User-created custom agents (Phase 1: prompt-only, read-only chat) ────────
+
+MAX_USER_AGENTS_PER_WALLET = 10
+MAX_SYSTEM_PROMPT_LENGTH = 4000
+
+
+def _agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "owner_wallet": row["owner_wallet"],
+        "name": row["name"],
+        "description": row.get("description"),
+        "system_prompt": row["system_prompt"],
+        "model": row.get("model"),
+        "created_at": _iso(row.get("created_at")),
+    }
+
+
+def create_user_agent(
+    owner_wallet: str,
+    name: str,
+    description: Optional[str],
+    system_prompt: str,
+    model: Optional[str] = None,
+) -> dict[str, Any]:
+    init_db()
+    wallet = owner_wallet.strip()
+    name = name.strip()
+    system_prompt = system_prompt.strip()
+
+    if not name:
+        return {"error": "Agent name is required."}
+    if not system_prompt:
+        return {"error": "System prompt is required."}
+    if len(system_prompt) > MAX_SYSTEM_PROMPT_LENGTH:
+        return {"error": f"System prompt must be {MAX_SYSTEM_PROMPT_LENGTH} characters or fewer."}
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM user_agents WHERE owner_wallet = %s",
+                (wallet,),
+            )
+            count = int(cur.fetchone()["n"])
+            if count >= MAX_USER_AGENTS_PER_WALLET:
+                return {"error": f"You can create up to {MAX_USER_AGENTS_PER_WALLET} agents."}
+
+            agent_id = str(uuid.uuid4())
+            cur.execute(
+                """
+                INSERT INTO user_agents (id, owner_wallet, name, description, system_prompt, model)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id, owner_wallet, name, description, system_prompt, model, created_at
+                """,
+                (agent_id, wallet, name, description, system_prompt, model),
+            )
+            row = cur.fetchone()
+    return _agent_row_to_dict(row)
+
+
+def list_user_agents(owner_wallet: str) -> dict[str, Any]:
+    init_db()
+    wallet = owner_wallet.strip()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, owner_wallet, name, description, system_prompt, model, created_at
+                FROM user_agents
+                WHERE owner_wallet = %s
+                ORDER BY created_at DESC
+                """,
+                (wallet,),
+            )
+            rows = cur.fetchall()
+    return {"agents": [_agent_row_to_dict(row) for row in rows]}
+
+
+def get_user_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, owner_wallet, name, description, system_prompt, model, created_at
+                FROM user_agents WHERE id = %s
+                """,
+                (agent_id.strip(),),
+            )
+            row = cur.fetchone()
+    return _agent_row_to_dict(row) if row else None
+
+
+def delete_user_agent(agent_id: str, owner_wallet: str) -> bool:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM user_agents WHERE id = %s AND owner_wallet = %s",
+                (agent_id.strip(), owner_wallet.strip()),
+            )
+            return cur.rowcount > 0
