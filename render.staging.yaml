@@ -1,0 +1,71 @@
+# Render Blueprint — BIT Agents Python API (STAGING)
+# https://render.com/docs/blueprint-spec
+#
+# Separate service from render.yaml (production). Deploys from the
+# serverless-dca-prototype branch so Zeya and Harshal can both hit a
+# shared, web-accessible URL to test the latency fixes without running
+# anything locally. Auto-redeploys on every push to that branch.
+#
+# Setup (Render dashboard):
+#   1. New > Blueprint > select this repo > Blueprint file: render.staging.yaml
+#   2. Fill in the "sync: false" env vars below (see notes per var)
+#   3. Deploy — Render gives you a URL like https://bitagents-agents-staging.onrender.com
+#
+# IMPORTANT: keep numInstances at 1 — same reason as production (in-process
+# schedulers + in-memory cache assume a single instance).
+
+services:
+  - type: web
+    name: bitagents-agents-staging
+    runtime: docker
+    dockerfilePath: ./agent/new/Dockerfile
+    dockerContext: ./agent/new
+    branch: serverless-dca-prototype
+    plan: starter
+    numInstances: 1
+    healthCheckPath: /health
+    envVars:
+      - key: AGENTS_API_HOST
+        value: "0.0.0.0"
+      - key: DATABASE_URL
+        sync: false # use a separate Neon branch/DB — do NOT point this at the production DB
+      - key: CAPIX_API_KEY
+        sync: false # can reuse the production key
+      - key: CAPIX_API_URL
+        value: https://www.capix.network/api/v1/chat/completions
+      - key: CAPIX_MODEL
+        value: meta-llama/llama-3.1-8b-instruct
+      - key: CAPIX_PROVIDER
+        value: DeepInfra
+      - key: CAPIX_READ_TIMEOUT
+        value: "45"
+      - key: CAPIX_MAX_RETRIES
+        value: "2"
+      - key: CAPIX_TIMING_LOG
+        value: "1"
+      - key: TOOL_ROUND_TIMING_LOG
+        value: "1"
+      - key: AGENTS_INTERNAL_API_KEY
+        sync: false # must match the staging frontend's AGENTS_INTERNAL_API_KEY
+      - key: SOLANA_CLUSTER
+        value: mainnet
+      - key: SOLANA_RPC_URL
+        sync: false # can reuse the production RPC URL
+      - key: CORS_ALLOW_ORIGINS
+        sync: false # set to the staging frontend URL once it exists (e.g. Vercel preview URL)
+      - key: BITAGENTS_PUBLIC_URL
+        sync: false
+      - key: TOKEN_RESEARCH_CACHE_TTL_SECONDS
+        value: "900"
+      - key: WALLET_MONITORING_CACHE_TTL_SECONDS
+        value: "900"
+      # Optional wallet keys — only set if you want staging to execute real trades.
+      # Leave unset to test research/chat agents without risking funds.
+      - key: DCA_WALLET_PRIVATE_KEY
+        sync: false
+      - key: VOLUME_AGENT_WALLET_PRIVATE_KEY
+        sync: false
+      - key: EASYA_ANALYSIS_AGENT_WALLET_PRIVATE_KEY
+        sync: false
+      - key: EZ_API_KEY
+        sync: false
