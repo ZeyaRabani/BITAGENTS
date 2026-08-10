@@ -49,7 +49,9 @@ from db import (
 )
 from hosted_llm import (
     CAPIX_API_URL,
+    CAPIX_MAX_RETRIES,
     CAPIX_MODEL,
+    CAPIX_READ_TIMEOUT_SECONDS,
     HOSTED_OLLAMA_BASE_URL,
     HOSTED_OLLAMA_MODEL,
     llm_configured,
@@ -355,6 +357,8 @@ def health(ping_llm: bool = Query(False)) -> dict[str, Any]:
         "llm_ping": llm_ping,
         "capix_url": CAPIX_API_URL if use_capix() else None,
         "capix_model": CAPIX_MODEL if use_capix() else None,
+        "capix_read_timeout_seconds": CAPIX_READ_TIMEOUT_SECONDS if use_capix() else None,
+        "capix_max_retries": CAPIX_MAX_RETRIES if use_capix() else None,
         "hosted_ollama_url": HOSTED_OLLAMA_BASE_URL if use_hosted_ollama() else None,
         "hosted_ollama_model": HOSTED_OLLAMA_MODEL if use_hosted_ollama() else None,
         "dca_model": MODEL,
