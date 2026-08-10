@@ -241,6 +241,10 @@ SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_easya_orders_active_limit ON easya_orders (created_at)
         WHERE status = 'active' AND order_type IN ('limit', 'threshold')
     """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_easya_orders_due_check ON easya_orders (last_checked_at)
+        WHERE status = 'active' AND order_type IN ('limit', 'threshold')
+    """,
 ]
 
 MIGRATION_STATEMENTS = [
@@ -472,6 +476,46 @@ def load_all_plans(user_wallet: Optional[str] = None) -> list[dict[str, Any]]:
                 )
             else:
                 cur.execute("SELECT * FROM dca_plans ORDER BY created_at ASC")
+            rows = cur.fetchall()
+    return [_plan_row_to_dict(row) for row in rows]
+
+
+def claim_due_dca_plans(limit: int = 25, lease_seconds: int = 180) -> list[dict[str, Any]]:
+    """Atomically claim up to `limit` due, active plans for execution.
+
+    Uses SELECT ... FOR UPDATE SKIP LOCKED so multiple scheduler instances can
+    poll the same table concurrently without ever claiming the same plan twice.
+    Claiming pushes next_execution_at forward by lease_seconds as a lease —
+    if this worker crashes mid-execution, the plan becomes claimable again once
+    the lease expires instead of being stuck forever. A successful execution
+    overwrites next_execution_at with the real next run time; a failed one
+    naturally retries after the lease window instead of hot-looping every poll.
+    """
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM dca_plans
+                WHERE status = 'active' AND next_execution_at <= NOW()
+                ORDER BY next_execution_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+                """,
+                (limit,),
+            )
+            claimed_ids = [row["id"] for row in cur.fetchall()]
+            if not claimed_ids:
+                return []
+            cur.execute(
+                """
+                UPDATE dca_plans
+                SET next_execution_at = NOW() + (%s || ' seconds')::interval
+                WHERE id = ANY(%s)
+                RETURNING *
+                """,
+                (lease_seconds, claimed_ids),
+            )
             rows = cur.fetchall()
     return [_plan_row_to_dict(row) for row in rows]
 
@@ -1037,6 +1081,116 @@ def load_all_volume_campaigns(user_wallet: Optional[str] = None) -> list[dict[st
                 cur.execute("SELECT * FROM volume_campaigns ORDER BY created_at ASC")
             rows = cur.fetchall()
     return [_volume_campaign_row_to_dict(row) for row in rows]
+
+
+def claim_due_volume_campaigns(limit: int = 25, lease_seconds: int = 180) -> list[dict[str, Any]]:
+    """Same claim-and-lease pattern as claim_due_dca_plans, for active volume cycles."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM volume_campaigns
+                WHERE status = 'active' AND next_execution_at <= NOW()
+                ORDER BY next_execution_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+                """,
+                (limit,),
+            )
+            claimed_ids = [row["id"] for row in cur.fetchall()]
+            if not claimed_ids:
+                return []
+            cur.execute(
+                """
+                UPDATE volume_campaigns
+                SET next_execution_at = NOW() + (%s || ' seconds')::interval
+                WHERE id = ANY(%s)
+                RETURNING *
+                """,
+                (lease_seconds, claimed_ids),
+            )
+            rows = cur.fetchall()
+    return [_volume_campaign_row_to_dict(row) for row in rows]
+
+
+def claim_provisioning_volume_campaigns(limit: int = 10, lease_seconds: int = 120) -> list[dict[str, Any]]:
+    """Claim campaigns stuck in 'provisioning' so only one worker retries pool setup for each.
+
+    'provisioning' rows don't use next_execution_at for scheduling, so it's free to
+    reuse here purely as a claim lease (same reasoning as claim_due_dca_plans) —
+    without it, the row lock from FOR UPDATE releases as soon as this function's
+    transaction commits, before the actual (slow, on-chain) provisioning call runs,
+    so a second poll could grab the same campaign and double-create a pool.
+    """
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM volume_campaigns
+                WHERE status = 'provisioning'
+                  AND (next_execution_at IS NULL OR next_execution_at <= NOW())
+                ORDER BY created_at ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+                """,
+                (limit,),
+            )
+            claimed_ids = [row["id"] for row in cur.fetchall()]
+            if not claimed_ids:
+                return []
+            cur.execute(
+                """
+                UPDATE volume_campaigns
+                SET next_execution_at = NOW() + (%s || ' seconds')::interval
+                WHERE id = ANY(%s)
+                RETURNING *
+                """,
+                (lease_seconds, claimed_ids),
+            )
+            rows = cur.fetchall()
+    return [_volume_campaign_row_to_dict(row) for row in rows]
+
+
+def claim_due_easya_orders(limit: int = 25) -> list[dict[str, Any]]:
+    """Claim-and-lease active limit/threshold orders due for a fill check.
+
+    Limit orders have no check interval (order_type = 'limit' bypasses the
+    last_checked_at gate below) — they're checked every poll, same as before.
+    Threshold orders keep their existing check_interval_seconds semantics.
+    Bumping last_checked_at inside the same FOR UPDATE SKIP LOCKED transaction
+    doubles as both the due-check and the claim lease, so two scheduler
+    instances can never both pick up the same order in the same window.
+    """
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id FROM easya_orders
+                WHERE status = 'active'
+                  AND order_type IN ('limit', 'threshold')
+                  AND (
+                    order_type = 'limit'
+                    OR last_checked_at IS NULL
+                    OR last_checked_at <= NOW() - (check_interval_seconds || ' seconds')::interval
+                  )
+                ORDER BY last_checked_at ASC NULLS FIRST
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+                """,
+                (limit,),
+            )
+            claimed_ids = [row["id"] for row in cur.fetchall()]
+            if not claimed_ids:
+                return []
+            cur.execute(
+                "UPDATE easya_orders SET last_checked_at = NOW() WHERE id = ANY(%s) RETURNING *",
+                (claimed_ids,),
+            )
+            rows = cur.fetchall()
+    return [dict(row) for row in rows]
 
 
 def find_volume_campaign(campaign_id: str) -> Optional[dict[str, Any]]:

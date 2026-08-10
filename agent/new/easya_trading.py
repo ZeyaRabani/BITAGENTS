@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from db import get_conn, init_db
+from db import claim_due_easya_orders, get_conn, init_db
 from dca_agent import (
     HAS_SOLDERS,
     _build_and_execute_swap,
@@ -1096,32 +1096,15 @@ def _try_fill_limit_order(order: dict[str, Any]) -> None:
         )
 
 
-def _threshold_due_for_check(order: dict[str, Any]) -> bool:
-    last_checked = order.get("last_checked_at")
-    interval = int(order.get("check_interval_seconds") or THRESHOLD_CHECK_INTERVAL_SECONDS)
-    if not last_checked:
-        return True
-    if isinstance(last_checked, str):
-        try:
-            last_checked = datetime.fromisoformat(last_checked.replace("Z", "+00:00"))
-        except ValueError:
-            return True
-    if last_checked.tzinfo is None:
-        last_checked = last_checked.replace(tzinfo=timezone.utc)
-    elapsed = (datetime.now(timezone.utc) - last_checked).total_seconds()
-    return elapsed >= interval
-
-
 def _try_fill_threshold_order(order: dict[str, Any]) -> None:
+    # Due-check + last_checked_at claim lease now happen in claim_due_easya_orders()
+    # (SELECT ... FOR UPDATE SKIP LOCKED) before this is ever called — don't re-check
+    # here, since last_checked_at was just bumped to NOW() by the claim itself.
     if order.get("status") != "active" or order.get("order_type") != "threshold":
-        return
-    if not _threshold_due_for_check(order):
         return
 
     metrics = _token_metrics(order["output_token"])
     now = datetime.now(timezone.utc)
-    _update_order(order["id"], last_checked_at=now)
-
     should_stop, stop_reason = _stop_trigger_met(order, metrics)
     if should_stop:
         _update_order(
@@ -1198,19 +1181,7 @@ def _order_scheduler_loop() -> None:
     global _order_scheduler_running
     while _order_scheduler_running:
         try:
-            init_db()
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        SELECT * FROM easya_orders
-                        WHERE status = 'active' AND order_type IN ('limit', 'threshold')
-                        ORDER BY created_at ASC
-                        LIMIT 25
-                        """
-                    )
-                    rows = cur.fetchall()
-            for row in rows:
+            for row in claim_due_easya_orders():
                 parsed = _order_row(row)
                 if parsed.get("order_type") == "threshold":
                     _try_fill_threshold_order(parsed)

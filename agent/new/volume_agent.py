@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from db import (
+    claim_due_volume_campaigns,
+    claim_provisioning_volume_campaigns,
     find_volume_campaign,
     insert_volume_campaign,
     load_all_volume_campaigns,
@@ -720,27 +722,13 @@ def _run_volume_execution(campaign_id: str, *, dry_run: bool = False, force: boo
 def _scheduler_loop() -> None:
     while not _scheduler_stop.is_set():
         try:
-            for campaign in load_all_volume_campaigns():
-                status = campaign.get("status")
-                if status == "provisioning":
-                    print(
-                        f"\n  Pool provision retry: {campaign.get('name')} ({campaign.get('id')})"
-                    )
-                    result = provision_campaign_infrastructure(campaign["id"])
-                    if result.get("error"):
-                        print(f"  Provision failed: {result.get('error')}")
-                    continue
-                if status != "active":
-                    continue
-                next_at = campaign.get("next_execution_at")
-                if not next_at:
-                    continue
-                try:
-                    due = datetime.fromisoformat(next_at.replace("Z", "+00:00"))
-                except Exception:
-                    continue
-                if due > datetime.now(timezone.utc):
-                    continue
+            for campaign in claim_provisioning_volume_campaigns():
+                print(f"\n  Pool provision retry: {campaign.get('name')} ({campaign.get('id')})")
+                result = provision_campaign_infrastructure(campaign["id"])
+                if result.get("error"):
+                    print(f"  Provision failed: {result.get('error')}")
+
+            for campaign in claim_due_volume_campaigns():
                 print(f"\n  ⏰ Volume due: {campaign.get('name')} ({campaign.get('id')}) · user {str(campaign.get('user_wallet',''))[:8]}…")
                 result = _run_volume_execution(campaign["id"])
                 if result.get("error"):

@@ -496,6 +496,7 @@ def _ata_exists(wallet_pubkey: str, mint_address: str) -> bool:
 
 # ─── Plan persistence (Neon PostgreSQL) ───────────────────────────────────────
 
+from db import claim_due_dca_plans
 from db import find_plan as _find_plan_db
 from db import insert_plan as _insert_plan_db
 from db import load_all_plans
@@ -2092,24 +2093,14 @@ def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
     global _scheduler_running
     while _scheduler_running:
         try:
-            now = datetime.now(timezone.utc)
-            for plan in _load_plans():
-                if plan.get("status") != "active":
-                    continue
-                next_at = plan.get("next_execution_at")
-                if not next_at:
-                    continue
-                due = datetime.fromisoformat(next_at)
-                if due.tzinfo is None:
-                    due = due.replace(tzinfo=timezone.utc)
-                if due <= now:
-                    owner = (plan.get("user_wallet") or "unknown")[:8]
-                    print(f"\n  ⏰ DCA due: {plan['name']} ({plan['id']}) · user {owner}…")
-                    result = _run_plan_execution(plan["id"])
-                    if result.get("status") == "success":
-                        print(f"  ✅ Tx: {result.get('signature', 'ok')}")
-                    else:
-                        print(f"  ⚠️  {result.get('error', result)}")
+            for plan in claim_due_dca_plans():
+                owner = (plan.get("user_wallet") or "unknown")[:8]
+                print(f"\n  ⏰ DCA due: {plan['name']} ({plan['id']}) · user {owner}…")
+                result = _run_plan_execution(plan["id"])
+                if result.get("status") == "success":
+                    print(f"  ✅ Tx: {result.get('signature', 'ok')}")
+                else:
+                    print(f"  ⚠️  {result.get('error', result)}")
         except Exception as e:
             print(f"  ⚠️  Scheduler error: {e}")
         time.sleep(poll_seconds)
