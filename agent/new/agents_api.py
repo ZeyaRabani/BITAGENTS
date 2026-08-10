@@ -54,7 +54,7 @@ from hosted_llm import (
     HOSTED_OLLAMA_MODEL,
     llm_configured,
     llm_provider,
-    ping_llm,
+    ping_llm as _ping_llm,
     use_capix,
     use_hosted_ollama,
 )
@@ -329,7 +329,7 @@ def _startup() -> None:
 def health(ping_llm: bool = Query(False)) -> dict[str, Any]:
     wallet = get_wallet_pubkey()
     agent_info = get_agent_wallet_info()
-    llm_ping = ping_llm() if ping_llm and llm_configured() else None
+    llm_ping = _ping_llm() if ping_llm and llm_configured() else None
     return {
         "status": "ok",
         "agents": {
@@ -382,7 +382,7 @@ def health_llm() -> dict[str, Any]:
             "provider": llm_provider(),
             "error": "CAPIX_API_KEY, HOSTED_MODEL_API_KEY, or OPEN_ROUTER_API is not set",
         }
-    result = ping_llm()
+    result = _ping_llm()
     return {"provider": llm_provider(), **result}
 
 
