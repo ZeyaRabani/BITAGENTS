@@ -24,8 +24,9 @@ HOSTED_CONNECT_TIMEOUT_SECONDS = float(
     os.environ.get("HOSTED_OLLAMA_CONNECT_TIMEOUT", "15")
 )
 HOSTED_READ_TIMEOUT_SECONDS = float(os.environ.get("HOSTED_OLLAMA_READ_TIMEOUT", "120"))
-CAPIX_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("CAPIX_CONNECT_TIMEOUT", "15"))
-CAPIX_READ_TIMEOUT_SECONDS = float(os.environ.get("CAPIX_READ_TIMEOUT", "120"))
+CAPIX_CONNECT_TIMEOUT_SECONDS = float(os.environ.get("CAPIX_CONNECT_TIMEOUT", "10"))
+CAPIX_READ_TIMEOUT_SECONDS = float(os.environ.get("CAPIX_READ_TIMEOUT", "45"))
+CAPIX_TIMING_LOG = os.environ.get("CAPIX_TIMING_LOG", "1").strip().lower() not in ("0", "false", "")
 
 
 def _looks_like_model_tag(value: str) -> bool:
@@ -91,7 +92,7 @@ CAPIX_API_KEY = (
 CAPIX_API_URL = os.environ.get("CAPIX_API_URL", DEFAULT_CAPIX_API_URL).strip() or DEFAULT_CAPIX_API_URL
 CAPIX_MODEL = os.environ.get("CAPIX_MODEL", DEFAULT_CAPIX_MODEL).strip() or DEFAULT_CAPIX_MODEL
 CAPIX_PROVIDER = os.environ.get("CAPIX_PROVIDER", "DeepInfra").strip()
-CAPIX_MAX_RETRIES = int(os.environ.get("CAPIX_MAX_RETRIES", "5"))
+CAPIX_MAX_RETRIES = int(os.environ.get("CAPIX_MAX_RETRIES", "2"))
 
 # Legacy OpenRouter (optional fallback)
 OPEN_ROUTER_API = (
@@ -433,7 +434,9 @@ def call_capix(
 
     last_error = "Unknown CapIX error"
     max_attempts = max(CAPIX_MAX_RETRIES, 1)
+    call_started = time.time()
     for attempt in range(1, max_attempts + 1):
+        attempt_started = time.time()
         try:
             resp = requests.post(
                 CAPIX_API_URL,
@@ -484,8 +487,18 @@ def call_capix(
                 continue
             raise RuntimeError(last_error)
         message = choices[0].get("message") or {}
+        if CAPIX_TIMING_LOG:
+            attempt_ms = int((time.time() - attempt_started) * 1000)
+            total_ms = int((time.time() - call_started) * 1000)
+            print(
+                f"  ⏱ CapIX call ok: attempt {attempt}/{max_attempts}, "
+                f"attempt_ms={attempt_ms}, total_ms={total_ms}, model={resolved_model}"
+            )
         return {"message": _normalize_assistant_message(message)}
 
+    if CAPIX_TIMING_LOG:
+        total_ms = int((time.time() - call_started) * 1000)
+        print(f"  ⏱ CapIX call FAILED after {max_attempts} attempt(s), total_ms={total_ms}: {last_error}")
     raise RuntimeError(f"CapIX API error for model {resolved_model}: {last_error}")
 
 
