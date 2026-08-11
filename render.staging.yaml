@@ -11,8 +11,12 @@
 #   2. Fill in the "sync: false" env vars below (see notes per var)
 #   3. Deploy — Render gives you a URL like https://bitagents-agents-staging.onrender.com
 #
-# IMPORTANT: keep numInstances at 1 — same reason as production (in-process
-# schedulers + in-memory cache assume a single instance).
+# numInstances: as of the scheduler + cache_store fixes on this branch, running
+# more than 1 instance is now SAFE (schedulers use SELECT...FOR UPDATE SKIP
+# LOCKED so two instances can't double-fire the same job). It's kept at 1 here
+# as the default until it's actually been tested live with real traffic — to
+# try 2+, also set CACHE_BACKEND=postgres below (in-memory cache is still
+# per-instance and just gets less effective, not incorrect, without it).
 
 services:
   - type: web
@@ -45,6 +49,8 @@ services:
         value: "1"
       - key: TOOL_ROUND_TIMING_LOG
         value: "1"
+      - key: CACHE_BACKEND
+        value: memory # set to "postgres" before raising numInstances above 1
       - key: AGENTS_INTERNAL_API_KEY
         sync: false # must match the staging frontend's AGENTS_INTERNAL_API_KEY
       - key: SOLANA_CLUSTER
