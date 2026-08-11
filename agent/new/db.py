@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import psycopg2
+import psycopg2.pool
 from psycopg2.extras import Json, RealDictCursor
 
 AGENT_DIR = Path(__file__).resolve().parent
@@ -341,22 +343,87 @@ def _require_db() -> None:
         )
 
 
+# minconn connections are opened eagerly the moment the pool is first created
+# (not at import time — the pool itself is created lazily on first get_conn()),
+# so this is also the steady-state number of open connections to Neon per
+# instance. Kept modest by default since this multiplies by instance count
+# once running more than one instance — raise it based on the actual Neon
+# plan's connection limit, not guesswork.
+DB_POOL_MAX_CONNECTIONS = int(os.environ.get("DB_POOL_MAX_CONNECTIONS", "10"))
+# psycopg2's pool only keeps up to `minconn` idle connections around on putconn() —
+# anything returned above that is closed and reopened next time, not reused. So
+# minconn needs to equal maxconn for this to behave like an actual reusable pool,
+# not a size range (unlike most other connection pool implementations).
+DB_POOL_MIN_CONNECTIONS = int(os.environ.get("DB_POOL_MIN_CONNECTIONS", str(DB_POOL_MAX_CONNECTIONS)))
+DB_POOL_CHECKOUT_TIMEOUT_SECONDS = float(os.environ.get("DB_POOL_CHECKOUT_TIMEOUT_SECONDS", "5"))
+
+_pool: Optional["psycopg2.pool.ThreadedConnectionPool"] = None
+_pool_lock = threading.Lock()
+
+
+def _get_pool() -> "psycopg2.pool.ThreadedConnectionPool":
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                _pool = psycopg2.pool.ThreadedConnectionPool(
+                    DB_POOL_MIN_CONNECTIONS,
+                    DB_POOL_MAX_CONNECTIONS,
+                    get_database_url(),
+                    cursor_factory=RealDictCursor,
+                    connect_timeout=15,
+                )
+    return _pool
+
+
+def _checkout_conn(pool: "psycopg2.pool.ThreadedConnectionPool"):
+    """pool.getconn() raises PoolError immediately when exhausted instead of
+    waiting — under a real traffic burst that turns transient saturation into
+    hard request failures. Retry briefly instead; connections free up in
+    milliseconds once in-flight queries finish, so a short bounded wait
+    smooths over bursts instead of failing the instant every slot is busy.
+    """
+    deadline = time.monotonic() + DB_POOL_CHECKOUT_TIMEOUT_SECONDS
+    delay = 0.05
+    while True:
+        try:
+            return pool.getconn()
+        except psycopg2.pool.PoolError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.5)
+
+
 @contextmanager
 def get_conn():
+    """A pooled connection instead of opening a fresh TCP+TLS connection per call.
+
+    Previously every get_conn() call did a full psycopg2.connect() (new TCP
+    handshake + TLS + auth against Neon) and closed it on exit — at high
+    request volume this adds real per-call latency and risks hitting Neon's
+    connection limit as traffic grows. A pool reuses live connections instead.
+    Broken connections (dead socket, etc.) are discarded rather than returned
+    to the pool, so one bad connection doesn't poison future checkouts.
+    """
     _require_db()
-    conn = psycopg2.connect(
-        get_database_url(),
-        cursor_factory=RealDictCursor,
-        connect_timeout=15,
-    )
+    pool = _get_pool()
+    conn = _checkout_conn(pool)
+    broken = False
     try:
         yield conn
         conn.commit()
+    except psycopg2.OperationalError:
+        broken = True
+        raise
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except psycopg2.OperationalError:
+            broken = True
         raise
     finally:
-        conn.close()
+        pool.putconn(conn, close=broken)
 
 
 def _iso(value: Any) -> Any:
