@@ -18,6 +18,7 @@ from deposit_ledger import (
     _parse_verified_user_deposits,
     _user_in_transaction,
     _valid_signature,
+    user_token_withdraw_lock,
 )
 from dca_agent import SOLANA_CLUSTER, SOLANA_RPC, resolve_token, sol_rpc
 
@@ -437,15 +438,14 @@ def withdraw_easya_tokens(user_wallet: str, token: str, amount: float) -> dict[s
     if amount <= 0:
         return {"error": "Withdraw amount must be greater than zero."}
 
-    rows = _easya_rows(user_wallet)
-    ledger = _ledger_totals(user_wallet, tok["symbol"], rows)
-    reserved = _reserved_for_orders(user_wallet, tok["symbol"])
-    withdrawable = round(
-        max(ledger["deposited"] + ledger["acquired"] - ledger["withdrawn"] - reserved, 0.0),
-        9,
-    )
-
-    with _ledger_lock:
+    with user_token_withdraw_lock(user_wallet, tok["symbol"]):
+        rows = _easya_rows(user_wallet)
+        ledger = _ledger_totals(user_wallet, tok["symbol"], rows)
+        reserved = _reserved_for_orders(user_wallet, tok["symbol"])
+        withdrawable = round(
+            max(ledger["deposited"] + ledger["acquired"] - ledger["withdrawn"] - reserved, 0.0),
+            9,
+        )
         if withdrawable + 1e-12 < amount:
             return {
                 "error": (

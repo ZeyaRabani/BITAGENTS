@@ -7,16 +7,19 @@ so DCA plans cannot spend more than each user has deposited.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from db import (
     deposit_exists,
     find_deposit_by_signature,
+    get_conn,
     insert_ledger_entry,
     load_all_ledger_entries,
     load_all_plans,
@@ -31,7 +34,40 @@ from dca_agent import (
     sol_rpc,
 )
 
+# In-process only — harmless as a fast local pre-check, but NOT what protects
+# withdrawals from a cross-instance race. See user_token_withdraw_lock below.
 _ledger_lock = threading.Lock()
+
+
+def _advisory_lock_key(user_wallet: str, token: str) -> int:
+    """Deterministic signed-64-bit key for pg_advisory_xact_lock, scoped to one user+token."""
+    digest = hashlib.sha256(f"withdraw:{user_wallet}:{token}".encode()).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+@contextmanager
+def user_token_withdraw_lock(user_wallet: str, token: str):
+    """Serialize withdrawals for one (user, token) pair across every process.
+
+    threading.Lock only protects one Python process — under more than one
+    instance, two withdrawal requests for the same user+token could each pass
+    their own balance check before either records anything, and both send
+    funds. pg_advisory_xact_lock is visible to every connection to the same
+    Postgres database regardless of which instance holds it, and releases
+    automatically when this transaction ends (commit, rollback, or the
+    connection dying) — so a crashed request can't leave it stuck locked.
+
+    Held for the whole withdrawal, including the on-chain transfer — that's
+    deliberate: the lock has to cover check-then-send-then-record as one
+    unit, or the same race just reopens between the check and the send.
+    Only serializes this one user's own withdrawals for this one token;
+    other users and other tokens proceed independently.
+    """
+    key = _advisory_lock_key(user_wallet, token)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+        yield
 
 # Platform fee on each successful scheduled DCA execution (input token).
 DCA_PLATFORM_FEE_RATE = 0.005  # 0.5%
@@ -751,7 +787,7 @@ def withdraw_user_tokens(user_wallet: str, token: str, amount: float) -> dict[st
     if amount <= 0:
         return {"error": "Withdraw amount must be greater than zero."}
 
-    with _ledger_lock:
+    with user_token_withdraw_lock(user_wallet, tok["symbol"]):
         withdrawable = get_user_token_withdrawable(user_wallet, tok["symbol"])
         if withdrawable + 1e-12 < amount:
             return {

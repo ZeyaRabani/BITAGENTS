@@ -504,7 +504,7 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
 
 
 def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[str, Any]:
-    from deposit_ledger import _ledger_lock
+    from deposit_ledger import user_token_withdraw_lock
     from dca_agent import send_tokens_to_user
 
     user_wallet = user_wallet.strip()
@@ -515,12 +515,13 @@ def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[
     if amount <= 0:
         return {"error": "Withdraw amount must be greater than zero."}
 
-    rows = _volume_rows(user_wallet)
-    ledger = _ledger_totals(user_wallet, tok["symbol"], rows)
-    reserved = _reserved_for_campaigns(user_wallet, tok["symbol"])
-    withdrawable = round(max(ledger["deposited"] - ledger["spent_ledger"] - ledger["withdrawn"] - reserved, 0.0), 9)
-
-    with _ledger_lock:
+    with user_token_withdraw_lock(user_wallet, tok["symbol"]):
+        rows = _volume_rows(user_wallet)
+        ledger = _ledger_totals(user_wallet, tok["symbol"], rows)
+        reserved = _reserved_for_campaigns(user_wallet, tok["symbol"])
+        withdrawable = round(
+            max(ledger["deposited"] - ledger["spent_ledger"] - ledger["withdrawn"] - reserved, 0.0), 9
+        )
         if withdrawable + 1e-12 < amount:
             return {
                 "error": f"Insufficient withdrawable {tok['symbol']}. Withdrawable: {withdrawable}, requested: {amount}.",
