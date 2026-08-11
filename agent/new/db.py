@@ -245,6 +245,14 @@ SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_easya_orders_due_check ON easya_orders (last_checked_at)
         WHERE status = 'active' AND order_type IN ('limit', 'threshold')
     """,
+    """
+    CREATE TABLE IF NOT EXISTS cache_kv (
+        key         TEXT PRIMARY KEY,
+        value       JSONB NOT NULL,
+        expires_at  TIMESTAMPTZ NOT NULL
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_cache_kv_expires ON cache_kv (expires_at)",
 ]
 
 MIGRATION_STATEMENTS = [
