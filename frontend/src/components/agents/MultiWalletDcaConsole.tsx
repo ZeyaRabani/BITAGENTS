@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Panel } from "@/components/AppShell";
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 
@@ -31,10 +33,16 @@ function shorten(address: string) {
 
 export function MultiWalletDcaConsole() {
   const { wallet, token, busy, error, isAuthenticated } = useDcaWalletAuth();
+  const { connection } = useConnection();
+  const { publicKey, sendTransaction } = useWallet();
   const [balance, setBalance] = useState<BalanceResponse | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+
+  const [depositAmount, setDepositAmount] = useState("0.01");
+  const [depositing, setDepositing] = useState(false);
+  const [depositMsg, setDepositMsg] = useState<string | null>(null);
 
   const [outputToken, setOutputToken] = useState("USDC");
   const [amountPerBuy, setAmountPerBuy] = useState("0.001");
@@ -70,6 +78,46 @@ export function MultiWalletDcaConsole() {
   useEffect(() => {
     load();
   }, [load, refreshTick]);
+
+  const deposit = async () => {
+    if (!publicKey || !balance?.deposit_address) return;
+    const parsed = Number(depositAmount);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setDepositMsg("Enter a valid amount.");
+      return;
+    }
+    setDepositing(true);
+    setDepositMsg(null);
+    try {
+      const destination = new PublicKey(balance.deposit_address);
+      const tx = new Transaction();
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: destination,
+          lamports: Math.round(parsed * LAMPORTS_PER_SOL),
+        })
+      );
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.feePayer = publicKey;
+
+      setDepositMsg("Approve in wallet…");
+      const signature = await sendTransaction(tx, connection);
+      setDepositMsg("Confirming on-chain…");
+      await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
+
+      // No separate "verify deposit" step here, unlike the pooled DCA flow --
+      // this address belongs only to this user, so the on-chain balance IS
+      // the balance. Just refresh and read it straight from the chain.
+      setDepositMsg(`Deposited. Signature: ${signature}`);
+      setRefreshTick((n) => n + 1);
+    } catch (err) {
+      setDepositMsg(err instanceof Error ? `Error: ${err.message}` : "Deposit failed.");
+    } finally {
+      setDepositing(false);
+    }
+  };
 
   const createPlan = async () => {
     if (!token) return;
@@ -188,6 +236,28 @@ export function MultiWalletDcaConsole() {
                   <div className="font-mono text-sm">{b.balance}</div>
                 </div>
               ))}
+
+              <div className="border-t border-grid pt-3">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
+                  Deposit SOL (sends directly to your address above, from this wallet)
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={depositAmount}
+                    onChange={(e) => setDepositAmount(e.target.value)}
+                    className="flex-1 rounded border border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+                  />
+                  <button
+                    type="button"
+                    disabled={depositing}
+                    onClick={deposit}
+                    className="rounded border border-grid px-3 py-1 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
+                  >
+                    {depositing ? "…" : "Deposit"}
+                  </button>
+                </div>
+                {depositMsg && <div className="mt-2 text-xs text-muted-foreground break-all">{depositMsg}</div>}
+              </div>
             </>
           )}
 
