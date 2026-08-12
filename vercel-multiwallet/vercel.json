@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "agent/new/**"
+    },
+    "api/cron/tick.py": {
+      "includeFiles": "agent/new/**"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/cron/tick", "destination": "/api/cron/tick" },
+    { "source": "/api/(.*)", "destination": "/api/index.py" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/tick",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
