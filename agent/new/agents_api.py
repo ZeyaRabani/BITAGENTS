@@ -79,6 +79,7 @@ from dca_agent import (
     update_dca_plan_status,
 )
 import agent_wallets
+import dca_multiwallet
 from easya_screener_client import CACHE_TTL_SECONDS, screener_configured
 from easya_trading import (
     EASYA_ORDER_POLL_SECONDS,
@@ -248,6 +249,18 @@ class DepositVerifyRequest(BaseModel):
 
 
 class WithdrawRequest(BaseModel):
+    token: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+
+
+class MultiWalletCreatePlanRequest(BaseModel):
+    output_token: str = Field(min_length=1)
+    amount_per_buy: float = Field(gt=0)
+    interval: str = Field(min_length=1)
+    max_executions: int = Field(gt=0)
+
+
+class MultiWalletWithdrawRequest(BaseModel):
     token: str = Field(min_length=1)
     amount: float = Field(gt=0)
 
@@ -518,6 +531,50 @@ def multi_wallet_demo_address(
         "is_active": agent_wallets.is_wallet_active(balance_lamports),
         "max_spendable_lamports": agent_wallets.max_spendable_lamports(balance_lamports),
     }
+
+
+@app.get("/multi-wallet/dca/balance")
+def multi_wallet_dca_balance(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Real on-chain balance of this user's own derived DCA wallet -- not a
+    ledger sum. Runs alongside /wallet/balance (the pooled-wallet version),
+    does not touch it."""
+    return dca_multiwallet.get_balances(auth_wallet)
+
+
+@app.post("/multi-wallet/dca/plan")
+def multi_wallet_dca_create_plan(
+    body: MultiWalletCreatePlanRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Create a real DCA plan executed from this user's own derived wallet.
+    No LLM in this path -- plain validated parameters in, a real plan or a
+    real error out."""
+    result = dca_multiwallet.create_plan(
+        auth_wallet, body.output_token, body.amount_per_buy, body.interval, body.max_executions
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/multi-wallet/dca/plans")
+def multi_wallet_dca_plans(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return list_dca_plans(user_wallet=auth_wallet)
+
+
+@app.post("/multi-wallet/dca/withdraw")
+def multi_wallet_dca_withdraw(
+    body: MultiWalletWithdrawRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = dca_multiwallet.withdraw(auth_wallet, body.token.strip(), float(body.amount))
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @app.get("/wallet/balance")

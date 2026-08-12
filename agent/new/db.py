@@ -85,7 +85,8 @@ SCHEMA_STATEMENTS = [
         status              VARCHAR(20) NOT NULL DEFAULT 'active',
         created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         next_execution_at   TIMESTAMPTZ,
-        executions          JSONB NOT NULL DEFAULT '[]'::jsonb
+        executions          JSONB NOT NULL DEFAULT '[]'::jsonb,
+        wallet_mode         VARCHAR(16) NOT NULL DEFAULT 'pooled'
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_dca_plans_user_wallet ON dca_plans (user_wallet)",
@@ -265,6 +266,7 @@ SCHEMA_STATEMENTS = [
 ]
 
 MIGRATION_STATEMENTS = [
+    "ALTER TABLE dca_plans ADD COLUMN IF NOT EXISTS wallet_mode VARCHAR(16) NOT NULL DEFAULT 'pooled'",
     "ALTER TABLE user_ledger ALTER COLUMN reference_id TYPE VARCHAR(128)",
     "ALTER TABLE user_ledger ALTER COLUMN signature TYPE VARCHAR(128)",
     "ALTER TABLE easya_orders ALTER COLUMN order_type TYPE VARCHAR(12)",
@@ -465,6 +467,7 @@ def _plan_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
         "created_at": _iso(row.get("created_at")),
         "next_execution_at": _iso(row.get("next_execution_at")),
         "executions": executions,
+        "wallet_mode": row.get("wallet_mode") or "pooled",
     }
 
 
@@ -622,19 +625,20 @@ def insert_plan(plan: dict[str, Any]) -> dict[str, Any]:
                     input_mint, output_mint, amount_per_buy, interval_label,
                     interval_minutes, total_budget, spent_so_far, max_executions,
                     executions_count, slippage_bps, status, created_at,
-                    next_execution_at, executions
+                    next_execution_at, executions, wallet_mode
                 ) VALUES (
                     %(id)s, %(user_wallet)s, %(name)s, %(input_token)s, %(output_token)s,
                     %(input_mint)s, %(output_mint)s, %(amount_per_buy)s, %(interval)s,
                     %(interval_minutes)s, %(total_budget)s, %(spent_so_far)s, %(max_executions)s,
                     %(executions_count)s, %(slippage_bps)s, %(status)s, %(created_at)s,
-                    %(next_execution_at)s, %(executions)s
+                    %(next_execution_at)s, %(executions)s, %(wallet_mode)s
                 )
                 """,
                 {
                     **plan,
                     "interval": plan.get("interval"),
                     "executions": Json(plan.get("executions") or []),
+                    "wallet_mode": plan.get("wallet_mode") or "pooled",
                 },
             )
     return plan

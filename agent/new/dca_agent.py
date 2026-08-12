@@ -2095,8 +2095,15 @@ def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
         try:
             for plan in claim_due_dca_plans():
                 owner = (plan.get("user_wallet") or "unknown")[:8]
-                print(f"\n  ⏰ DCA due: {plan['name']} ({plan['id']}) · user {owner}…")
-                result = _run_plan_execution(plan["id"])
+                mode = plan.get("wallet_mode") or "pooled"
+                print(f"\n  ⏰ DCA due: {plan['name']} ({plan['id']}) · user {owner}… [{mode}]")
+                if mode == "multiwallet":
+                    # Deferred import: dca_multiwallet imports from this module,
+                    # so this must not be a top-level import (circular).
+                    import dca_multiwallet
+                    result = dca_multiwallet.execute_plan_now(plan["id"])
+                else:
+                    result = _run_plan_execution(plan["id"])
                 if result.get("status") == "success":
                     print(f"  ✅ Tx: {result.get('signature', 'ok')}")
                 else:
