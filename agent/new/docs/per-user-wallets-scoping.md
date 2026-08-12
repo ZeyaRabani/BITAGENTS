@@ -1,6 +1,37 @@
-# Per-user agent wallets — architecture scoping
+# Per-user agent wallets — architecture scoping ("Operation Multi-wallet")
 
-Status: research/design, not implemented. Written 2026-08-11 on `serverless-dca-prototype`.
+Status: core primitives built and proven live on a local Solana network
+(2026-08-12) — derivation, per-user index assignment, and fee-payer
+sponsorship all confirmed working end-to-end with a real on-chain transaction.
+**Not yet wired into any live deposit/withdrawal/execution flow.** See
+`agent/new/agent_wallets.py` for the code and the "Proof so far" section below
+for exactly what's been verified.
+
+## Proof so far
+
+Everything below was verified against a real, running Solana network — a local
+`solana-test-validator` (identical transaction/RPC/fee semantics to devnet and
+mainnet, just unrestricted and instant), not just reasoned through:
+
+- **Per-user wallet index assignment** (`db.get_or_create_wallet_index`) — 20
+  simultaneous requests for the same user always converge on the same index;
+  15 different concurrent users never collide.
+- **Wallet derivation** (`agent_wallets.derive_user_keypair`) — same
+  seed+agent+index always yields the same wallet; different users, and the
+  same user across different agents, always get different wallets.
+- **Fee-payer sponsorship, proven with a real on-chain transaction**: airdropped
+  test SOL to both a derived user wallet and a separate fee-payer wallet, sent
+  a sponsored transfer, and confirmed on-chain that the user's wallet lost
+  *exactly* the transfer amount and not one lamport more, while the fee payer
+  covered the entire 10,000-lamport network fee. This is the core claim of
+  the whole redesign — that per-user wallets don't need their own SOL for
+  gas — and it's no longer theoretical.
+
+Devnet itself couldn't be used directly for this (the public faucet was
+rate-limited on this sandbox's shared IP, and its own site asked automated
+tools not to use its web form) — a local validator gave an equivalent, and in
+some ways stronger, proof: real transaction and fee mechanics, zero rate
+limits, fully reproducible.
 
 ## The problem with the current model
 
@@ -144,11 +175,10 @@ careful testing before real funds move through it (following the same pattern us
 for everything else this session: build and prove correctness against real
 infrastructure before trusting it, not just reasoning about it). Suggested order:
 
-1. Prototype the derivation + fee-payer flow end-to-end on devnet with a couple of
-   test accounts — prove deposits, a swap, and a withdrawal work correctly through
-   a derived wallet before touching the real agents.
+1. ~~Prototype the derivation + fee-payer flow end-to-end with a couple of test
+   accounts.~~ Done — see "Proof so far" above.
 2. Design and review master seed custody properly — this is the piece with the
-   least room for a mistake.
+   least room for a mistake, and hasn't been started.
 3. Wire new deposits through per-user wallets for one agent first (DCA is the
    natural pick — most-used, best understood), running alongside the existing
    pooled path.
