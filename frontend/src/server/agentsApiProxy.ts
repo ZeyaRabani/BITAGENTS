@@ -245,6 +245,42 @@ export async function proxyMultiWalletDemoAddress(authToken: string): Promise<Re
   });
 }
 
+export async function proxyMultiWalletDcaBalance(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/multi-wallet/dca/balance`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyMultiWalletDcaCreatePlan(
+  body: { output_token: string; amount_per_buy: number; interval: string; max_executions: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/multi-wallet/dca/plan`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyMultiWalletDcaPlans(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/multi-wallet/dca/plans`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyMultiWalletDcaWithdraw(
+  body: { token: string; amount: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/multi-wallet/dca/withdraw`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function proxyDcaResolveToken(query: string): Promise<Response> {
   const params = new URLSearchParams({ query });
   return fetch(`${getAgentsBaseUrl()}/tokens/resolve?${params}`, {
