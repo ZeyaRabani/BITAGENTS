@@ -3058,9 +3058,27 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
         return None
 
     mint_match = re.search(r"[1-9A-HJ-NP-Za-km-z]{32,44}", text)
-    if not mint_match:
-        return None
-    output_token = mint_match.group(0)
+    if mint_match:
+        output_token = mint_match.group(0)
+    else:
+        # No raw mint address in the message -- by far the more common case is
+        # a ticker symbol ("...into BITAGENTS every minute"), which the UI's own
+        # deposit form explicitly supports ("ANY SPL TOKEN - SYMBOL OR MINT
+        # ADDRESS"). Missing this meant every symbol-phrased request silently
+        # fell through to the free-text LLM loop instead of this deterministic,
+        # guaranteed-to-actually-execute path -- confirmed live: the model
+        # described a plan as created and running without ever calling the
+        # tool that would make that real (no DB row, no on-chain transaction).
+        symbol_match = re.search(r"\b(?:into|of)\s+([a-zA-Z][a-zA-Z0-9]{1,14})\b", text)
+        if not symbol_match:
+            return None
+        candidate = symbol_match.group(1)
+        if candidate.upper() == "SOL":
+            return None
+        resolved = resolve_token(candidate)
+        if "error" in resolved:
+            return None
+        output_token = candidate
 
     amount_match = re.search(r"\b(\d+(?:\.\d+)?)\s*sol\b", lower)
     if not amount_match:
@@ -3070,12 +3088,13 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
     amount_per_buy = float(amount_match.group(1))
 
     interval_match = re.search(
-        r"every\s+(\d+)\s*(second|seconds|sec|secs|s|minute|minutes|min|mins|m|hour|hours|h|day|days|d)\b",
+        r"every\s+(\d+)?\s*(second|seconds|sec|secs|s|minute|minutes|min|mins|m|hour|hours|h|day|days|d)\b",
         lower,
     )
     if not interval_match:
         return None
     count, unit = interval_match.groups()
+    count = count or "1"  # "every minute" means "every 1 minute", not a missing count
     unit = unit.rstrip(".")
     unit_aliases = {
         "sec": "seconds",
