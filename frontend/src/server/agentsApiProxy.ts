@@ -238,6 +238,13 @@ export async function proxyDcaWalletAgent(): Promise<Response> {
   });
 }
 
+export async function proxyMultiWalletDemoAddress(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/multi-wallet-demo/address`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyDcaResolveToken(query: string): Promise<Response> {
   const params = new URLSearchParams({ query });
   return fetch(`${getAgentsBaseUrl()}/tokens/resolve?${params}`, {

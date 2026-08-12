@@ -9,20 +9,22 @@ flow yet — see agent/new/docs/per-user-wallets-scoping.md for the plan.
 No private key is ever stored per user: given the master seed and a user's
 assigned index (see db.get_or_create_wallet_index), the keypair is always
 re-derivable on demand and never needs to be persisted.
+
+No fee-payer wallet: each user's derived wallet pays its own network fees
+out of its own SOL balance, same as any ordinary Solana wallet. That means a
+wallet needs some SOL in it before it can do anything — a hard requirement,
+communicated to the user up front, not something the platform silently
+covers for them. See MIN_SOL_TO_ACTIVATE_LAMPORTS below.
 """
 
 from __future__ import annotations
 
 import base64
 import os
-from typing import Any, Optional
+from typing import Optional
 
 try:
-    from solders.hash import Hash
     from solders.keypair import Keypair
-    from solders.message import MessageV0
-    from solders.pubkey import Pubkey
-    from solders.transaction import VersionedTransaction
 
     HAS_SOLDERS = True
 except ImportError:
@@ -38,6 +40,18 @@ _SOLANA_SLIP44_COIN_TYPE = 501
 # One slot per agent under the same master seed, so a bug touching one agent's
 # wallet handling can't reach another agent's funds for the same user.
 _AGENT_SLOTS = {"dca": 0, "volume": 1, "easya": 2}
+
+# What we tell the user they need to deposit before their wallet can do
+# anything. A single signature costs 5,000 lamports on Solana today -- this
+# is deliberately higher than that bare minimum so a wallet can cover a few
+# real operations (not just exactly one) before running dry. Every action
+# that spends from a user's wallet must always leave at least one fee's
+# worth of SOL behind for whichever transaction spends it -- "withdraw all"
+# means "all except the fee for this transaction," never literally zero.
+MIN_SOL_TO_ACTIVATE_LAMPORTS = int(
+    os.environ.get("MULTI_WALLET_MIN_SOL_LAMPORTS", "1000000")  # 0.001 SOL
+)
+SOLANA_BASE_FEE_LAMPORTS = 5000
 
 
 def _load_seed_from_env(env_var: str) -> Optional[bytes]:
@@ -95,42 +109,14 @@ def get_user_wallet_pubkey(agent: str, user_wallet: str) -> str:
     return str(get_user_wallet_keypair(agent, user_wallet).pubkey())
 
 
-def get_fee_payer_keypair() -> Optional["Keypair"]:
-    """One small, separate operational wallet that pays network fees for
-    every sponsored transaction. It never holds user funds and never needs
-    to scale with user count -- see per-user-wallets-scoping.md."""
-    if not HAS_SOLDERS:
-        return None
-    raw = os.environ.get("MULTI_WALLET_FEE_PAYER_PRIVATE_KEY", "").strip()
-    if not raw:
-        return None
-    import base58
-
-    try:
-        if raw.startswith("["):
-            import json
-
-            return Keypair.from_bytes(bytes(json.loads(raw)))
-        return Keypair.from_bytes(base58.b58decode(raw))
-    except Exception:
-        return None
+def max_spendable_lamports(current_balance_lamports: int) -> int:
+    """How much of a wallet's SOL balance can actually be sent/withdrawn right
+    now, reserving enough for this transaction's own fee. Applies whether
+    the wallet holds SOL as the asset being moved (spending SOL itself) or
+    just needs SOL to cover the fee for moving some other token."""
+    return max(0, current_balance_lamports - SOLANA_BASE_FEE_LAMPORTS)
 
 
-def build_sponsored_transaction(
-    payer_keypair: "Keypair",
-    authority_keypair: "Keypair",
-    instructions: list,
-    blockhash: "Hash",
-) -> "VersionedTransaction":
-    """Build and sign a transaction where `payer_keypair` covers the network
-    fee but `authority_keypair` is the one authorizing the actual instructions
-    (e.g. the token transfer). The two are different accounts on purpose --
-    that's the entire point of fee sponsorship. Order matters: solders expects
-    signers in the same order the compiled message lists required signers,
-    which is payer first (it's always account index 0 in a fee-payer message).
-    """
-    payer_pubkey = payer_keypair.pubkey()
-    msg = MessageV0.try_compile(payer_pubkey, instructions, [], blockhash)
-    if authority_keypair.pubkey() == payer_pubkey:
-        return VersionedTransaction(msg, [payer_keypair])
-    return VersionedTransaction(msg, [payer_keypair, authority_keypair])
+def is_wallet_active(balance_lamports: int) -> bool:
+    """Whether this wallet has enough SOL to do anything at all yet."""
+    return balance_lamports >= MIN_SOL_TO_ACTIVATE_LAMPORTS

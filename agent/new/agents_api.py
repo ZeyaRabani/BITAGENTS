@@ -72,11 +72,13 @@ from dca_agent import (
     list_dca_plans,
     resolve_token,
     run_agent_with_actions,
+    sol_rpc,
     start_metrics_scheduler,
     start_scheduler,
     update_dca_plan,
     update_dca_plan_status,
 )
+import agent_wallets
 from easya_screener_client import CACHE_TTL_SECONDS, screener_configured
 from easya_trading import (
     EASYA_ORDER_POLL_SECONDS,
@@ -482,6 +484,40 @@ def resolve_token_info(
 @app.get("/wallet/agent")
 def wallet_agent(_: None = Depends(require_internal_key)) -> dict[str, Any]:
     return get_agent_wallet_info()
+
+
+@app.get("/multi-wallet-demo/address")
+def multi_wallet_demo_address(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Operation Multi-wallet demo: each signed-in user gets their OWN derived
+    deposit address for the DCA agent, instead of the one shared agent wallet
+    everyone deposits into today. Not wired into the live deposit flow.
+    """
+    if not agent_wallets.multi_wallet_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="MULTI_WALLET_MASTER_SEED is not configured on this server.",
+        )
+    address = agent_wallets.get_user_wallet_pubkey("dca", auth_wallet)
+    balance_lamports = 0
+    try:
+        balance_lamports = int(sol_rpc("getBalance", [address, {"commitment": "confirmed"}])["value"])
+    except Exception:
+        pass
+    return {
+        "user_wallet": auth_wallet,
+        "your_deposit_address": address,
+        "cluster": SOLANA_CLUSTER,
+        "balance_lamports": balance_lamports,
+        "balance_sol": round(balance_lamports / 1_000_000_000, 9),
+        "min_sol_to_activate_lamports": agent_wallets.MIN_SOL_TO_ACTIVATE_LAMPORTS,
+        "min_sol_to_activate_sol": round(
+            agent_wallets.MIN_SOL_TO_ACTIVATE_LAMPORTS / 1_000_000_000, 9
+        ),
+        "is_active": agent_wallets.is_wallet_active(balance_lamports),
+        "max_spendable_lamports": agent_wallets.max_spendable_lamports(balance_lamports),
+    }
 
 
 @app.get("/wallet/balance")
