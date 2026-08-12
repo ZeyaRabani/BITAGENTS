@@ -255,6 +255,13 @@ SCHEMA_STATEMENTS = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_cache_kv_expires ON cache_kv (expires_at)",
+    """
+    CREATE TABLE IF NOT EXISTS agent_wallet_index (
+        user_wallet   VARCHAR(64) PRIMARY KEY,
+        wallet_index  SERIAL NOT NULL,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 MIGRATION_STATEMENTS = [
@@ -1377,3 +1384,48 @@ def update_volume_campaign(campaign_id: str, updates: dict[str, Any]) -> Optiona
                 },
             )
     return find_volume_campaign(campaign_id)
+
+
+def get_or_create_wallet_index(user_wallet: str) -> int:
+    """Return this user's per-user agent-wallet derivation index, assigning one
+    on first use. Safe under concurrency: the index comes from a Postgres SERIAL
+    (atomic fetch-and-increment, no locking needed) and the insert uses
+    ON CONFLICT DO NOTHING, so two simultaneous first-time calls for the same
+    user can never end up with two different indices, and two different users
+    can never end up with the same one.
+    """
+    init_db()
+    user_wallet = user_wallet.strip()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT wallet_index FROM agent_wallet_index WHERE user_wallet = %s",
+                (user_wallet,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["wallet_index"])
+            cur.execute(
+                """
+                INSERT INTO agent_wallet_index (user_wallet)
+                VALUES (%s)
+                ON CONFLICT (user_wallet) DO NOTHING
+                RETURNING wallet_index
+                """,
+                (user_wallet,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["wallet_index"])
+    # Someone else's insert won the race between our SELECT and INSERT above --
+    # re-select outside that transaction to read the winning row.
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT wallet_index FROM agent_wallet_index WHERE user_wallet = %s",
+                (user_wallet,),
+            )
+            row = cur.fetchone()
+    if not row:
+        raise RuntimeError(f"Failed to assign a wallet index for {user_wallet}")
+    return int(row["wallet_index"])
