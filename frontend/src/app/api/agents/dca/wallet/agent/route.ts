@@ -1,9 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { proxyDcaWalletAgent } from "@/server/agentsApiProxy";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const res = await proxyDcaWalletAgent();
+    const authHeader = request.headers.get("authorization");
+    const authToken = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length).trim() : undefined;
+    const res = await proxyDcaWalletAgent(authToken);
     const data = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch {

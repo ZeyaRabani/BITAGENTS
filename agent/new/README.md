@@ -1,6 +1,17 @@
-# Volume Agent — handoff notes (`claude-branch`)
+# Handoff notes — `serverless-dca-prototype`
 
-For Harshal. This branch = `origin/Volume-bot` + your merged fixes (already in, see "Layer 1" below) + several layers of fixes found by actually running real campaigns end-to-end against live BITAGENTS on mainnet. Nothing here duplicates your work — this picks up from exactly where your merge left off. **See Layer 4 at the bottom for the exact test we ran and step-by-step instructions to reproduce it yourself.**
+For Harshal. This branch now covers two separate pieces of work:
+
+1. **Volume Agent fixes** (below) — several layers of fixes found by actually running real campaigns end-to-end against live BITAGENTS on mainnet, on top of your merged work.
+2. **DCA Agent: per-user wallets + Ruqa's stateless serverless architecture** — see **"Part 2"** further down. This is new since the Volume Agent work below and is a separate track entirely: it's about the DCA agent, not Volume, and about two things Zeya specifically wanted tested — (a) every user getting their own on-chain wallet instead of everyone sharing one pooled agent wallet, and (b) a real test of whether Ruqa's proposal to make the backend stateless/serverless actually works, not just whether it sounds right on paper.
+
+Both pieces were built and tested independently — nothing in Part 2 touches or depends on the Volume Agent code below. Jump straight to **Part 2** if that's what you're here for.
+
+---
+
+## Part 1 — Volume Agent
+
+For Harshal. This branch = `origin/Volume-bot` + your merged fixes (already in, see "Layer 1" below) + several layers of fixes found by actually running real campaigns end-to-end against live BITAGENTS on mainnet. Nothing here duplicates your work — this picks up from exactly where your merge left off. **See Layer 4 at the bottom of Part 1 for the exact test we ran and step-by-step instructions to reproduce it yourself.**
 
 **Branch lineage**, oldest to newest:
 ```
@@ -182,3 +193,112 @@ Requires your wallet to already have enough SOL deposited (check first with `vol
 - Pull the campaign's `executions` array (via `/volume/campaigns/{id}/executions` or straight from the `volume_campaigns` table) and check any signature directly against Solana: `getTransaction` via `https://api.mainnet-beta.solana.com` RPC, confirm `err` is `null`.
 - Check `volume_ledger.get_volume_user_balances("<wallet>")` before and after for the real available-SOL delta.
 - Check `https://api.dexscreener.com/latest/dex/tokens/iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY` before and after for volume/mcap/price impact.
+
+---
+---
+
+# Part 2 — DCA Agent: per-user wallets + Ruqa's serverless architecture
+
+For Harshal, from Zeya's testing session. Two goals drove this, both explicit asks:
+
+1. **"Operation Multi-wallet"** — today, every user of the DCA agent deposits into the *same* shared pooled wallet. Zeya wanted each user to get their **own** wallet instead, so one user's funds are never sitting in the same address as anyone else's.
+2. **A real test of Ruqa's proposal** — Ruqa suggested making the backend stateless/serverless so BITAGENTS can scale faster. Rather than just discuss it, Zeya wanted it actually built and proven end-to-end on real infrastructure (real mainnet, real database, real serverless functions) — not a design doc.
+
+Both are done, deployed, and tested with real money on mainnet. They also turned out to be one deployment, not two — see "Why these ended up combined" below.
+
+**Everything in Part 2 is on a brand-new, completely separate deployment** — a different Vercel project, a different Neon database branch, from the main bitagents.app site and from wherever the pooled DCA agent currently runs. Nothing here can affect the production site. Live URLs:
+- Frontend: `https://bitagents-multiwallet-frontend.vercel.app`
+- Backend: `https://bitagents-multiwallet-test.vercel.app`
+
+---
+
+## 2.1 — Why per-user wallets, and how it works
+
+**The problem with the pooled model**: every user's deposit goes into one shared agent wallet (`DCA_WALLET_PRIVATE_KEY`). The app's own database is the only thing keeping track of "whose money is whose" inside that wallet. If that bookkeeping is ever wrong — a bug, a race condition, an exploit — there's no on-chain separation protecting one user's funds from another's.
+
+**The fix**: `agent_wallets.py` derives a unique Solana keypair per user, per agent, using SLIP-0010/BIP44 HD derivation from a single master seed:
+```python
+path = f"m/44'/501'/{agent_slot}'/{wallet_index}'"
+Keypair.from_seed_and_derivation_path(master_seed, path)
+```
+`agent_slot` is fixed per agent (DCA=0, Volume=1, EasyA=2), `wallet_index` is a sequential per-user counter assigned on first use (`db.py`'s `get_or_create_wallet_index`, a `SERIAL` column — race-tested under concurrent signups). This means:
+- Every user's DCA deposit address is **mathematically unique and different from every other user's**, and different from the same user's Volume/EasyA wallet.
+- No private keys are stored per user — they're re-derived on demand from the one master seed (`MULTI_WALLET_MASTER_SEED` env var) whenever needed.
+- The real balance the app ever trusts is **what's actually on-chain in that specific address**, checked fresh via RPC before every action — never a ledger sum. This was a deliberate reaction to how fragile the pooled model's ledger-as-source-of-truth approach is (see the withdrawal race fix below).
+
+**One explicit product decision from Zeya**: no fee-payer wallet. Early drafts had BITAGENTS pre-funding each new derived wallet with a little SOL so users wouldn't need to hold SOL themselves. Zeya rejected this — users must deposit their own SOL to activate their wallet; BITAGENTS funding wallets was ruled out. `agent_wallets.MIN_SOL_TO_ACTIVATE_LAMPORTS` reflects this.
+
+**Platform fee, redesigned**: under the pooled model, the 0.5% DCA fee was pure bookkeeping — there was nowhere else for it to go, it just stayed in the one shared wallet. That doesn't work anymore once funds are spread across many separate wallets. Now every successful buy does a **second, real on-chain transfer** of the fee out of the user's own wallet to a collector address — and the old pooled agent wallet is reused for this, deliberately: it stops holding user funds and becomes purely the platform's fee wallet. See `dca_multiwallet.execute_plan_now`.
+
+**New code**: `agent_wallets.py` (derivation), `dca_multiwallet.py` (deposits/balance/create-plan/execute/withdraw, all real on-chain, no ledger trust), `db.py` additions (`wallet_mode` column on `dca_plans`, `agent_wallet_index` table). `dca_agent.py`'s scheduler now dispatches by `wallet_mode`: `'multiwallet'` plans execute through `dca_multiwallet`, `'pooled'` plans (the default, unchanged) execute through the existing pooled path — old and new coexist, nothing about the pooled agent changed behaviorally.
+
+### A real bug this surfaced: the LLM was hallucinating successful plans
+
+While testing multi-wallet through the actual chat UI, a plan came back as "created and running" in the chat reply — but no database row existed and no on-chain transaction happened. **Root cause**: `_parse_create_dca_request` (the deterministic, guaranteed-to-actually-execute parser that stages a plan for confirmation) only matched raw Solana mint addresses and required an explicit interval count ("every **3** hours"). A message phrased the more natural way — a ticker symbol ("...into BITAGENTS every minute", no count) — didn't match, silently fell through to the free-text LLM loop, and the model just *described* success in plain English without ever calling a tool that would make it real.
+
+**Fixed**: symbol phrasing now falls back to `resolve_token()`, and a bare "every minute" now correctly defaults the count to 1 instead of requiring "every 1 minute" verbatim. Verified live by replaying the exact failing message against a throwaway wallet — it now correctly returns "Insufficient SOL balance" (a real check) instead of fabricating a plan. This fix applies to **both** the pooled and multi-wallet chat paths equally, since it's the same shared parser.
+
+### Also cleaned up while testing
+
+- **A real cross-instance fund-drain race** in withdrawals (pooled and multi-wallet both call `withdraw_user_tokens`/`dca_multiwallet.withdraw`): two concurrent withdraw requests could both read "sufficient balance" before either wrote its debit, double-spending the same funds if two server instances (or two overlapping requests) hit at once. Fixed with `pg_advisory_xact_lock` scoped to `(user_wallet, token)` in `deposit_ledger.py`, `volume_ledger.py`, `easya_trading_ledger.py` — same pattern applied everywhere withdrawals happen. Proven under real concurrent `threading.Thread` requests racing against a live server, not just reasoned about.
+- **Stale test data**: found ~295 rows of 3-week-old Volume Agent test data in the shared local Postgres tied to Zeya's real wallet, making old balances look current. Confirmed the real on-chain balance was negligible before cleaning it up — this was a data hygiene issue, not a code bug.
+
+---
+
+## 2.2 — Ruqa's serverless proposal, actually tested
+
+**Why this matters**: the current backend (wherever it's deployed — Render, a laptop, etc.) is a single long-running Python process. Its DCA/Volume/EasyA schedulers are background *threads* inside that one process. That model doesn't scale horizontally in the way Ruqa described — you can't just spin up more of it on demand, and if that one process goes down, everything stops (see Part 1's "Operational note" above — this exact failure mode already happened once with the Volume Agent).
+
+**What "stateless serverless" actually requires, concretely**: no code can assume it's still running when the *next* request comes in. Specifically, nothing can be a background thread, because a serverless function has no persistent process for a thread to live in between invocations.
+
+### What was built: `vercel-multiwallet/`
+
+A new, completely separate deployment (not `agents_api.py` lifted onto Vercel — it's a from-scratch minimal app) with genuinely zero background threads:
+
+- **`api/index.py`** — the HTTP API. Every request is a fresh, independent invocation; nothing is kept in memory between requests.
+- **`api/cron/tick.py`** — this is the actual Ruqa-shaped piece. Recurring DCA execution as a **function Vercel Cron invokes on a schedule**, not a thread. Each invocation independently claims whatever's due right now and executes it, using the same `SELECT ... FOR UPDATE SKIP LOCKED` claim-and-lease pattern already proven safe under concurrency for the withdrawal race fix above — so even if Vercel invokes overlapping/concurrent ticks (which it does, in practice), a plan can never be double-executed.
+- Its own Neon database branch (not production), its own env vars, its own mainnet RPC connection.
+
+### Verified on real infrastructure, not simulated
+
+- Real end-to-end auth + balance flow against the live deployed URL (real mainnet RPC, real Neon DB, real serverless function).
+- 3 concurrent users tested against the live deployment: 3 genuinely different deposit addresses, zero collisions.
+- Cron tick endpoint: correctly rejects unauthorized calls (401), correctly executes with the right secret, correctly reports zero claimed when nothing is due.
+- **Real mainnet DCA executions fired through this exact architecture**, e.g. tx [`484bvyJ...`](https://explorer.solana.com/tx/484bvyJeKSDZgfgXYsSBrg3feNtZviGbfZg1xDYum372ToTfyvKw792dyyMPkqLVYdytBm81T9htW1HrvhY3auoe?cluster=mainnet) and [`5pGfjr...`](https://explorer.solana.com/tx/5pGfjrtCCdoEGA5xguRgJEEJKGSphbd1xXct1nQoQ9cMC4fzaT5PT9ucoD4uGmprLDPgCLzyznhg9qastG7b2LmZ?cluster=mainnet), each with its own platform-fee transfer, both claimed and executed by `api/cron/tick.py` against real user plans.
+
+### Why these ended up combined into one deployment
+
+Zeya asked for both to be built and tested on mainnet at the same time ("I want to do all of it at the same time to see if it works"). They turned out to compose naturally: the multi-wallet feature needed *some* backend to run on, and the serverless architecture needed *something real* to execute recurring, not a toy example — so the multi-wallet DCA feature became the real workload proving the serverless architecture, rather than two separate exercises.
+
+### The original DCA UI now runs unmodified against this new backend
+
+Initially this had a brand-new custom page (`/multi-wallet-dca`, still live, unchanged). Zeya then asked for the **exact same UI** as the existing DCA agent instead, at the same path (`/agents/dca`), with the LLM chat still working. Rather than rebuild the UI, the backend was extended to expose the **same route shapes** the existing `DcaAgentConsole`/`DcaAgentDeposit`/`DcaPlanPanel` components already call (`/chat`, `/wallet/agent`, `/wallet/balance`, `/wallet/deposit/verify`, `/wallet/withdraw`, `/plans`, etc.) — so those components run completely unmodified, just pointed at this backend instead of the pooled one. Underneath, every one of those routes is backed by `dca_multiwallet`, not the pooled wallet.
+
+Two small, backward-compatible changes were needed in the shared frontend code (`frontend/`) to make this work, since they also affect the pooled deployment if this branch merges:
+- `dca_agent.py`: `run_agent_with_actions`/`execute_tool` now take a `wallet_mode` parameter. In `"multiwallet"` mode, `create_dca_plan`, `withdraw_user_tokens`, `get_user_deposit_balance`, `execute_dca_now`, and `get_agent_wallet` are transparently swapped for `dca_multiwallet`-backed versions instead of the pooled functions — same tool names, same LLM-facing behavior, different execution underneath. Pooled mode (the default) is untouched.
+- `wallet/agent` (the "what address do I deposit to" lookup) used to be answerable the same for everyone, with no login required — that doesn't work once every user has a different address. `fetchAgentWallet()`, its Next.js proxy route, and `DcaAgentDeposit.tsx` now pass the auth token through once the user signs in, and refetch when it becomes available. Backward compatible: the pooled backend ignores the token and answers exactly as before.
+
+**Chat/LLM confirmed working end-to-end** against the live deployment with a throwaway keypair: real sign-in, real per-user deposit address returned, real chat reply, and a real natural-language "DCA into BONK" request correctly staged for confirmation and then correctly rejected for insufficient real on-chain balance (not hallucinated) — same anti-hallucination guarantee as the pooled agent, now proven on the multi-wallet path too.
+
+### Known limitation, open for you: recurring execution needs a real heartbeat
+
+Vercel's free (Hobby) plan only allows cron schedules to run **once daily** — `vercel.json`'s cron is set to `0 0 * * *` accordingly. In practice this was tested by triggering `api/cron/tick.py` manually (`curl` with the `CRON_SECRET`), which works correctly but obviously isn't a real unattended solution. This is the direct tradeoff of "stateless serverless": a long-running thread (like your pooled scheduler) gives itself a heartbeat for free; a stateless function has none, so *something* external has to call it on a schedule.
+
+**Options discussed with Zeya, not yet decided**:
+1. Upgrade the Vercel project to Pro (~$20/mo) for native frequent cron.
+2. A free external pinger (e.g. cron-job.org) hitting the tick endpoint every 1–5 min — free, but external cron services generally don't go faster than ~1 min, and it's one more third-party dependency.
+3. **What Zeya asked about last**: add a small always-on worker to the **existing Render account** (the same one your pooled scheduler already runs on) that loops every ~10s and calls the tick endpoint — same free-tier pattern you already use, just for this new backend too. Needs a Render API token to deploy; not yet done.
+
+Whichever you land on, the tick endpoint itself is already correct and safe to call as often as you like (idempotent claim pattern, rejects unauthorized calls) — this is purely about *who* calls it, not a code change.
+
+### Environment / operational notes for `vercel-multiwallet/`
+
+- `agent/new/*.py` inside `vercel-multiwallet/` is a **copy**, not a symlink, of the specific modules it needs from the real `agent/new/` (this file's directory) — Vercel's `includeFiles` can't reach outside the deployed project's own directory tree. **If you change any of `agent_wallets.py`, `db.py`, `dca_agent.py`, `dca_multiwallet.py`, `deposit_ledger.py`, `hosted_llm.py`, `shared_governance.py`, `wallet_auth.py` here, re-copy them into `vercel-multiwallet/agent/new/` before redeploying** — they do not update automatically. See `vercel-multiwallet/README.md` for the full deploy process.
+- Env vars live on the Vercel project directly (not in a committed `.env`): `DATABASE_URL` (separate Neon branch), `MULTI_WALLET_MASTER_SEED`, `DCA_WALLET_PRIVATE_KEY` (fee collector), `SOLANA_CLUSTER`, `SOLANA_RPC_URL`, `CRON_SECRET`, `CORS_ALLOW_ORIGINS`, `DB_POOL_MAX_CONNECTIONS` (kept small — serverless can multiply connection pools across concurrent invocations, unlike one long-lived server), and now `CAPIX_API_KEY` (added this session — chat/LLM had no key configured on this backend until now).
+
+### What's still open for you (Part 2)
+
+1. **Recurring execution's heartbeat isn't solved yet** — pick one of the three options above. Given the pooled scheduler already runs on Render, option 3 is the most consistent with what you've already built, but needs your Render access to wire up.
+2. **Ledger/history routes are best-effort, not fully re-derived for multi-wallet**: `/wallet/ledger` shows real entries (swap outputs, withdrawals are written to it), but the "deposited/reserved/spent" breakdown shown in the balance UI is flattened to a single live on-chain number for multi-wallet users, since there's no ledger reservation system in this model — intentional, but worth a product look if you want that breakdown to mean something more specific.
+3. This is still a **test deployment on a separate Neon branch** — nothing here is wired to production data, and it should stay that way until you and Zeya are ready to actually migrate users off the pooled wallet.
+4. Fee collector address currently reuses the pooled `DCA_WALLET_PRIVATE_KEY`. Same open question as Part 1's Volume Agent fees: worth a product decision on when/how fees actually get swept into a dedicated BITAGENTS revenue wallet.

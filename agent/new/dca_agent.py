@@ -2896,6 +2896,7 @@ def _try_execute_pending_confirmation(
     session_id: Optional[str],
     user_input: Optional[str],
     conversation_history: Optional[list] = None,
+    wallet_mode: str = "pooled",
 ) -> Optional[tuple[str, dict, str, str]]:
     """When the user confirms, run the stored pending action immediately."""
     if not user_wallet or not _user_confirmed(user_input) or _user_declined(user_input):
@@ -2923,6 +2924,7 @@ def _try_execute_pending_confirmation(
         user_input=user_input,
         session_id=session_id,
         skip_confirmation=True,
+        wallet_mode=wallet_mode,
     )
     reply = _format_pending_execution_reply(tool_name, result)
     return tool_name, args, result, reply
@@ -2985,6 +2987,73 @@ def _check_action_confirmation(
     ), args
 
 
+_MULTIWALLET_TOOL_OVERRIDES: dict[str, Any] = {}
+
+
+def _multiwallet_tool_overrides() -> dict:
+    """Chat-driven mutations for multi-wallet plans must land on the user's own
+    derived wallet, not the pooled agent wallet TOOL_MAP points at -- these
+    wrap the same tool names with dca_multiwallet's implementations instead.
+    Built lazily (not at import time) to avoid a circular import with
+    dca_multiwallet, which itself imports from this module.
+    """
+    global _MULTIWALLET_TOOL_OVERRIDES
+    if not _MULTIWALLET_TOOL_OVERRIDES:
+        import dca_multiwallet
+
+        def _create_dca_plan(
+            input_token: str,
+            output_token: str,
+            amount_per_buy: float,
+            interval: str,
+            user_wallet: Optional[str] = None,
+            max_executions: Optional[int] = None,
+            **_ignored,
+        ) -> dict:
+            if not user_wallet:
+                return {"error": "user_wallet is required. User must connect wallet and authenticate first."}
+            if not max_executions:
+                return {"error": "max_executions is required for multi-wallet DCA plans (no open-ended plans yet)."}
+            return dca_multiwallet.create_plan(
+                user_wallet, output_token, float(amount_per_buy), interval, int(max_executions)
+            )
+
+        def _withdraw_user_tokens(user_wallet: str, token: str, amount: float, **_ignored) -> dict:
+            return dca_multiwallet.withdraw(user_wallet, token, float(amount))
+
+        def _get_user_deposit_balance(user_wallet: str, **_ignored) -> dict:
+            return dca_multiwallet.get_balances(user_wallet)
+
+        def _execute_dca_now(plan_id: str, dry_run: bool = False, user_wallet: Optional[str] = None, **_ignored) -> dict:
+            if user_wallet:
+                owned = _assert_plan_owner(plan_id, user_wallet)
+                if "error" in owned:
+                    return owned
+            if _coerce_bool(dry_run):
+                return {"error": "dry_run is not supported for multi-wallet plans."}
+            return dca_multiwallet.execute_plan_now(plan_id)
+
+        def _get_agent_wallet(user_wallet: Optional[str] = None, **_ignored) -> dict:
+            # Unlike the pooled agent, there is no single shared deposit address --
+            # every user gets their own derived wallet, so this must be tied to
+            # whoever is asking rather than answered the same for everyone.
+            if not user_wallet:
+                return {"error": "Wallet authentication required to look up your deposit address."}
+            return {
+                "agent_wallet": dca_multiwallet.get_deposit_address(user_wallet),
+                "note": "This is your own personal deposit address, unique to your connected wallet -- not shared with any other user.",
+            }
+
+        _MULTIWALLET_TOOL_OVERRIDES = {
+            "create_dca_plan": _create_dca_plan,
+            "withdraw_user_tokens": _withdraw_user_tokens,
+            "get_user_deposit_balance": _get_user_deposit_balance,
+            "execute_dca_now": _execute_dca_now,
+            "get_agent_wallet": _get_agent_wallet,
+        }
+    return _MULTIWALLET_TOOL_OVERRIDES
+
+
 def execute_tool(
     tool_name: str,
     tool_args: dict,
@@ -2992,13 +3061,25 @@ def execute_tool(
     user_input: Optional[str] = None,
     session_id: Optional[str] = None,
     skip_confirmation: bool = False,
+    wallet_mode: str = "pooled",
 ) -> str:
-    func = TOOL_MAP.get(tool_name)
+    func = None
+    if wallet_mode == "multiwallet":
+        func = _multiwallet_tool_overrides().get(tool_name)
+    if func is None:
+        func = TOOL_MAP.get(tool_name)
     if not func:
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
     try:
         args = _normalize_tool_args(func, tool_args or {})
         auth_wallet = user_wallet.strip() if user_wallet else None
+
+        if wallet_mode == "multiwallet" and tool_name == "get_agent_wallet":
+            # Pooled mode answers this the same for everyone (no auth needed);
+            # multi-wallet mode can't -- each user has a different address.
+            if not auth_wallet:
+                return json.dumps({"error": "Wallet authentication required for this action."})
+            args["user_wallet"] = auth_wallet
 
         wallet_scoped_tools = {
             "create_dca_plan",
@@ -3224,12 +3305,13 @@ def run_agent_with_actions(
     conversation_history: list,
     user_wallet: Optional[str] = None,
     session_id: Optional[str] = None,
+    wallet_mode: str = "pooled",
 ) -> tuple[str, list, list[dict[str, Any]]]:
     """Run one user turn; returns reply, updated history, and tool action trace."""
     actions: list[dict[str, Any]] = []
 
     pending_execution = _try_execute_pending_confirmation(
-        user_wallet, session_id, user_input, conversation_history
+        user_wallet, session_id, user_input, conversation_history, wallet_mode=wallet_mode
     )
     if pending_execution:
         tool_name, args, result, reply = pending_execution
@@ -3307,7 +3389,7 @@ def run_agent_with_actions(
         if not tool_calls:
             if _user_confirmed(user_input) and user_wallet:
                 recovered = _try_execute_pending_confirmation(
-                    user_wallet, session_id, user_input, conversation_history
+                    user_wallet, session_id, user_input, conversation_history, wallet_mode=wallet_mode
                 )
                 if recovered:
                     tool_name, args, result, reply = recovered
@@ -3352,6 +3434,7 @@ def run_agent_with_actions(
                 user_wallet=user_wallet,
                 user_input=user_input,
                 session_id=session_id,
+                wallet_mode=wallet_mode,
             )
             print("  ✅ Done")
             actions.append({"tool": name, "args": args, "result": result})

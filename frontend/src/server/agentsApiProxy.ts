@@ -231,10 +231,10 @@ export async function proxyDcaChat(
   });
 }
 
-export async function proxyDcaWalletAgent(): Promise<Response> {
+export async function proxyDcaWalletAgent(authToken?: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/wallet/agent`, {
     cache: "no-store",
-    headers: buildHeaders(),
+    headers: buildHeaders(authToken),
   });
 }
 
