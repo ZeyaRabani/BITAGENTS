@@ -23,6 +23,7 @@ export type HedgeFundHealth = {
   trading_wallet?: string | null;
   trading_wallet_configured?: boolean;
   max_strategy_usdc?: number;
+  min_horizon_days?: number;
   allowed_deposit_tokens?: string[];
   monitor_interval_seconds?: number;
 };
@@ -82,6 +83,13 @@ export type PaperStrategy = {
     last_error?: string;
     deploy_errors?: { symbol?: string; error?: string }[];
     partial_deploy_refunded?: boolean;
+    liquidation_txs?: {
+      signature?: string;
+      explorer_url?: string;
+      symbol?: string;
+      side?: string;
+    }[];
+    swapped_to_usdc?: boolean;
   };
   created_by?: string;
   updated_at?: string;
@@ -124,6 +132,12 @@ export type StrategyBlock = {
   symbols: string[];
   horizon_days?: number;
   horizon_label?: string;
+  liquidation_txs?: {
+    signature?: string;
+    explorer_url?: string;
+    symbol?: string;
+    side?: string;
+  }[];
 };
 
 export type FailedStrategy = PaperStrategy & {

@@ -8,8 +8,11 @@ Two-pass rank:
 
 from __future__ import annotations
 
+import os
 from datetime import date, timedelta
 from typing import Any, Optional
+
+HF_MIN_HORIZON_DAYS = max(1, int(os.environ.get("HF_MIN_HORIZON_DAYS", "3")))
 
 from covenant_analysts import run_all_analysts, synthesize_signals
 from covenant_features import closes_from_prices, compute_features
@@ -29,17 +32,31 @@ HORIZON_PRESETS = {
 }
 
 
+def clamp_horizon_days(days: Optional[int]) -> Optional[int]:
+    """Finite horizons must run at least HF_MIN_HORIZON_DAYS (default 3). 0/None stay open-ended."""
+    if days is None:
+        return None
+    try:
+        d = int(days)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0:
+        return None
+    return max(HF_MIN_HORIZON_DAYS, d)
+
+
 def parse_horizon_days(text: str = "", horizon_days: Optional[int] = None) -> Optional[int]:
     """
     Return horizon in days, or None for open-ended (user closes manually).
     Explicit horizon_days <= 0 means open-ended.
+    Positive horizons shorter than HF_MIN_HORIZON_DAYS are raised to that minimum.
     """
     if horizon_days is not None:
         try:
             d = int(horizon_days)
         except (TypeError, ValueError):
             d = 0
-        return None if d <= 0 else d
+        return clamp_horizon_days(d)
 
     import re
 
@@ -68,13 +85,13 @@ def parse_horizon_days(text: str = "", horizon_days: Optional[int] = None) -> Op
         n = float(m.group(1))
         unit = m.group(2).lower()
         if unit.startswith("day"):
-            return max(1, int(round(n)))
+            return clamp_horizon_days(int(round(n)))
         if unit.startswith("week"):
-            return max(1, int(round(n * 7)))
+            return clamp_horizon_days(int(round(n * 7)))
         if unit.startswith("month"):
-            return max(1, int(round(n * 30)))
+            return clamp_horizon_days(int(round(n * 30)))
         if unit.startswith("year"):
-            return max(1, int(round(n * 365)))
+            return clamp_horizon_days(int(round(n * 365)))
     # Default: open-ended (user can close anytime)
     return None
 

@@ -129,7 +129,9 @@ from hedge_fund_ledger import (
 from hedge_fund_live import list_live_trades as hf_list_live_trades
 from hedge_fund_paper import (
     HF_MAX_STRATEGY_USDC,
+    HF_MIN_HORIZON_DAYS,
     HF_MONITOR_INTERVAL_SECONDS,
+    HF_SCHEDULER_POLL_SECONDS,
     add_capital_to_strategy as hf_add_capital,
     analyze_live_asset as hf_analyze_live_asset,
     confirm_strategy as hf_confirm_strategy,
@@ -354,7 +356,7 @@ def _startup() -> None:
     if start_hedge_fund_scheduler():
         print(
             f"  📈 Hedge Fund paper monitor started "
-            f"(every {HF_MONITOR_INTERVAL_SECONDS // 3600}h, poll 60s)"
+            f"(every {HF_MONITOR_INTERVAL_SECONDS // 3600}h, close-poll {HF_SCHEDULER_POLL_SECONDS // 60}m)"
         )
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund")
@@ -1433,9 +1435,10 @@ def hedge_fund_health() -> dict[str, Any]:
         "live_trading": True,
         "deposits_required": True,
         "max_strategy_usdc": HF_MAX_STRATEGY_USDC,
+        "min_horizon_days": HF_MIN_HORIZON_DAYS,
         "management_fee_on_start_pct": 1.0,
         "performance_fee_on_profit_pct": 10.0,
-        "allowed_deposit_tokens": ["SOL", "USDC"],
+        "allowed_deposit_tokens": ["USDC"],
         "analysts": 18,
         "llm_required_for_trades": False,
         "monitor_interval_seconds": HF_MONITOR_INTERVAL_SECONDS,

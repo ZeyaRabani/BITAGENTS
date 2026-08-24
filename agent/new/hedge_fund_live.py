@@ -68,6 +68,63 @@ def list_live_positions(strategy_id: str) -> list[dict[str, Any]]:
             return [_row(r) for r in cur.fetchall()]
 
 
+def open_live_holdings(strategy_id: str) -> list[dict[str, Any]]:
+    """Open units to swap back to USDC — positions first, else unmatched BUY fills."""
+    positions = [
+        p for p in list_live_positions(strategy_id) if float(p.get("units") or 0) > 0
+    ]
+    if positions:
+        return positions
+    bought: dict[str, dict[str, Any]] = {}
+    sold: dict[str, float] = {}
+    for t in list_live_trades(strategy_id, limit=500):
+        mint = str(t.get("mint") or "")
+        units = float(t.get("units") or 0)
+        side = str(t.get("side") or "").upper()
+        if not mint or units <= 0:
+            continue
+        if side == "BUY":
+            prev = bought.get(mint) or {
+                "mint": mint,
+                "symbol": t.get("symbol") or "?",
+                "units": 0.0,
+                "user_wallet": t.get("user_wallet"),
+            }
+            prev["units"] = float(prev["units"]) + units
+            bought[mint] = prev
+        elif side == "SELL":
+            sold[mint] = sold.get(mint, 0.0) + units
+    leftover = []
+    for mint, row in bought.items():
+        remaining = float(row["units"]) - sold.get(mint, 0.0)
+        if remaining > 1e-9:
+            leftover.append({**row, "units": remaining})
+    return leftover
+
+
+def _liquidation_txs(trades: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    txs = []
+    seen: set[str] = set()
+    for t in trades:
+        side = str(t.get("side") or "").upper()
+        if side and side not in ("SELL", "FEE"):
+            continue
+        sig = str(t.get("signature") or "")
+        if not sig or sig in seen:
+            continue
+        seen.add(sig)
+        txs.append(
+            {
+                "signature": sig,
+                "explorer_url": t.get("explorer_url")
+                or f"https://explorer.solana.com/tx/{sig}",
+                "symbol": t.get("symbol"),
+                "side": t.get("side"),
+            }
+        )
+    return txs
+
+
 def _insert_live_trade(
     *,
     strategy_id: str,
@@ -703,10 +760,26 @@ def liquidate_live_strategy(
     capital = float(rules.get("capital_usd") or 0)
     deploy_usd = float(rules.get("deploy_usd") or (capital * (1.0 - HF_MGMT_FEE_RATE)))
 
-    positions = list_live_positions(strategy_id)
+    positions = open_live_holdings(strategy_id)
     trades = []
     proceeds_usdc = 0.0
     errors = []
+    if not positions:
+        existing = _liquidation_txs(list_live_trades(strategy_id, limit=200))
+        return {
+            "ok": True,
+            "liquidated": True,
+            "already_flat": True,
+            "proceeds_usdc": 0.0,
+            "perf_fee_usd": 0.0,
+            "net_credited_usdc": 0.0,
+            "trades": [],
+            "errors": [],
+            "liquidation_txs": existing,
+            "to_asset": "USDC",
+            "to_mint": USDC_MINT,
+            "message": "No remaining live positions to swap to USDC.",
+        }
 
     for pos in positions:
         units = float(pos.get("units") or 0)
@@ -775,8 +848,9 @@ def liquidate_live_strategy(
         signature=first_signature,
     )
 
-    remaining = list_live_positions(strategy_id)
+    remaining = open_live_holdings(strategy_id)
     fully_liquidated = not remaining and not errors
+    liquidation_txs = _liquidation_txs(trades)
     if not fully_liquidated:
         return {
             "ok": False,
@@ -788,6 +862,7 @@ def liquidate_live_strategy(
             "trades": trades,
             "errors": errors,
             "remaining_positions": remaining,
+            "liquidation_txs": liquidation_txs,
             "credit": credit,
             "to_asset": "USDC",
             "to_mint": USDC_MINT,
@@ -848,6 +923,9 @@ def liquidate_live_strategy(
         "trades": trades,
         "errors": errors,
         "credit": credit,
+        "liquidation_txs": _liquidation_txs(
+            [t for t in list_live_trades(strategy_id, limit=200) if str(t.get("side") or "").upper() in ("SELL", "FEE")]
+        ),
         "to_asset": "USDC",
         "to_mint": USDC_MINT,
         "message": (

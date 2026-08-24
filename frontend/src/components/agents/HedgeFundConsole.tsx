@@ -8,7 +8,6 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import {
   addPaperStrategyCapital,
   analyzePaperAsset,
-  createPaperStrategy,
   dismissPaperStrategy,
   fetchHedgeFundHealth,
   fetchPaperDashboard,
@@ -62,6 +61,59 @@ function preciseNumber(n?: number | null, suffix = "") {
   return `${Number(n.toPrecision(2)).toString()}${suffix}`;
 }
 
+type TxRow = {
+  signature?: string | null;
+  explorer_url?: string | null;
+  symbol?: string;
+  side?: string;
+};
+
+function CloseTxLinks({
+  txs,
+  trades,
+  swapped,
+}: {
+  txs?: TxRow[];
+  trades?: TxRow[];
+  swapped?: boolean;
+}) {
+  const rows: { sig: string; href: string; label: string }[] = [];
+  const seen = new Set<string>();
+  const add = (t: TxRow, allSides: boolean) => {
+    const sig = t.signature ? String(t.signature) : "";
+    if (!sig || seen.has(sig)) return;
+    const side = String(t.side || "").toUpperCase();
+    if (!allSides && side && side !== "SELL" && side !== "FEE") return;
+    seen.add(sig);
+    rows.push({
+      sig,
+      href: t.explorer_url || explorerUrlForSignature(sig, HEDGE_FUND.cluster),
+      label: `${t.side || "tx"} ${t.symbol || ""}`.trim(),
+    });
+  };
+  for (const t of txs || []) add(t, true);
+  for (const t of trades || []) add(t, false);
+  if (rows.length === 0 && !swapped) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {swapped && <div className="text-signal">Swapped back to USDC</div>}
+      {rows.length > 0 && <div className="text-muted-foreground">Close / swap tx</div>}
+      {rows.map((r) => (
+        <a
+          key={r.sig}
+          href={r.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block break-all text-[10px] text-signal hover:underline"
+          title={r.sig}
+        >
+          {r.label} · {r.sig.slice(0, 12)}…{r.sig.slice(-8)} ↗
+        </a>
+      ))}
+    </div>
+  );
+}
+
 export function HedgeFundConsole() {
   const { publicKey } = useWallet();
   const { token, busy: authBusy, error: authError, isAuthenticated } = useKickstartWalletAuth();
@@ -75,12 +127,6 @@ export function HedgeFundConsole() {
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [dashboard, setDashboard] = useState<PaperDashboard | null>(null);
   const [dashBusy, setDashBusy] = useState(false);
-  const [symbolInput, setSymbolInput] = useState("");
-  const [tpInput, setTpInput] = useState("15");
-  const [slInput, setSlInput] = useState("8");
-  const [horizonDays, setHorizonDays] = useState("");
-  const [capitalInput, setCapitalInput] = useState("100");
-  const [agentPick, setAgentPick] = useState(true);
   const [editTp, setEditTp] = useState<Record<string, string>>({});
   const [editSl, setEditSl] = useState<Record<string, string>>({});
   const [editHorizon, setEditHorizon] = useState<Record<string, string>>({});
@@ -161,45 +207,6 @@ export function HedgeFundConsole() {
     void runCommand(text);
   }
 
-  async function onCreateStrategy() {
-    if (!token) return;
-    setDashBusy(true);
-    setError(null);
-    try {
-      const tokens = agentPick
-        ? undefined
-        : symbolInput
-            .split(/[,\s]+/)
-            .map((s) => s.trim().toUpperCase())
-            .filter(Boolean);
-      if (!agentPick && (!tokens || tokens.length === 0)) {
-        throw new Error("Enter stocks/crypto tickers, or enable agent pick");
-      }
-      const hzRaw = horizonDays.trim();
-      const horizon = hzRaw === "" ? null : Math.max(0, Number(hzRaw) || 0);
-      const capital = Math.min(100, Math.max(1, Number(capitalInput) || 100));
-      await createPaperStrategy(token, {
-        tokens,
-        mode: agentPick ? "agent" : "user",
-        take_profit_pct: Number(tpInput) || 15,
-        stop_loss_pct: Number(slInput) || 8,
-        capital_usd: capital,
-        horizon_days: horizon === 0 ? null : horizon,
-        notes: agentPick
-          ? `Agent pick · live $${capital}${horizon ? ` · ${horizon}d` : " · open-ended"}`
-          : `User symbols · live $${capital}${horizon ? ` · ${horizon}d` : " · open-ended"}`,
-        trading_mode: "live",
-        funding_token: "USDC",
-      });
-      setDepositTick((t) => t + 1);
-      await refreshDashboard();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Create strategy failed");
-    } finally {
-      setDashBusy(false);
-    }
-  }
-
   async function onSaveRules(strategyId: string) {
     if (!token) return;
     setDashBusy(true);
@@ -210,7 +217,7 @@ export function HedgeFundConsole() {
           ? undefined
           : hzRaw === "0" || hzRaw.toLowerCase() === "open"
             ? 0
-            : Math.max(0, Number(hzRaw) || 0);
+            : Math.max(health?.min_horizon_days ?? 3, Number(hzRaw) || 0);
       const addCap = Number(editAddCap[strategyId] || 0);
       await updatePaperStrategy(token, strategyId, {
         take_profit_pct: Number(editTp[strategyId] ?? 15),
@@ -447,70 +454,12 @@ export function HedgeFundConsole() {
             </div>
           </div>
         </Panel>
-
-        <Panel title="New live strategy" className="lg:col-span-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-            <label className="flex items-center gap-2 font-mono text-xs">
-              <input
-                type="checkbox"
-                checked={agentPick}
-                onChange={(e) => setAgentPick(e.target.checked)}
-                disabled={!token}
-              />
-              Agent picks assets for horizon
-            </label>
-            {!agentPick && (
-              <input
-                value={symbolInput}
-                onChange={(e) => setSymbolInput(e.target.value)}
-                placeholder="AAPL NVDA BTC ETH"
-                className="min-w-[12rem] flex-1 border border-grid bg-background px-3 py-2 font-mono text-sm"
-              />
-            )}
-            <div className="flex flex-wrap gap-2">
-              <input
-                value={capitalInput}
-                onChange={(e) => setCapitalInput(e.target.value)}
-                className="w-24 border border-grid bg-background px-2 py-2 font-mono text-sm"
-                title="Capital USDC (max 100)"
-                placeholder="$ USDC"
-              />
-              <input
-                value={horizonDays}
-                onChange={(e) => setHorizonDays(e.target.value)}
-                className="w-24 border border-grid bg-background px-2 py-2 font-mono text-sm"
-                title="Horizon days (blank = open-ended)"
-                placeholder="Days"
-              />
-              <input
-                value={tpInput}
-                onChange={(e) => setTpInput(e.target.value)}
-                className="w-20 border border-grid bg-background px-2 py-2 font-mono text-sm"
-                title="Take profit %"
-                placeholder="TP%"
-              />
-              <input
-                value={slInput}
-                onChange={(e) => setSlInput(e.target.value)}
-                className="w-20 border border-grid bg-background px-2 py-2 font-mono text-sm"
-                title="Stop loss %"
-                placeholder="SL%"
-              />
-              <button
-                type="button"
-                disabled={!token || dashBusy || authBusy}
-                onClick={() => void onCreateStrategy()}
-                className="border border-signal bg-signal/10 px-4 py-2 font-mono text-xs uppercase text-signal disabled:opacity-40"
-              >
-                Propose
-              </button>
-            </div>
-          </div>
-          <p className="mt-2 font-mono text-[10px] text-muted-foreground">
-            Live mode: deposit first · max $100 · 1% on confirm · edit mints before confirm · auto-liquidate when days end.
-          </p>
-        </Panel>
       </div>
+      <p className="font-mono text-[11px] text-muted-foreground">
+        Create strategies in chat after depositing USDC — propose assets, confirm, then live
+        Jupiter fills show below. Minimum trading horizon is 3 days (shorter requests are
+        raised to 3d). Expired sleeves auto-swap back to USDC (15m poll, also on server start).
+      </p>
 
       {(() => {
         // A strategy only belongs on this tab once assets have actually
@@ -585,7 +534,7 @@ export function HedgeFundConsole() {
                   <span>Days</span>
                   <input
                     className="w-14 border border-grid bg-background px-1 py-0.5"
-                    placeholder="open"
+                    placeholder="min 3"
                     value={
                       editHorizon[s.id] ??
                       (s.horizon_days == null && s.rules?.horizon_days == null
@@ -652,6 +601,11 @@ export function HedgeFundConsole() {
                     Backtest: {strategyBacktests[s.id]}
                   </div>
                 )}
+                <CloseTxLinks
+                  txs={s.rules?.liquidation_txs}
+                  trades={(dashboard?.by_strategy || []).find((b) => b.strategy.id === s.id)?.live_trades}
+                  swapped={Boolean(s.rules?.swapped_to_usdc)}
+                />
               </div>
             );
             })}
@@ -807,6 +761,11 @@ export function HedgeFundConsole() {
                     {(block.decisions || []).length === 0 && <p>—</p>}
                   </div>
                 </div>
+                <CloseTxLinks
+                  txs={block.liquidation_txs || s.rules?.liquidation_txs}
+                  trades={liveTrades}
+                  swapped={Boolean(s.rules?.swapped_to_usdc)}
+                />
               </div>
             );
           })}

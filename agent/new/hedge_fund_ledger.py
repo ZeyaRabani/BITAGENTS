@@ -1,7 +1,7 @@
 """
 Per-user deposit ledger for the Hedge Fund agent wallet (live trading).
-Users may deposit SOL or USDC only. Withdrawals blocked while capital is reserved
-by active/pending live strategies.
+Users may deposit USDC only. Leftover SOL can still be withdrawn. Withdrawals
+are blocked while capital is reserved by active/pending live strategies.
 """
 
 from __future__ import annotations
@@ -19,7 +19,8 @@ from hedge_fund_assets import SOL_MINT, USDC_MINT
 HF_MGMT_FEE_RATE = float(os.environ.get("HF_MGMT_FEE_RATE", "0.01"))  # 1% at start
 HF_PERF_FEE_RATE = float(os.environ.get("HF_PERF_FEE_RATE", "0.10"))  # 10% of profit on liquidate
 HF_MAX_STRATEGY_USDC = float(os.environ.get("HF_MAX_STRATEGY_USDC", "100"))
-ALLOWED_DEPOSIT_TOKENS = {"SOL", "USDC"}
+ALLOWED_DEPOSIT_TOKENS = {"USDC"}
+ALLOWED_WITHDRAW_TOKENS = {"USDC", "SOL"}
 
 
 def load_hf_keypair():
@@ -58,6 +59,7 @@ def get_hf_agent_wallet_info() -> dict[str, Any]:
         "cluster": SOLANA_CLUSTER,
         "rpc": SOLANA_RPC,
         "allowed_tokens": sorted(ALLOWED_DEPOSIT_TOKENS),
+        "allowed_withdraw_tokens": sorted(ALLOWED_WITHDRAW_TOKENS),
         "max_strategy_usdc": HF_MAX_STRATEGY_USDC,
         "management_fee_pct": HF_MGMT_FEE_RATE * 100,
         "performance_fee_pct": HF_PERF_FEE_RATE * 100,
@@ -153,8 +155,16 @@ def get_hf_user_balances(
 
     rows = _hf_rows(user_wallet)
     strategies = list_strategies(user_wallet)
+    tokens = ["USDC"]
+    sol_totals = _ledger_totals(user_wallet, "SOL", rows)
+    if (
+        sol_totals["deposited"] > 0
+        or sol_totals["spent_ledger"] > 0
+        or sol_totals["withdrawn"] > 0
+    ):
+        tokens.append("SOL")
     balances = []
-    for token in sorted(ALLOWED_DEPOSIT_TOKENS):
+    for token in tokens:
         totals = _ledger_totals(user_wallet, token, rows)
         reserved = _reserved_for_live_strategies(
             user_wallet, token, exclude_strategy_id, strategies=strategies
@@ -191,8 +201,8 @@ def check_hf_can_spend(
     exclude_strategy_id: Optional[str] = None,
 ) -> dict[str, Any]:
     token = token.strip().upper()
-    if token not in ALLOWED_DEPOSIT_TOKENS:
-        return {"error": f"Only SOL or USDC can fund strategies (got {token})."}
+    if token not in ALLOWED_WITHDRAW_TOKENS:
+        return {"error": f"Only USDC can fund strategies (got {token})."}
     balances = get_hf_user_balances(user_wallet, exclude_strategy_id=exclude_strategy_id)
     amount = float(amount)
     for row in balances.get("balances") or []:
@@ -381,7 +391,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
         if not inbound:
             return {
                 "error": (
-                    "No verifiable SOL/USDC deposit from your wallet to the Hedge Fund wallet "
+                    "No verifiable USDC deposit from your wallet to the Hedge Fund wallet "
                     "was found in this transaction."
                 ),
                 "status": "rejected",
@@ -397,7 +407,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
             token = str(tok.get("symbol") or "").upper()
             if token not in ALLOWED_DEPOSIT_TOKENS:
                 return {
-                    "error": f"Only SOL or USDC deposits are accepted (got {token}).",
+                    "error": f"Only USDC deposits are accepted (got {token}).",
                     "status": "rejected",
                 }
             record = {
@@ -419,7 +429,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
             records.append(record)
         if not records:
             return {
-                "error": "No SOL/USDC transfer to the Hedge Fund wallet found in this transaction.",
+                "error": "No USDC transfer to the Hedge Fund wallet found in this transaction.",
                 "status": "rejected",
             }
         return {
@@ -436,8 +446,8 @@ def withdraw_hf_tokens(user_wallet: str, token: str, amount: float) -> dict[str,
 
     user_wallet = user_wallet.strip()
     token = token.strip().upper()
-    if token not in ALLOWED_DEPOSIT_TOKENS:
-        return {"error": "Only SOL or USDC can be withdrawn."}
+    if token not in ALLOWED_WITHDRAW_TOKENS:
+        return {"error": "Only USDC (or leftover SOL) can be withdrawn."}
     tok = resolve_token(token)
     if "error" in tok:
         return tok

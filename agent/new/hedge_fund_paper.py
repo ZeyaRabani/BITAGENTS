@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import secrets
 import threading
-import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -20,7 +19,7 @@ from yahoo_market_data import (
 )
 
 HF_MONITOR_INTERVAL_SECONDS = int(os.environ.get("HF_MONITOR_INTERVAL_SECONDS", str(4 * 3600)))
-HF_SCHEDULER_POLL_SECONDS = int(os.environ.get("HF_SCHEDULER_POLL_SECONDS", "60"))
+HF_SCHEDULER_POLL_SECONDS = int(os.environ.get("HF_SCHEDULER_POLL_SECONDS", "900"))
 # Paper book defaults — strategy sleeves capped at $100 USDC (paper) for now
 HF_MAX_STRATEGY_USDC = float(os.environ.get("HF_MAX_STRATEGY_USDC", "100"))
 HF_MIN_STRATEGY_USDC = float(os.environ.get("HF_MIN_STRATEGY_USDC", "1"))
@@ -29,6 +28,8 @@ HF_MIN_STRATEGY_USDC = float(os.environ.get("HF_MIN_STRATEGY_USDC", "1"))
 # routing a few cents through a token with thin liquidity.
 HF_MIN_PER_ASSET_USDC = float(os.environ.get("HF_MIN_PER_ASSET_USDC", "5"))
 DEFAULT_PAPER_CAPITAL = float(os.environ.get("HF_DEFAULT_PAPER_CAPITAL", str(HF_MAX_STRATEGY_USDC)))
+# Live sleeves need a few days before the book typically turns a profit.
+HF_MIN_HORIZON_DAYS = max(1, int(os.environ.get("HF_MIN_HORIZON_DAYS", "3")))
 
 
 def clamp_strategy_capital(amount: Optional[float]) -> float:
@@ -44,6 +45,19 @@ def clamp_strategy_capital(amount: Optional[float]) -> float:
 
 def min_capital_for_book(num_assets: int) -> float:
     return round(HF_MIN_PER_ASSET_USDC * max(1, num_assets), 2)
+
+
+def clamp_horizon_days(days: Optional[int]) -> Optional[int]:
+    """Keep open-ended (None/0); raise any shorter finite horizon to the 3-day minimum."""
+    if days is None:
+        return None
+    try:
+        d = int(days)
+    except (TypeError, ValueError):
+        return None
+    if d <= 0:
+        return None
+    return max(HF_MIN_HORIZON_DAYS, d)
 
 
 def _horizon_label_for(days: Optional[int]) -> str:
@@ -312,7 +326,7 @@ def create_strategy(
 ) -> dict[str, Any]:
     """
     Create strategy (live by default). Pending until confirm_strategy().
-    Live: requires SOL/USDC deposit, Jupiter swaps, 1% start fee / 10% perf on profit.
+    Live: requires USDC deposit, Jupiter swaps, 1% start fee / 10% perf on profit.
     Paper: virtual fills only (trading_mode='paper').
     Capital sleeve capped at HF_MAX_STRATEGY_USDC (default $100).
     """
@@ -330,9 +344,7 @@ def create_strategy(
     trading_mode = (trading_mode or "live").strip().lower()
     if trading_mode not in ("live", "paper"):
         trading_mode = "live"
-    funding_token = (funding_token or "USDC").strip().upper()
-    if funding_token not in ("SOL", "USDC"):
-        funding_token = "USDC"
+    funding_token = "USDC"
 
     portfolio = get_or_create_portfolio(user_wallet, capital_usd or DEFAULT_PAPER_CAPITAL)
     sleeve_capital = clamp_strategy_capital(capital_usd)
@@ -370,7 +382,7 @@ def create_strategy(
         except Exception:
             pass
 
-    days = parse_horizon_days(horizon_text, horizon_days)
+    days = clamp_horizon_days(parse_horizon_days(horizon_text, horizon_days))
     pick_days = horizon_days_for_picker(days)
     preset = horizon_preset(pick_days)
     horizon_label = "open" if not days else preset["key"]
@@ -539,9 +551,18 @@ def create_strategy(
         f"Open-ended — liquidate anytime with **liquidate {sid}**."
         if not days
         else f"Horizon {days}d — auto-liquidates to USDC when ended (or liquidate early)."
+        + (
+            f" (raised to the {HF_MIN_HORIZON_DAYS}d minimum)"
+            if (
+                horizon_days is not None
+                and int(horizon_days or 0) > 0
+                and int(horizon_days) < HF_MIN_HORIZON_DAYS
+            )
+            else ""
+        )
     )
     mode_note = (
-        f"LIVE · deposit SOL/USDC first · 1% fee at start · 10% of profit on liquidate · max ${HF_MAX_STRATEGY_USDC:,.0f}"
+        f"LIVE · deposit USDC first · 1% fee at start · 10% of profit on liquidate · max ${HF_MAX_STRATEGY_USDC:,.0f}"
         if trading_mode == "live"
         else f"PAPER · virtual fills · max ${HF_MAX_STRATEGY_USDC:,.0f}"
     )
@@ -739,8 +760,9 @@ def confirm_strategy(
     rules["paper_mode"] = trading_mode == "paper"
     rules["deposits_required"] = trading_mode == "live"
     if funding_token:
-        rules["funding_token"] = funding_token.upper()
-    funding = (rules.get("funding_token") or "USDC").upper()
+        rules["funding_token"] = "USDC"
+    funding = "USDC"
+    rules["funding_token"] = "USDC"
 
     # Apply mint corrections
     if mint_overrides:
@@ -754,9 +776,6 @@ def confirm_strategy(
 
     if horizon_days is not None:
         days = int(horizon_days) if int(horizon_days) > 0 else None
-        rules["horizon_days"] = days
-        rules["open_ended"] = days is None
-        rules["horizon_label"] = _horizon_label_for(days)
     else:
         days = strategy.get("horizon_days")
         if days is None and rules.get("horizon_days") is not None:
@@ -766,9 +785,10 @@ def confirm_strategy(
                 days = int(days) if int(days) > 0 else None
             except (TypeError, ValueError):
                 days = None
-        rules["horizon_days"] = days
-        rules["open_ended"] = days is None
-        rules["horizon_label"] = _horizon_label_for(days)
+    days = clamp_horizon_days(days)
+    rules["horizon_days"] = days
+    rules["open_ended"] = days is None
+    rules["horizon_label"] = _horizon_label_for(days)
 
     if not allocation_pct and symbols:
         w = round(100.0 / len(symbols), 4)
@@ -908,7 +928,7 @@ def strategy_live_pnl(strategy_id: str, user_wallet: str) -> dict[str, Any]:
             "expired": expired,
             "never_deployed": not mark.get("trades"),
             "hint": (
-                f"No live fills yet — confirm {strategy_id} after depositing SOL/USDC."
+                f"No live fills yet — confirm {strategy_id} after depositing USDC."
                 if not mark.get("trades") and status in ("pending", "closed")
                 else None
             ),
@@ -1052,18 +1072,162 @@ def strategy_live_pnl(strategy_id: str, user_wallet: str) -> dict[str, Any]:
     }
 
 
+def _merge_liquidation_txs(rules: dict[str, Any], live: dict[str, Any]) -> dict[str, Any]:
+    txs = list(rules.get("liquidation_txs") or [])
+    seen = {str(t.get("signature")) for t in txs if t.get("signature")}
+    incoming = list(live.get("liquidation_txs") or [])
+    if not incoming:
+        for t in live.get("trades") or []:
+            sig = t.get("signature")
+            if not sig:
+                continue
+            incoming.append(
+                {
+                    "signature": sig,
+                    "explorer_url": t.get("explorer_url") or f"https://explorer.solana.com/tx/{sig}",
+                    "symbol": t.get("symbol"),
+                    "side": t.get("side"),
+                }
+            )
+    for t in incoming:
+        sig = t.get("signature")
+        if not sig or str(sig) in seen:
+            continue
+        txs.append(t)
+        seen.add(str(sig))
+    rules["liquidation_txs"] = txs
+    return rules
+
+
+def _apply_live_usdc_exit(
+    strategy: dict[str, Any],
+    reason: str,
+    *,
+    reopen_on_partial: bool,
+) -> dict[str, Any]:
+    from hedge_fund_assets import USDC_MINT
+    from hedge_fund_live import liquidate_live_strategy
+
+    strategy_id = strategy["id"]
+    rules0 = dict(strategy.get("rules") or {})
+    live = liquidate_live_strategy(strategy, reason=reason)
+    rules0 = _merge_liquidation_txs(rules0, live)
+    rules0["last_liquidation_attempt_at"] = _now().isoformat()
+    rules0["liquidation_errors"] = live.get("errors") or []
+
+    fully = bool(live.get("liquidated"))
+    if not fully:
+        new_status = "active" if reopen_on_partial else "closed"
+        rules0["swapped_to_usdc"] = False
+        init_db()
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE hf_strategies
+                    SET status = %s, rules = %s, updated_at = NOW()
+                    WHERE id = %s RETURNING *
+                    """,
+                    (new_status, Json(rules0), strategy_id),
+                )
+                strategy = _row(cur.fetchone())
+        return {**live, "strategy": strategy, "trading_mode": "live"}
+
+    rules0["liquidated_at"] = _now().isoformat()
+    rules0["liquidation_proceeds_usd"] = live.get("proceeds_usdc")
+    rules0["liquidation_total_proceeds_usd"] = live.get("total_proceeds_usdc")
+    rules0["liquidation_profit_usd"] = live.get("profit_usd")
+    rules0["perf_fee_usd"] = live.get("perf_fee_usd")
+    rules0["liquidation_mint"] = USDC_MINT
+    rules0["swapped_to_usdc"] = True
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE hf_strategies SET status = 'closed', rules = %s, updated_at = NOW()
+                WHERE id = %s RETURNING *
+                """,
+                (Json(rules0), strategy_id),
+            )
+            strategy = _row(cur.fetchone())
+    return {**live, "strategy": strategy, "trading_mode": "live"}
+
+
+def _claim_usdc_exit(
+    strategy_id: str,
+    allowed_statuses: tuple[str, ...],
+    user_wallet: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """Mark a strategy liquidating so two close/swap runs cannot double-sell."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if user_wallet:
+                cur.execute(
+                    """
+                    UPDATE hf_strategies
+                    SET
+                        rules = jsonb_set(
+                            COALESCE(rules, '{}'::jsonb),
+                            '{pre_liquidation_status}',
+                            to_jsonb(status)
+                        ),
+                        status = 'liquidating',
+                        updated_at = NOW()
+                    WHERE id = %s AND user_wallet = %s AND status = ANY(%s)
+                    RETURNING *
+                    """,
+                    (strategy_id, user_wallet.strip(), list(allowed_statuses)),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE hf_strategies
+                    SET
+                        rules = jsonb_set(
+                            COALESCE(rules, '{}'::jsonb),
+                            '{pre_liquidation_status}',
+                            to_jsonb(status)
+                        ),
+                        status = 'liquidating',
+                        updated_at = NOW()
+                    WHERE id = %s AND status = ANY(%s)
+                    RETURNING *
+                    """,
+                    (strategy_id, list(allowed_statuses)),
+                )
+            row = cur.fetchone()
+    return _row(row) if row else None
+
+
 def liquidate_strategy(
     strategy_id: str,
     user_wallet: str,
     reason: str = "Horizon ended — liquidate to USDC",
 ) -> dict[str, Any]:
     """Sell all strategy positions to USDC (live Jupiter or paper). Marks strategy closed."""
-    from hedge_fund_assets import USDC_MINT
+    from hedge_fund_live import open_live_holdings
 
     strategy = get_strategy(strategy_id, user_wallet)
     if not strategy:
         return {"error": "Strategy not found"}
+
+    rules0 = dict(strategy.get("rules") or {})
+    trading_mode = (strategy.get("trading_mode") or rules0.get("trading_mode") or "live").lower()
+
     if strategy.get("status") == "closed":
+        if trading_mode == "live" and open_live_holdings(strategy_id):
+            claimed = _claim_usdc_exit(strategy_id, ("closed",), user_wallet)
+            if not claimed:
+                latest = get_strategy(strategy_id, user_wallet)
+                return {
+                    "strategy": latest,
+                    "note": "USDC exit already in progress",
+                    "liquidating": True,
+                    "trades": [],
+                }
+            return _apply_live_usdc_exit(claimed, reason, reopen_on_partial=False)
         return {"strategy": strategy, "note": "Already closed", "trades": []}
     if strategy.get("status") == "liquidating":
         return {
@@ -1075,22 +1239,7 @@ def liquidate_strategy(
     if strategy.get("status") not in ("active", "paused"):
         return {"error": f"Cannot liquidate strategy in status={strategy.get('status')}"}
 
-    # Atomically claim liquidation so a user click and scheduler tick cannot
-    # submit duplicate Jupiter sells.
-    init_db()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                UPDATE hf_strategies
-                SET status = 'liquidating', updated_at = NOW()
-                WHERE id = %s AND user_wallet = %s
-                  AND status IN ('active', 'paused')
-                RETURNING *
-                """,
-                (strategy_id, user_wallet.strip()),
-            )
-            claimed = cur.fetchone()
+    claimed = _claim_usdc_exit(strategy_id, ("active", "paused"), user_wallet)
     if not claimed:
         latest = get_strategy(strategy_id, user_wallet)
         return {
@@ -1099,49 +1248,11 @@ def liquidate_strategy(
             "liquidating": True,
             "trades": [],
         }
-    strategy = _row(claimed)
+    strategy = claimed
 
-    rules0 = dict(strategy.get("rules") or {})
-    trading_mode = (strategy.get("trading_mode") or rules0.get("trading_mode") or "live").lower()
+    trading_mode = (strategy.get("trading_mode") or (strategy.get("rules") or {}).get("trading_mode") or "live").lower()
     if trading_mode == "live":
-        from hedge_fund_live import liquidate_live_strategy
-
-        live = liquidate_live_strategy(strategy, reason=reason)
-        if not live.get("liquidated"):
-            rules0["last_liquidation_attempt_at"] = _now().isoformat()
-            rules0["liquidation_errors"] = live.get("errors") or []
-            init_db()
-            with get_conn() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        UPDATE hf_strategies
-                        SET status = 'active', rules = %s, updated_at = NOW()
-                        WHERE id = %s RETURNING *
-                        """,
-                        (Json(rules0), strategy_id),
-                    )
-                    strategy = _row(cur.fetchone())
-            return {**live, "strategy": strategy, "trading_mode": "live"}
-
-        rules0["liquidated_at"] = _now().isoformat()
-        rules0["liquidation_proceeds_usd"] = live.get("proceeds_usdc")
-        rules0["liquidation_total_proceeds_usd"] = live.get("total_proceeds_usdc")
-        rules0["liquidation_profit_usd"] = live.get("profit_usd")
-        rules0["perf_fee_usd"] = live.get("perf_fee_usd")
-        rules0["liquidation_mint"] = USDC_MINT
-        init_db()
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    UPDATE hf_strategies SET status = 'closed', rules = %s, updated_at = NOW()
-                    WHERE id = %s RETURNING *
-                    """,
-                    (Json(rules0), strategy_id),
-                )
-                strategy = _row(cur.fetchone())
-        return {**live, "strategy": strategy, "trading_mode": "live"}
+        return _apply_live_usdc_exit(strategy, reason, reopen_on_partial=True)
 
     return _liquidate_paper(strategy_id, user_wallet, reason)
 
@@ -1267,7 +1378,7 @@ def _liquidate_paper(strategy_id: str, user_wallet: str, reason: str) -> dict[st
 
 def maybe_liquidate_expired(strategy_id: str) -> Optional[dict[str, Any]]:
     strategy = get_strategy(strategy_id)
-    if not strategy or strategy.get("status") != "active":
+    if not strategy or strategy.get("status") not in ("active", "paused"):
         return None
     rules = strategy.get("rules") or {}
     horizon = int(strategy.get("horizon_days") or rules.get("horizon_days") or 0)
@@ -1293,6 +1404,47 @@ def maybe_liquidate_expired(strategy_id: str) -> Optional[dict[str, Any]]:
         )
     return None
 
+
+def complete_unswapped_closed_strategies() -> dict[str, Any]:
+    """Swap leftover live holdings on strategies already marked closed."""
+    from hedge_fund_live import open_live_holdings
+
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM hf_strategies WHERE status = 'closed'")
+            rows = [_row(r) for r in cur.fetchall()]
+    results = []
+    for strategy in rows:
+        rules = strategy.get("rules") or {}
+        trading_mode = (
+            strategy.get("trading_mode") or rules.get("trading_mode") or "live"
+        ).lower()
+        if trading_mode != "live":
+            continue
+        if not open_live_holdings(strategy["id"]):
+            continue
+        claimed = _claim_usdc_exit(strategy["id"], ("closed",))
+        if not claimed:
+            continue
+        result = _apply_live_usdc_exit(
+            claimed,
+            "Closed strategy still held tokens — swap remaining to USDC",
+            reopen_on_partial=False,
+        )
+        results.append({"strategy_id": strategy["id"], **result})
+    return {"checked": len(rows), "swapped": results, "count": len(results)}
+
+
+def run_horizon_close_cycle() -> dict[str, Any]:
+    expired = liquidate_all_expired_strategies()
+    leftover = complete_unswapped_closed_strategies()
+    return {
+        "expired": expired,
+        "unswapped": leftover,
+        "expired_count": expired.get("count") or 0,
+        "unswapped_count": leftover.get("count") or 0,
+    }
 
 
 def update_strategy_rules(
@@ -1346,6 +1498,7 @@ def update_strategy_rules(
             new_horizon = row.get("horizon_days")
             if horizon_days is not None:
                 new_horizon = int(horizon_days) if int(horizon_days) > 0 else None
+                new_horizon = clamp_horizon_days(new_horizon)
                 merged_rules["horizon_days"] = new_horizon
                 merged_rules["open_ended"] = new_horizon is None
                 merged_rules["horizon_label"] = _horizon_label_for(new_horizon)
@@ -2132,7 +2285,12 @@ def liquidate_all_expired_strategies() -> dict[str, Any]:
             cur.execute(
                 """
                 UPDATE hf_strategies
-                SET status = 'active', updated_at = NOW()
+                SET status = CASE
+                    WHEN rules->>'pre_liquidation_status' IN ('closed', 'paused', 'active')
+                        THEN rules->>'pre_liquidation_status'
+                    ELSE 'active'
+                END,
+                    updated_at = NOW()
                 WHERE status = 'liquidating'
                   AND updated_at < NOW() - INTERVAL '10 minutes'
                 """
@@ -2140,7 +2298,8 @@ def liquidate_all_expired_strategies() -> dict[str, Any]:
             cur.execute(
                 """
                 SELECT id FROM hf_strategies
-                WHERE status = 'active' AND horizon_days IS NOT NULL AND horizon_days > 0
+                WHERE status IN ('active', 'paused')
+                  AND horizon_days IS NOT NULL AND horizon_days > 0
                 """
             )
             ids = [r["id"] for r in cur.fetchall()]
@@ -2348,6 +2507,7 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
                     "symbols": s.get("symbols") or [],
                     "horizon_days": s.get("horizon_days"),
                     "horizon_label": s.get("horizon_label"),
+                    "liquidation_txs": (rules.get("liquidation_txs") or []),
                 }
             )
             continue
@@ -2422,15 +2582,29 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
 
 def _scheduler_loop() -> None:
     global _last_market_refresh_at
-    # Stagger first run slightly
-    time.sleep(5)
+    try:
+        print("  HF close cycle on startup (expired + unswapped closed → USDC)")
+        startup = run_horizon_close_cycle()
+        if startup["expired_count"] or startup["unswapped_count"]:
+            print(
+                f"  HF startup close: {startup['expired_count']} expired, "
+                f"{startup['unswapped_count']} previously-closed still holding tokens"
+            )
+        else:
+            print("  HF startup close: no strategies needed swapping")
+    except Exception as exc:
+        print(f"  ⚠️  HF startup close cycle error: {exc}")
+
     while not _scheduler_stop.is_set():
+        if _scheduler_stop.wait(HF_SCHEDULER_POLL_SECONDS):
+            break
         try:
-            # Check horizon expiry every scheduler poll, independent of Yahoo
-            # symbols and the slower 4h market-analysis cadence.
-            expired = liquidate_all_expired_strategies()
-            if expired["count"]:
-                print(f"  HF auto-liquidation: {expired['count']} expired strategy attempt(s)")
+            cycle = run_horizon_close_cycle()
+            if cycle["expired_count"] or cycle["unswapped_count"]:
+                print(
+                    f"  HF auto-close: {cycle['expired_count']} expired, "
+                    f"{cycle['unswapped_count']} unswapped closed"
+                )
 
             due = True
             if _last_market_refresh_at is not None:
@@ -2445,7 +2619,6 @@ def _scheduler_loop() -> None:
                 )
         except Exception as exc:
             print(f"  ⚠️  HF paper scheduler error: {exc}")
-        _scheduler_stop.wait(HF_SCHEDULER_POLL_SECONDS)
 
 
 def start_hedge_fund_scheduler() -> bool:
@@ -2469,6 +2642,7 @@ def scheduler_status() -> dict[str, Any]:
         "running": bool(_scheduler_thread and _scheduler_thread.is_alive()),
         "interval_seconds": HF_MONITOR_INTERVAL_SECONDS,
         "poll_seconds": HF_SCHEDULER_POLL_SECONDS,
+        "close_poll_seconds": HF_SCHEDULER_POLL_SECONDS,
         "last_market_refresh_at": _last_market_refresh_at.isoformat() if _last_market_refresh_at else None,
         "watched_symbols": list_watched_symbols(),
     }

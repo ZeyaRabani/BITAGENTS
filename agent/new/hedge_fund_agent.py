@@ -22,6 +22,7 @@ from hedge_fund_core import (
 )
 from hedge_fund_paper import (
     HF_MAX_STRATEGY_USDC,
+    HF_MIN_HORIZON_DAYS,
     HF_MIN_PER_ASSET_USDC,
     HF_MONITOR_INTERVAL_SECONDS,
     add_capital_to_strategy,
@@ -132,7 +133,7 @@ TOOLS = [
                 "If the user does not name tickers (e.g. 'only stocks', 'pick assets', 'max profit'), "
                 "OMIT tokens and set mode='agent' so the agent selects the book. "
                 "Do NOT pass tokens like STOCKS/CRYPTO — those are not tickers. "
-                f"Capital max ${HF_MAX_STRATEGY_USDC:.0f} USDC from deposited SOL/USDC. "
+                f"Capital max ${HF_MAX_STRATEGY_USDC:.0f} USDC from deposited USDC. "
                 f"Each asset needs at least ${HF_MIN_PER_ASSET_USDC:.0f} capital — e.g. 2 assets need "
                 f"${HF_MIN_PER_ASSET_USDC * 2:.0f}+ total, so pick a book size the stated capital "
                 "actually supports (fewer assets if capital is small). "
@@ -157,10 +158,13 @@ TOOLS = [
                     "take_profit_pct": {"type": "number"},
                     "stop_loss_pct": {"type": "number"},
                     "capital_usd": {"type": "number", "description": f"USDC sleeve, max {HF_MAX_STRATEGY_USDC}"},
-                    "horizon_days": {"type": "number", "description": "Days; omit/0 = open-ended"},
+                    "horizon_days": {
+                        "type": "number",
+                        "description": f"Trading days (min {HF_MIN_HORIZON_DAYS}; omit/0 = open-ended)",
+                    },
                     "notes": {"type": "string", "description": "Include 'only stocks' / 'only crypto' when said"},
                     "trading_mode": {"type": "string", "description": "live (default) | paper"},
-                    "funding_token": {"type": "string", "description": "USDC or SOL"},
+                    "funding_token": {"type": "string", "description": "USDC only"},
                     "mint_overrides": {
                         "type": "object",
                         "description": "Optional symbol→mint corrections",
@@ -191,7 +195,10 @@ TOOLS = [
                         "type": "number",
                         "description": "ONLY set if the user explicitly wants to change the funding amount now. Omit to keep the strategy's original capital.",
                     },
-                    "horizon_days": {"type": "number"},
+                    "horizon_days": {
+                        "type": "number",
+                        "description": f"Optional; min {HF_MIN_HORIZON_DAYS} days if set",
+                    },
                     "funding_token": {"type": "string"},
                     "mint_overrides": {
                         "type": "object",
@@ -267,7 +274,8 @@ TOOLS = [
         "function": {
             "name": "update_paper_strategy",
             "description": (
-                "Edit strategy: TP/SL, symbols, horizon_days (0=open), add_capital_usd "
+                "Edit strategy: TP/SL, symbols, horizon_days "
+                f"(min {HF_MIN_HORIZON_DAYS}; 0=open), add_capital_usd "
                 f"(extra capital up to ${HF_MAX_STRATEGY_USDC:.0f}), name, status."
             ),
             "parameters": {
@@ -280,7 +288,10 @@ TOOLS = [
                     "name": {"type": "string"},
                     "status": {"type": "string"},
                     "notes": {"type": "string"},
-                    "horizon_days": {"type": "number"},
+                    "horizon_days": {
+                        "type": "number",
+                        "description": f"Min {HF_MIN_HORIZON_DAYS} days if set; 0 = open-ended",
+                    },
                     "add_capital_usd": {"type": "number"},
                 },
                 "required": ["strategy_id"],
@@ -563,8 +574,8 @@ SYSTEM_PROMPT = f"""You are **Hedge Fund Agent** — LIVE trading by default (re
 Fees: **1% at strategy start** + **10% of profit only on liquidate** (1/10).
 
 Flow:
-1. User must deposit **SOL or USDC** to the Hedge Fund wallet first.
-2. Create strategy → `create_paper_strategy` (pending, trading_mode=live).
+1. User must deposit **USDC** (not SOL) to the Hedge Fund wallet first.
+2. Create strategy in **chat** → `create_paper_strategy` (pending, trading_mode=live).
    - If user says "only stocks" / "pick assets" / "max profit" without tickers:
      omit `tokens`, set mode=agent, put wording in `notes` — agent selects the book.
    - Never pass STOCKS/CRYPTO as tokens.
@@ -572,6 +583,7 @@ Flow:
    - Show mint addresses; user may correct via mint_overrides.
    - Capital sleeve max **${HF_MAX_STRATEGY_USDC:.0f} USDC**, min **${HF_MIN_PER_ASSET_USDC:.0f}/asset**
      (2 assets needs ${HF_MIN_PER_ASSET_USDC * 2:.0f}+, 3 needs ${HF_MIN_PER_ASSET_USDC * 3:.0f}+, etc.).
+   - Trading horizon minimum **{HF_MIN_HORIZON_DAYS} days** (1–2 day requests are raised to {HF_MIN_HORIZON_DAYS}d; omit/0 stays open-ended).
 3. Confirm → `confirm_paper_strategy` spends deposit, takes 1% fee, then buys the book
    IN THE BACKGROUND — the tool call returns immediately (does not wait for the Jupiter
    swaps to finish), so relay its `message` as-is; do not imply the buys are already done.
@@ -685,7 +697,7 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
         f"(max ${_fmt(result.get('max_capital_usd') or HF_MAX_STRATEGY_USDC)})",
         f"- Symbols: {', '.join(result.get('symbols') or [])}",
         f"- Trading: **{result.get('trading_mode') or 'live'}** · funding: {result.get('funding_token') or 'USDC'}",
-        "- Deposit SOL/USDC to the Hedge Fund wallet before confirm (1% fee on start)",
+        "- Deposit USDC to the Hedge Fund wallet before confirm (1% fee on start)",
         "",
         "**Solana mints (catalog / Jupiter) — correct before confirm if needed**",
     ]
