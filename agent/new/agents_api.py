@@ -359,6 +359,19 @@ def _startup() -> None:
             f"(every {HF_MONITOR_INTERVAL_SECONDS // 3600}h, close-poll {HF_SCHEDULER_POLL_SECONDS // 60}m)"
         )
     print(f"  🗄️  Cache backend: {cache_backend()}")
+    try:
+        from meteora_dlmm import ensure_pool_script_deps, pool_script_deps_ready
+
+        if pool_script_deps_ready():
+            print("  📦 Meteora pool Node deps ready")
+        else:
+            deps_err = ensure_pool_script_deps()
+            if deps_err:
+                print(f"  ⚠️  Meteora pool script: {deps_err}")
+            else:
+                print("  📦 Meteora pool Node deps installed")
+    except Exception as exc:
+        print(f"  ⚠️  Meteora pool Node deps check failed: {exc}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund")
 
 
@@ -1048,8 +1061,12 @@ def volume_deposit_verify(
     auth_wallet: str = Depends(require_wallet_session),
 ) -> dict[str, Any]:
     result = verify_and_record_volume_deposit(body.signature.strip(), auth_wallet)
-    if result.get("error") and result.get("status") != "already_recorded":
-        raise HTTPException(status_code=400, detail=result["error"])
+    if "error" in result:
+        if result.get("status") == "already_recorded":
+            return result
+        detail = result["error"]
+        status = 403 if result.get("status") == "rejected" else 400
+        raise HTTPException(status_code=status, detail=detail)
     return result
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -27,7 +28,66 @@ METEORA_POOL_CREATION_SOL = float(os.environ.get("METEORA_POOL_CREATION_SOL", "0
 METEORA_DEFAULT_BIN_STEP = int(os.environ.get("METEORA_DEFAULT_BIN_STEP", "80"))
 METEORA_DEFAULT_FEE_BPS = int(os.environ.get("METEORA_DEFAULT_FEE_BPS", "25"))
 METEORA_POOL_SCRIPT = Path(__file__).resolve().parent / "scripts" / "create_dlmm_pool.cjs"
+METEORA_SCRIPTS_DIR = METEORA_POOL_SCRIPT.parent
+_POOL_DEPS_LOCK = threading.Lock()
 SOL_MINT = "So11111111111111111111111111111111111111112"
+
+
+def pool_script_deps_ready() -> bool:
+    return (METEORA_SCRIPTS_DIR / "node_modules" / "@solana" / "web3.js").exists()
+
+
+def ensure_pool_script_deps() -> Optional[str]:
+    """
+    Install Node packages for create_dlmm_pool.cjs if they are missing.
+    Render native Python deploys have Node but do not run npm install unless
+    the build command includes it (the Docker image does).
+    Returns an error string, or None when ready.
+    """
+    if pool_script_deps_ready():
+        return None
+    if not METEORA_POOL_SCRIPT.exists():
+        return "Meteora pool creation script is missing."
+    with _POOL_DEPS_LOCK:
+        if pool_script_deps_ready():
+            return None
+        print("  📦 Installing Meteora Node deps (agent/new/scripts)…")
+        try:
+            proc = subprocess.run(
+                ["npm", "install", "--omit=dev"],
+                cwd=str(METEORA_SCRIPTS_DIR),
+                capture_output=True,
+                text=True,
+                timeout=240,
+                check=False,
+            )
+        except FileNotFoundError:
+            return (
+                "npm is not installed. Meteora pool creation needs Node packages. "
+                "On Render, add to the build command: cd agent/new/scripts && npm install --omit=dev"
+            )
+        except subprocess.TimeoutExpired:
+            return "Timed out installing Meteora Node deps (npm install)."
+        if proc.returncode != 0:
+            err = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()[:800]
+            return f"Failed to install Meteora Node deps (@solana/web3.js): {err}"
+        if not pool_script_deps_ready():
+            return (
+                "npm install finished but @solana/web3.js is still missing under "
+                f"{METEORA_SCRIPTS_DIR / 'node_modules'}."
+            )
+        print("  ✅ Meteora Node deps ready")
+        return None
+
+
+def _pool_script_error(stderr: str, stdout: str, code: int) -> str:
+    blob = f"{stderr}\n{stdout}"
+    if "Cannot find module '@solana/web3.js'" in blob or "MODULE_NOT_FOUND" in blob:
+        return (
+            "Meteora pool script is missing Node packages (@solana/web3.js). "
+            "On the server run: cd agent/new/scripts && npm install --omit=dev"
+        )
+    return (stderr or stdout or f"Pool creation script failed ({code})").strip()[:1200]
 
 
 def _normalize_mint_pair(mint_a: str, mint_b: str) -> tuple[str, str]:
@@ -288,10 +348,14 @@ def create_dlmm_pool(
         return {
             "error": (
                 "Meteora pool creation script missing. Install with: "
-                "cd agent/new/scripts && npm install"
+                "cd agent/new/scripts && npm install --omit=dev"
             ),
             "script": str(METEORA_POOL_SCRIPT),
         }
+
+    deps_error = ensure_pool_script_deps()
+    if deps_error:
+        return {"error": deps_error}
 
     payload = {
         "tokenMint": token_mint.strip(),
@@ -303,6 +367,13 @@ def create_dlmm_pool(
         "quoteAmount": float(quote_amount),
     }
 
+    env = os.environ.copy()
+    node_modules = str(METEORA_SCRIPTS_DIR / "node_modules")
+    existing_node_path = env.get("NODE_PATH", "")
+    env["NODE_PATH"] = (
+        node_modules if not existing_node_path else f"{node_modules}{os.pathsep}{existing_node_path}"
+    )
+
     try:
         proc = subprocess.run(
             ["node", str(METEORA_POOL_SCRIPT), json.dumps(payload)],
@@ -310,13 +381,13 @@ def create_dlmm_pool(
             text=True,
             timeout=180,
             check=False,
+            cwd=str(METEORA_SCRIPTS_DIR),
+            env=env,
         )
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
         if proc.returncode != 0:
-            return {
-                "error": stderr or stdout or f"Pool creation script failed ({proc.returncode})",
-            }
+            return {"error": _pool_script_error(stderr, stdout, proc.returncode)}
         try:
             result = json.loads(stdout)
         except json.JSONDecodeError:

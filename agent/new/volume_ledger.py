@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -428,30 +429,43 @@ def record_user_credit_volume(
 
 
 def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[str, Any]:
-    from deposit_ledger import _ledger_lock, _parse_verified_user_deposits, _user_in_transaction, _valid_signature
+    from deposit_ledger import (
+        _explorer_url,
+        _ledger_lock,
+        _parse_verified_user_deposits,
+        _user_in_transaction,
+        _valid_signature,
+    )
+    from db import deposit_exists, find_deposit_by_signature
 
     signature = signature.strip()
     user_wallet = user_wallet.strip()
     agent_wallet = get_volume_wallet_pubkey()
     if not agent_wallet:
         return {"error": "Volume Agent wallet is not configured on the server."}
-    if not signature or not _valid_signature(signature):
-        return {"error": "Valid transaction signature is required."}
+    if not signature:
+        return {"error": "Transaction signature is required."}
+    if not _valid_signature(signature):
+        return {"error": "Invalid transaction signature format."}
     if not user_wallet:
         return {"error": "User wallet address is required."}
 
     with _ledger_lock:
-        from db import deposit_exists, find_deposit_by_signature
-
         if deposit_exists(signature):
             existing = find_deposit_by_signature(signature)
             if existing and existing.get("user_wallet") != user_wallet:
-                return {"error": "This deposit was already credited to another wallet.", "status": "rejected"}
+                return {
+                    "error": (
+                        "This deposit transaction was already credited to another wallet. "
+                        "You cannot claim someone else's deposit."
+                    ),
+                    "status": "rejected",
+                }
             return {
                 "status": "already_recorded",
                 "deposit": existing,
                 "balances": get_volume_user_balances(user_wallet),
-                "message": "Deposit already credited to your balance.",
+                "message": "This deposit was already verified for your wallet.",
             }
 
         tx = None
@@ -459,31 +473,48 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
             commitment = "finalized" if attempt >= 4 else "confirmed"
             tx = sol_rpc(
                 "getTransaction",
-                [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0, "commitment": commitment}],
+                [
+                    signature,
+                    {
+                        "encoding": "jsonParsed",
+                        "maxSupportedTransactionVersion": 0,
+                        "commitment": commitment,
+                    },
+                ],
             )
             if tx:
                 break
             if attempt < 9:
-                import time
-
                 time.sleep(2.0)
         if not tx:
             return {"error": "Transaction not found. Wait for confirmation and try again."}
         if not _user_in_transaction(tx, user_wallet):
-            return {"error": "Your connected wallet is not involved in this transaction."}
+            return {
+                "error": (
+                    "Your connected wallet is not involved in this transaction. "
+                    "You can only verify deposits you signed and sent."
+                ),
+            }
 
         inbound = _parse_verified_user_deposits(tx, user_wallet, agent_wallet)
         if not inbound:
-            return {"error": "No verifiable deposit to the Volume Agent wallet was found."}
+            return {
+                "error": (
+                    "No verifiable deposit from your wallet to the Volume Agent wallet was found. "
+                    "Ensure you signed the transfer and it sent tokens to the agent wallet."
+                ),
+            }
 
         now = datetime.now(timezone.utc).isoformat()
         records = []
+        skipped: list[str] = []
         for transfer in inbound:
             tok = resolve_token(transfer["mint"])
             if "error" in tok:
+                skipped.append(transfer.get("token") or transfer.get("mint", "unknown"))
                 continue
             record = {
-                "id": str(uuid.uuid4())[:8],
+                "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
                 "agent_wallet": agent_wallet,
                 "signature": signature,
@@ -495,12 +526,19 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
                 "reference_id": signature[:128],
                 "status": "confirmed",
                 "verified_at": now,
-                "explorer_url": f"https://explorer.solana.com/tx/{signature}",
+                "explorer_url": _explorer_url(signature),
             }
-            insert_ledger_entry(record)
-            records.append(record)
+            if insert_ledger_entry(record):
+                records.append(record)
         if not records:
-            return {"error": "Could not resolve deposited token metadata."}
+            if skipped:
+                return {
+                    "error": (
+                        "Deposit found on-chain but token metadata could not be resolved: "
+                        + ", ".join(skipped)
+                    ),
+                }
+            return {"error": "Could not save deposit to database. Please retry verification."}
         return {
             "status": "confirmed",
             "deposits": records,
