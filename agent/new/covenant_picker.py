@@ -16,6 +16,7 @@ HF_MIN_HORIZON_DAYS = max(1, int(os.environ.get("HF_MIN_HORIZON_DAYS", "3")))
 
 from covenant_analysts import run_all_analysts, synthesize_signals
 from covenant_features import closes_from_prices, compute_features
+from hedge_fund_learning import symbol_learned_adjustment
 from yahoo_market_data import (
     CANDIDATE_UNIVERSE,
     fetch_yahoo_daily_prices,
@@ -336,7 +337,8 @@ def select_assets_for_horizon(
             features = row["features"]
             signals = run_all_analysts(features)
             synthesis = synthesize_signals(signals)
-            score = float(synthesis["composite_score"]) + _tilt(features, prefer)
+            learned = symbol_learned_adjustment(sym)
+            score = float(synthesis["composite_score"]) + _tilt(features, prefer) + learned
             ranked.append(
                 {
                     "symbol": sym,
@@ -346,6 +348,7 @@ def select_assets_for_horizon(
                     "action": synthesis["action"],
                     "confidence": synthesis["confidence"],
                     "composite_score": synthesis["composite_score"],
+                    "learned_adjustment": round(learned, 5),
                     "features_summary": {
                         "ret_21d": features.get("ret_21d"),
                         "vol_63": features.get("vol_63"),
@@ -364,7 +367,8 @@ def select_assets_for_horizon(
             features = compute_features(closes_cache[sym], spy_closes=spy_closes or None, news_titles=titles)
             signals = run_all_analysts(features)
             synthesis = synthesize_signals(signals)
-            score = float(synthesis["composite_score"]) + _tilt(features, prefer)
+            learned = symbol_learned_adjustment(sym)
+            score = float(synthesis["composite_score"]) + _tilt(features, prefer) + learned
             ranked.append(
                 {
                     "symbol": sym,
@@ -374,6 +378,7 @@ def select_assets_for_horizon(
                     "action": synthesis["action"],
                     "confidence": synthesis["confidence"],
                     "composite_score": synthesis["composite_score"],
+                    "learned_adjustment": round(learned, 5),
                     "features_summary": {
                         "ret_21d": features.get("ret_21d"),
                         "vol_63": features.get("vol_63"),
@@ -448,6 +453,6 @@ def select_assets_for_horizon(
             f"({preset['key']}, prefer={prefer}"
             f"{', stocks-only' if not allow_crypto else ''}"
             f"{', crypto-only' if crypto_only else ''}"
-            f") via {method}."
+            f") via {method}, scores tilted by learned reward from past round-trips."
         ),
     }

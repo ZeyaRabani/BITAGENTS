@@ -417,6 +417,18 @@ TOOLS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_learning_snapshot",
+            "description": (
+                "Reinforcement-learning feedback: per-symbol reward learned from realized "
+                "round-trip PnL on past paper + live trades. Shows which tickers the agent "
+                "has learned to favor/avoid in future asset selection, and why."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -550,6 +562,11 @@ def _paper_tools(user_wallet: Optional[str] = None):
             capital_usd=min(cap, HF_MAX_STRATEGY_USDC),
         )
 
+    def get_learning_snapshot(**_kwargs):
+        from hedge_fund_learning import learning_snapshot
+
+        return learning_snapshot()
+
     return {
         "create_paper_strategy": create_paper_strategy,
         "confirm_paper_strategy": confirm_paper_strategy,
@@ -565,6 +582,7 @@ def _paper_tools(user_wallet: Optional[str] = None):
         "analyze_token_for_portfolio": analyze_token_for_portfolio,
         "calculate_fees": calculate_fees,
         "get_fee_structure": get_fee_structure,
+        "get_learning_snapshot": get_learning_snapshot,
     }
 
 

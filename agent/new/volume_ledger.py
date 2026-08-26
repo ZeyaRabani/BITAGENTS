@@ -451,6 +451,7 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
                 "status": "already_recorded",
                 "deposit": existing,
                 "balances": get_volume_user_balances(user_wallet),
+                "message": "Deposit already credited to your balance.",
             }
 
         tx = None
@@ -500,7 +501,12 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
             records.append(record)
         if not records:
             return {"error": "Could not resolve deposited token metadata."}
-        return {"status": "confirmed", "deposits": records, "balances": get_volume_user_balances(user_wallet)}
+        return {
+            "status": "confirmed",
+            "deposits": records,
+            "balances": get_volume_user_balances(user_wallet),
+            "message": "Deposit verified and credited to your balance.",
+        }
 
 
 def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[str, Any]:

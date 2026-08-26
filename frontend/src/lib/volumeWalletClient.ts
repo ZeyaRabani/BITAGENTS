@@ -33,6 +33,7 @@ export type ResolvedToken = {
 
 export type DepositVerifyResponse = {
   status: string;
+  message?: string;
   deposits?: Array<{
     token: string;
     amount: number;
