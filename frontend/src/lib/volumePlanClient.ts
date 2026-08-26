@@ -24,8 +24,8 @@ export type VolumeCampaignSummary = {
   last_error?: { leg?: string; error?: string; available?: number } | null;
   infrastructure?: {
     pool_creation_error?: { error?: string };
-    last_check?: { message?: string };
-    initial_check?: { message?: string };
+    last_check?: { message?: string; source?: string; jupiter_route?: boolean };
+    initial_check?: { message?: string; source?: string; jupiter_route?: boolean };
   };
 };
 
@@ -41,6 +41,7 @@ export type VolumePoolCheck = {
   pool_creation_cost_sol?: number;
   message?: string;
   source?: string;
+  jupiter_route?: boolean;
   pool_type?: string | null;
   meteora_url?: string;
   base_token?: string;

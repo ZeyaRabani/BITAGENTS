@@ -96,8 +96,8 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     name: "Volume Agent",
     category: "Trading",
     description:
-      "Run volume campaigns. Deposit your token + SOL, create or reuse a pool, and schedule buy/sell cycles at your chosen frequency.",
-    tagline: "DLMM volume · pool infra",
+      "Run volume campaigns on tokens that already trade. Deposit SOL, pick a pair, and schedule buy/sell cycles through Jupiter — same path as BITAGENTS Volume.",
+    tagline: "Jupiter volume · no pool setup",
     pricePerTask: "0.25% / leg",
     runs: "-",
     volumeSol: "-",

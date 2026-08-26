@@ -3,9 +3,9 @@ Volume Agent — Meteora DLMM pool infrastructure + scheduled buy/sell volume ca
 
 Flow:
 1. User signs in (shared wallet auth)
-2. User deposits token + SOL (pool creation ~0.02669 SOL + trade budget)
+2. User deposits SOL (and token if needed)
 3. User creates campaign with pair, frequency, max executions
-4. Agent checks DLMM pool → creates or reuses
+4. Agent reuses existing Meteora/Jupiter liquidity (same path as BITAGENTS Volume)
 5. Scheduler runs round-trip swaps (SOL→token, token→SOL) at 0.25% platform fee per leg
 """
 
@@ -48,11 +48,9 @@ from dca_agent import (
 )
 from hosted_llm import call_llm, llm_provider, use_hosted_ollama
 from meteora_dlmm import (
-    METEORA_DEFAULT_FEE_BPS,
+    NO_ROUTE_MESSAGE,
     check_pool_infrastructure,
-    create_dlmm_pool,
     ensure_meteora_dlmm_pool,
-    get_pool_creation_cost_sol,
     meteora_pool_app_url,
 )
 from volume_ledger import (
@@ -136,8 +134,8 @@ def _estimate_campaign_budget(
 
 
 def _dlmm_pool_ready(infra: dict[str, Any]) -> bool:
-    """True when Meteora returned a real on-chain pool address (DLMM or DAMM v2)."""
-    return bool(infra.get("pool_exists") and infra.get("pool_address"))
+    """True when the campaign can swap: a Meteora pool or any Jupiter route."""
+    return bool(infra.get("pool_exists"))
 
 
 def ensure_volume_meteora_pool(
@@ -147,7 +145,8 @@ def ensure_volume_meteora_pool(
     user_wallet: Optional[str] = None,
     create_if_missing: bool = False,
 ) -> dict[str, Any]:
-    """Resolve tokens, check Meteora live, optionally create a DLMM pool on Meteora."""
+    """Resolve tokens and reuse existing Meteora/Jupiter liquidity. Never creates a pool."""
+    del user_wallet, create_if_missing
     base = resolve_token(base_token)
     quote = resolve_token(quote_token)
     if "error" in base:
@@ -155,19 +154,8 @@ def ensure_volume_meteora_pool(
     if "error" in quote:
         return quote
 
-    if create_if_missing and user_wallet:
-        pool_cost = get_pool_creation_cost_sol()
-        spend_check = check_user_can_spend_volume(user_wallet.strip(), quote["symbol"], pool_cost)
-        if "error" in spend_check:
-            return spend_check
-
-    result = ensure_meteora_dlmm_pool(
-        base["mint"],
-        quote["mint"],
-        create_if_missing=create_if_missing,
-        quote_amount=float(get_pool_creation_cost_sol()) if create_if_missing else 0.0,
-    )
-    if result.get("error"):
+    result = ensure_meteora_dlmm_pool(base["mint"], quote["mint"])
+    if result.get("error") and not result.get("pool_exists"):
         return result
 
     result.update(
@@ -179,22 +167,6 @@ def ensure_volume_meteora_pool(
             "pair": f"{base['symbol']}/{quote['symbol']}",
         }
     )
-
-    if (
-        create_if_missing
-        and user_wallet
-        and result.get("status") == "created"
-        and (result.get("liquidity") or {}).get("status") == "seeded"
-    ):
-        pool_cost = get_pool_creation_cost_sol()
-        record_user_spend_volume(
-            user_wallet.strip(),
-            quote["symbol"],
-            pool_cost,
-            reference_id=f"pool-create-{base['symbol']}-{quote['symbol']}",
-            signature=result.get("signature"),
-        )
-
     return result
 
 
@@ -210,116 +182,39 @@ def provision_campaign_infrastructure(campaign_id: str) -> dict[str, Any]:
 
     if _dlmm_pool_ready(infra):
         pool_address = infra.get("pool_address")
+        infra_merged = {**campaign.get("infrastructure", {}), "last_check": infra}
+        infra_merged.pop("pool_creation_error", None)
+        infra_merged.pop("spend_check_error", None)
+        updates["infrastructure"] = infra_merged
         updates["pool_exists"] = True
         updates["pool_address"] = pool_address
-        updates["status"] = "active" if campaign.get("status") == "provisioning" else campaign.get("status")
-        if campaign.get("status") == "provisioning" and not campaign.get("next_execution_at"):
-            updates["next_execution_at"] = datetime.now(timezone.utc).isoformat()
+        updates["pool_creation_cost_sol"] = 0.0
+        prev = campaign.get("status")
+        if prev in ("provisioning", "failed"):
+            updates["status"] = "active"
+            if not campaign.get("next_execution_at"):
+                updates["next_execution_at"] = datetime.now(timezone.utc).isoformat()
         update_volume_campaign(campaign_id, updates)
         return {
             "status": "reuse_pool",
             "campaign_id": campaign_id,
             "pool_address": pool_address,
             "source": infra.get("source", "meteora"),
+            "jupiter_route": bool(infra.get("jupiter_route")),
             "meteora_url": meteora_pool_app_url(pool_address, infra.get("pool_type") or "dlmm") if pool_address else None,
             "message": infra.get("message"),
             "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
         }
 
-    user_wallet = (campaign.get("user_wallet") or "").strip()
-    pool_cost = float(campaign.get("pool_creation_cost_sol") or get_pool_creation_cost_sol())
-    seed_token_amount = float(campaign.get("infrastructure", {}).get("seed_token_amount") or 0.0)
-    spend_check = check_user_can_spend_volume(
-        user_wallet, campaign.get("quote_token", "SOL"), pool_cost, exclude_campaign_id=campaign_id
-    )
-    if "error" in spend_check:
-        updates["status"] = "failed"
-        updates["infrastructure"] = {
-            **updates.get("infrastructure", {}),
-            "spend_check_error": spend_check,
-            "last_provision_error_at": datetime.now(timezone.utc).isoformat(),
-        }
-        update_volume_campaign(campaign_id, updates)
-        return spend_check
-
-    created = create_dlmm_pool(
-        token_mint=campaign["base_mint"],
-        quote_mint=campaign["quote_mint"],
-        fee_bps=METEORA_DEFAULT_FEE_BPS,
-        quote_amount=pool_cost,
-        token_amount=seed_token_amount,
-    )
-    if created.get("error"):
-        updates["status"] = "failed"
-        updates["infrastructure"] = {
-            **updates.get("infrastructure", {}),
-            "pool_creation_error": created,
-            "last_provision_error_at": datetime.now(timezone.utc).isoformat(),
-        }
-        update_volume_campaign(campaign_id, updates)
-        return created
-
-    pool_address = created.get("pool_address")
-    if created.get("status") == "exists" and not pool_address:
-        pool_address = (created.get("pool") or {}).get("pool_address")
-
-    # A pool with no liquidity in it can't fill any swap — an empty pool is
-    # not a usable pool. Only mark the campaign ready to trade once real
-    # liquidity actually landed on-chain, not just the empty pool shell.
-    liquidity = created.get("liquidity") or {}
-    if liquidity.get("status") != "seeded":
-        updates["status"] = "failed"
-        updates["infrastructure"] = {
-            **updates.get("infrastructure", {}),
-            "pool_creation": created,
-            "pool_creation_error": {
-                "error": liquidity.get("error")
-                or "Pool was created but liquidity seeding did not complete, so it cannot fill any swaps yet."
-            },
-            "last_provision_error_at": datetime.now(timezone.utc).isoformat(),
-        }
-        update_volume_campaign(campaign_id, updates)
-        return {"error": updates["infrastructure"]["pool_creation_error"]["error"], "pool_address": pool_address}
-
-    updates.update(
-        {
-            "pool_exists": True,
-            "pool_address": pool_address,
-            "status": "active",
-            "next_execution_at": datetime.now(timezone.utc).isoformat(),
-            "infrastructure": {
-                **updates.get("infrastructure", {}),
-                "pool_creation": created,
-            },
-        }
-    )
-    if user_wallet and pool_cost > 0:
-        record_user_spend_volume(
-            user_wallet,
-            campaign.get("quote_token", "SOL"),
-            pool_cost,
-            reference_id=f"pool-create-{campaign_id}",
-            signature=liquidity.get("signature") or created.get("signature"),
-        )
-        updates["spent_so_far"] = round(float(campaign.get("spent_so_far") or 0) + pool_cost, 9)
-        if seed_token_amount > 0:
-            record_user_spend_volume(
-                user_wallet,
-                campaign.get("base_token"),
-                seed_token_amount,
-                reference_id=f"pool-create-{campaign_id}-token-seed",
-                signature=liquidity.get("signature"),
-            )
-
-    update_volume_campaign(campaign_id, updates)
-    return {
-        "status": "pool_ready",
-        "campaign_id": campaign_id,
-        "pool_address": pool_address,
-        "pool_creation": created,
-        "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-        "message": created.get("message") or "DLMM pool is ready for volume campaigns.",
+    err = infra.get("error") or infra.get("message") or NO_ROUTE_MESSAGE
+    updates["status"] = "failed"
+    updates["infrastructure"] = {
+        **updates.get("infrastructure", {}),
+        "pool_creation_error": {"error": err},
+        "last_provision_error_at": datetime.now(timezone.utc).isoformat(),
     }
+    update_volume_campaign(campaign_id, updates)
+    return {"error": err}
 
 
 def create_volume_campaign(
@@ -365,8 +260,12 @@ def create_volume_campaign(
 
     infra = check_pool_infrastructure(base["mint"], quote["mint"])
     dlmm_ready = _dlmm_pool_ready(infra)
-    pool_cost = 0.0 if dlmm_ready else float(infra.get("pool_creation_cost_sol") or get_pool_creation_cost_sol())
-    estimated_budget = _estimate_campaign_budget(trade_amount, max_executions, pool_cost, dlmm_ready)
+    if not dlmm_ready:
+        err = infra.get("error") or infra.get("message") or NO_ROUTE_MESSAGE
+        return {"error": err, "infrastructure": infra}
+
+    pool_cost = 0.0
+    estimated_budget = _estimate_campaign_budget(trade_amount, max_executions, pool_cost, True)
 
     if total_budget is None:
         total_budget = estimated_budget
@@ -374,7 +273,7 @@ def create_volume_campaign(
         return {
             "error": (
                 f"total_budget too low. Need at least {estimated_budget} {quote['symbol']} "
-                f"({max_executions} round-trips + pool cost {pool_cost})."
+                f"({max_executions} round-trips)."
             ),
             "estimated_budget": estimated_budget,
         }
@@ -408,9 +307,9 @@ def create_volume_campaign(
         "executions_count": 0,
         "slippage_bps": slippage_bps,
         "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-        "status": "active" if dlmm_ready else "provisioning",
+        "status": "active",
         "created_at": now.isoformat(),
-        "next_execution_at": now.isoformat() if dlmm_ready else None,
+        "next_execution_at": now.isoformat(),
         "executions": [],
         "infrastructure": {
             "initial_check": infra,
@@ -419,38 +318,19 @@ def create_volume_campaign(
     }
     insert_volume_campaign(campaign)
 
-    if not dlmm_ready:
-        provisioned = provision_campaign_infrastructure(campaign["id"])
-        campaign = find_volume_campaign(campaign["id"]) or campaign
-        if campaign.get("status") == "failed":
-            err = provisioned.get("error") or "Pool provisioning failed."
-            return {
-                "status": "created",
-                "campaign": campaign,
-                "infrastructure": provisioned,
-                "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-                "error": err,
-                "message": f"Volume campaign **{name}** created but pool setup failed: {err}",
-            }
-        pool_note = "reused" if campaign.get("pool_exists") else "created"
-        return {
-            "status": "created",
-            "campaign": campaign,
-            "infrastructure": provisioned,
-            "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-            "message": (
-                f"Volume campaign **{name}** created. "
-                f"Platform fee **0.25% per transaction leg** (buy and sell). "
-                f"Pool: {pool_note}."
-            ),
-        }
-
+    source = str(infra.get("source") or "")
+    if infra.get("pool_address"):
+        venue = "existing Meteora pool"
+    elif "meteora" in source.lower():
+        venue = "existing Meteora liquidity (via Jupiter)"
+    else:
+        venue = "existing Jupiter route"
     return {
         "status": "created",
         "campaign": campaign,
         "infrastructure": infra,
         "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-        "message": f"Volume campaign **{name}** is active on existing DLMM pool.",
+        "message": f"Volume campaign **{name}** is active on {venue}.",
     }
 
 
@@ -952,7 +832,7 @@ def run_volume_agent_with_actions(
         "`Create campaign: swap 0.0001 SOL -> USDC for 3 times every 30 seconds`\n\n"
         "Requirements:\n"
         f"- Deposit **SOL** (and your base token if needed) to the Volume Agent wallet\n"
-        f"- Pool creation costs ~{get_pool_creation_cost_sol()} SOL if no DLMM pool exists\n"
+        f"- The pair must already trade on Jupiter (same as BITAGENTS Volume — no new pool is created)\n"
         f"- Platform fee: **0.25% per swap leg** (buy and sell)\n\n"
         "Not financial advice. DYOR."
     )

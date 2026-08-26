@@ -317,7 +317,7 @@ export function VolumeCampaignPanel({
                       disabled={busyId === campaign.id}
                       onClick={() => void retryProvision(campaign)}
                     >
-                      {busyId === campaign.id ? "Retrying…" : "Retry pool setup"}
+                      {busyId === campaign.id ? "Retrying…" : "Retry liquidity check"}
                     </button>
                   )}
                   {campaign.status === "active" && (
@@ -371,12 +371,12 @@ export function VolumeCampaignPanel({
 
               {campaign.status === "provisioning" && (
                 <p className="mt-2 font-mono text-[10px] text-warn">
-                  Setting up Meteora DLMM pool infrastructure… This usually completes in seconds when a pool
-                  already exists.
+                  Checking Jupiter / Meteora liquidity… This usually completes in seconds when the pair
+                  already trades.
                 </p>
               )}
 
-              {provisionErr && (
+              {provisionErr && (campaign.status === "failed" || campaign.status === "provisioning") && (
                 <div className="mt-2 border border-warn/30 bg-warn/10 px-3 py-2 font-mono text-[10px] text-warn">
                   Pool setup: {provisionErr}
                 </div>
@@ -417,6 +417,8 @@ export function VolumeCampaignPanel({
                       >
                         {campaign.pool_address}
                       </a>
+                    ) : campaign.pool_exists ? (
+                      "Jupiter route"
                     ) : (
                       "pending"
                     )}

@@ -58,13 +58,11 @@ export function VolumeAgentDeposit({
   authToken,
   onBalancesChange,
   refreshTick = 0,
-  poolCreationCostSol = 0.02669,
 }: {
   cluster?: string;
   authToken?: string | null;
   onBalancesChange?: (balances: UserDepositBalances | null) => void;
   refreshTick?: number;
-  poolCreationCostSol?: number;
 }) {
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
@@ -306,11 +304,10 @@ export function VolumeAgentDeposit({
     <Panel title="Volume Agent wallet · deposit">
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Deposit your <strong className="text-foreground">token + SOL</strong> to the Volume Agent wallet on{" "}
-          {cluster ?? "Solana"}. After you send funds, your deposit is verified automatically and
-          credited. You can also paste a transaction signature below if verification was missed.
-          If no Meteora DLMM pool exists, reserve ~{poolCreationCostSol} SOL for pool creation plus
-          trade budget. Platform fee is <strong className="text-foreground">0.25% per swap leg</strong>.
+          Deposit <strong className="text-foreground">SOL</strong> (and your token if needed) to the Volume
+          Agent wallet on {cluster ?? "Solana"}. After you send funds, your deposit is verified automatically
+          and credited. You can also paste a transaction signature below if verification was missed.
+          Platform fee is <strong className="text-foreground">0.25% per swap leg</strong>.
         </p>
 
         {!connected && <WalletMultiButton className="!w-full !justify-center" />}

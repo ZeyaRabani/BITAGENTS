@@ -6,8 +6,6 @@ __pycache__
 .venv
 venv
 *.json
-!scripts/package.json
-!scripts/package-lock.json
 dca_plans.json
 user_deposits.json
 .git

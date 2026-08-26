@@ -3,10 +3,8 @@
 #
 # Deploy: connect this repo in Render and use this file (Docker), OR create a
 # native Python Web Service with root directory `agent/new`, build command
-# `bash build.sh`, and start command
+# `pip install -r requirements.txt`, and start command
 # `uvicorn agents_api:app --host 0.0.0.0 --port $PORT`.
-# Native deploys MUST run npm install in scripts/ or pool creation fails with
-# "Cannot find module '@solana/web3.js'".
 #
 # IMPORTANT: prefer numInstances: 1 for now — Hedge Fund paper monitor + in-memory
 # research caches are still process-local. DCA/Volume/EasyA schedulers use

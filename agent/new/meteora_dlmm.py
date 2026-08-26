@@ -1,20 +1,14 @@
 """
-Meteora pool helpers: DLMM + DAMM v2 discovery, creation cost, and pool reuse checks.
+Meteora pool helpers: DLMM + DAMM v2 discovery and Jupiter route reuse.
 
-Uses Meteora's indexed APIs (not our database):
-- DLMM:  https://dlmm.datapi.meteora.ag/pools
-- DAMM:  https://damm-v2.datapi.meteora.ag/pools
+Volume campaigns swap through Jupiter (same path as BITAGENTS Volume).
+We never create new DLMM pools from this process.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import subprocess
-import threading
-import time
-from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import requests
 
@@ -24,70 +18,91 @@ METEORA_DLMM_DATAPI = os.environ.get(
 METEORA_DAMM_V2_DATAPI = os.environ.get(
     "METEORA_DAMM_V2_DATAPI", "https://damm-v2.datapi.meteora.ag"
 ).rstrip("/")
-METEORA_POOL_CREATION_SOL = float(os.environ.get("METEORA_POOL_CREATION_SOL", "0.02669"))
 METEORA_DEFAULT_BIN_STEP = int(os.environ.get("METEORA_DEFAULT_BIN_STEP", "80"))
 METEORA_DEFAULT_FEE_BPS = int(os.environ.get("METEORA_DEFAULT_FEE_BPS", "25"))
-METEORA_POOL_SCRIPT = Path(__file__).resolve().parent / "scripts" / "create_dlmm_pool.cjs"
-METEORA_SCRIPTS_DIR = METEORA_POOL_SCRIPT.parent
-_POOL_DEPS_LOCK = threading.Lock()
+JUPITER_QUOTE_API = os.environ.get("JUPITER_QUOTE_API", "https://api.jup.ag/swap/v1/quote")
 SOL_MINT = "So11111111111111111111111111111111111111112"
+NO_ROUTE_MESSAGE = (
+    "Jupiter has no swap route for this pair. Volume Agent only runs campaigns on "
+    "tokens that already trade (same as BITAGENTS Volume). It does not create new pools."
+)
 
 
-def pool_script_deps_ready() -> bool:
-    return (METEORA_SCRIPTS_DIR / "node_modules" / "@solana" / "web3.js").exists()
+def _route_labels_from_jupiter(data: dict[str, Any]) -> list[str]:
+    labels: list[str] = []
+    plan = data.get("routePlan") or data.get("routePlans") or []
+    if not isinstance(plan, list):
+        return labels
+    for hop in plan:
+        if not isinstance(hop, dict):
+            continue
+        info = hop.get("swapInfo") if isinstance(hop.get("swapInfo"), dict) else hop
+        label = info.get("label") if isinstance(info, dict) else None
+        if label:
+            labels.append(str(label))
+    return labels
 
 
-def ensure_pool_script_deps() -> Optional[str]:
+def check_jupiter_route_exists(token_mint: str, quote_mint: str = SOL_MINT) -> dict[str, Any]:
     """
-    Install Node packages for create_dlmm_pool.cjs if they are missing.
-    Render native Python deploys have Node but do not run npm install unless
-    the build command includes it (the Docker image does).
-    Returns an error string, or None when ready.
+    True when Jupiter can already swap this pair (any venue: DLMM, DAMM v2,
+    Pump, Raydium, …). Volume campaigns execute through Jupiter, so a quote
+    is enough — we must not create a redundant empty DLMM pool.
     """
-    if pool_script_deps_ready():
-        return None
-    if not METEORA_POOL_SCRIPT.exists():
-        return "Meteora pool creation script is missing."
-    with _POOL_DEPS_LOCK:
-        if pool_script_deps_ready():
-            return None
-        print("  📦 Installing Meteora Node deps (agent/new/scripts)…")
-        try:
-            proc = subprocess.run(
-                ["npm", "install", "--omit=dev"],
-                cwd=str(METEORA_SCRIPTS_DIR),
-                capture_output=True,
-                text=True,
-                timeout=240,
-                check=False,
-            )
-        except FileNotFoundError:
-            return (
-                "npm is not installed. Meteora pool creation needs Node packages. "
-                "On Render, add to the build command: cd agent/new/scripts && npm install --omit=dev"
-            )
-        except subprocess.TimeoutExpired:
-            return "Timed out installing Meteora Node deps (npm install)."
-        if proc.returncode != 0:
-            err = ((proc.stderr or "") + "\n" + (proc.stdout or "")).strip()[:800]
-            return f"Failed to install Meteora Node deps (@solana/web3.js): {err}"
-        if not pool_script_deps_ready():
-            return (
-                "npm install finished but @solana/web3.js is still missing under "
-                f"{METEORA_SCRIPTS_DIR / 'node_modules'}."
-            )
-        print("  ✅ Meteora Node deps ready")
-        return None
+    token_mint = token_mint.strip()
+    quote_mint = (quote_mint or SOL_MINT).strip()
 
+    def _ok(labels: list[str], *, estimated_output: Any = None) -> dict[str, Any]:
+        meteora = any("meteora" in (lbl or "").lower() for lbl in labels)
+        return {
+            "ok": True,
+            "source": "meteora (via Jupiter)" if meteora else "jupiter",
+            "route_labels": labels,
+            "meteora_in_route": meteora,
+            "estimated_output": estimated_output,
+        }
 
-def _pool_script_error(stderr: str, stdout: str, code: int) -> str:
-    blob = f"{stderr}\n{stdout}"
-    if "Cannot find module '@solana/web3.js'" in blob or "MODULE_NOT_FOUND" in blob:
-        return (
-            "Meteora pool script is missing Node packages (@solana/web3.js). "
-            "On the server run: cd agent/new/scripts && npm install --omit=dev"
-        )
-    return (stderr or stdout or f"Pool creation script failed ({code})").strip()[:1200]
+    try:
+        from dca_agent import _jupiter_get, get_jupiter_quote, get_wallet_pubkey
+        from volume_ledger import get_volume_wallet_pubkey
+
+        taker = get_volume_wallet_pubkey() or get_wallet_pubkey()
+        if taker:
+            last_err = None
+            for amount_sol in (0.01, 0.001):
+                quote = get_jupiter_quote(quote_mint, token_mint, amount_sol, slippage_bps=500, taker=taker)
+                if not quote.get("error"):
+                    data = quote.get("build_data") if isinstance(quote.get("build_data"), dict) else {}
+                    labels = _route_labels_from_jupiter(data)
+                    if labels or quote.get("estimated_output"):
+                        return _ok(labels, estimated_output=quote.get("estimated_output"))
+                last_err = quote.get("error")
+            if last_err:
+                print(f"  Jupiter v2 route check: {last_err}")
+
+        for amount in ("10000000", "1000000", "100000"):
+            resp = _jupiter_get(
+                JUPITER_QUOTE_API,
+                {
+                    "inputMint": quote_mint,
+                    "outputMint": token_mint,
+                    "amount": amount,
+                    "slippageBps": "500",
+                },
+            )
+            if not resp.ok:
+                continue
+            data = resp.json()
+            if not isinstance(data, dict) or data.get("error"):
+                continue
+            labels = _route_labels_from_jupiter(data)
+            if labels or data.get("outAmount") or data.get("routePlan"):
+                return _ok(labels, estimated_output=data.get("outAmount"))
+    except Exception as exc:
+        print(f"  Jupiter route check failed: {exc}")
+        return {"ok": False, "error": str(exc)}
+
+    return {"ok": False, "error": "Jupiter has no route for this pair."}
 
 
 def _normalize_mint_pair(mint_a: str, mint_b: str) -> tuple[str, str]:
@@ -97,7 +112,8 @@ def _normalize_mint_pair(mint_a: str, mint_b: str) -> tuple[str, str]:
 
 
 def get_pool_creation_cost_sol() -> float:
-    return METEORA_POOL_CREATION_SOL
+    """Volume Agent does not create pools; kept for API compatibility."""
+    return 0.0
 
 
 def meteora_pool_app_url(pool_address: str, pool_type: str = "dlmm") -> str:
@@ -210,7 +226,11 @@ def find_meteora_pool(token_mint: str, quote_mint: str = SOL_MINT) -> Optional[d
 
 
 def check_pool_infrastructure(token_mint: str, quote_mint: str = SOL_MINT) -> dict[str, Any]:
-    """Live Meteora lookup for the mint pair (DLMM first, then DAMM v2)."""
+    """
+    Live liquidity check: Meteora DLMM/DAMM first, then any Jupiter route.
+
+    Volume swaps go through Jupiter, so a quote is sufficient to start a campaign.
+    """
     existing = find_meteora_pool(token_mint, quote_mint)
     if existing and existing.get("pool_address"):
         pool_address = existing["pool_address"]
@@ -222,6 +242,7 @@ def check_pool_infrastructure(token_mint: str, quote_mint: str = SOL_MINT) -> di
             "pool_type": pool_type,
             "action": "reuse_pool",
             "source": "meteora",
+            "jupiter_route": True,
             "meteora_url": existing.get("meteora_url") or meteora_pool_app_url(pool_address, pool_type),
             "pool": existing,
             "pool_creation_cost_sol": 0.0,
@@ -229,20 +250,42 @@ def check_pool_infrastructure(token_mint: str, quote_mint: str = SOL_MINT) -> di
             "message": f"Meteora {label} pool found: {pool_address}",
         }
 
+    jupiter = check_jupiter_route_exists(token_mint, quote_mint)
+    if jupiter.get("ok"):
+        labels = [str(x) for x in (jupiter.get("route_labels") or []) if x]
+        venue = ", ".join(labels[:3])
+        source = jupiter.get("source") or "jupiter"
+        return {
+            "pool_exists": True,
+            "pool_address": None,
+            "pool_type": None,
+            "action": "reuse_existing_liquidity",
+            "source": source,
+            "jupiter_route": True,
+            "route_labels": labels,
+            "pool": None,
+            "pool_creation_cost_sol": 0.0,
+            "platform_fee_bps": METEORA_DEFAULT_FEE_BPS,
+            "message": (
+                "No dedicated Meteora DLMM/DAMM listing, but Jupiter already routes this pair"
+                + (f" via {venue}" if venue else " through existing liquidity")
+                + ". Volume swaps use that route; no new DLMM pool is created."
+            ),
+        }
+
     return {
         "pool_exists": False,
         "pool_address": None,
         "pool_type": None,
-        "action": "create_pool",
-        "source": "meteora",
+        "action": "no_route",
+        "source": "jupiter",
+        "jupiter_route": False,
         "pool": None,
-        "pool_creation_cost_sol": get_pool_creation_cost_sol(),
+        "pool_creation_cost_sol": 0.0,
         "platform_fee_bps": METEORA_DEFAULT_FEE_BPS,
         "bin_step": METEORA_DEFAULT_BIN_STEP,
-        "message": (
-            f"No Meteora DLMM or DAMM v2 pool for this pair. DLMM creation requires "
-            f"~{get_pool_creation_cost_sol()} SOL plus seed liquidity."
-        ),
+        "message": NO_ROUTE_MESSAGE,
+        "error": NO_ROUTE_MESSAGE,
     }
 
 
@@ -256,165 +299,17 @@ def ensure_meteora_dlmm_pool(
     bin_step: Optional[int] = None,
     fee_bps: Optional[int] = None,
 ) -> dict[str, Any]:
-    """
-    Check Meteora for an existing pool (DLMM or DAMM v2). Optionally create a DLMM pool.
-    """
-    existing = find_meteora_pool(token_mint, quote_mint)
-    if existing and existing.get("pool_address"):
-        pool_address = existing["pool_address"]
-        pool_type = existing.get("pool_type") or "dlmm"
-        label = "DLMM" if pool_type == "dlmm" else "DAMM v2"
+    """Reuse existing Meteora/Jupiter liquidity. Never creates a new DLMM pool."""
+    del create_if_missing, quote_amount, token_amount, bin_step, fee_bps
+    checked = check_pool_infrastructure(token_mint, quote_mint)
+    if checked.get("pool_exists"):
         return {
-            "status": "exists",
-            "pool_exists": True,
-            "pool_address": pool_address,
-            "pool_type": pool_type,
-            "source": "meteora",
-            "meteora_url": existing.get("meteora_url") or meteora_pool_app_url(pool_address, pool_type),
-            "pool": existing,
-            "message": f"Meteora {label} pool already exists: {pool_address}",
+            **checked,
+            "status": "exists" if checked.get("pool_address") else "jupiter_route",
         }
-
-    if not create_if_missing:
-        return {
-            "status": "missing",
-            "pool_exists": False,
-            "pool_address": None,
-            "source": "meteora",
-            "pool_creation_cost_sol": get_pool_creation_cost_sol(),
-            "message": "No Meteora pool for this pair.",
-        }
-
-    created = create_dlmm_pool(
-        token_mint=token_mint,
-        quote_mint=quote_mint,
-        fee_bps=fee_bps or METEORA_DEFAULT_FEE_BPS,
-        bin_step=bin_step,
-        quote_amount=quote_amount,
-        token_amount=token_amount,
-    )
-    if created.get("error"):
-        return created
-
-    pool_address = created.get("pool_address") or (created.get("pool") or {}).get("pool_address")
-    if not pool_address:
-        return {"error": "Pool creation finished but no Meteora pool address was returned.", "raw": created}
-
-    verified = find_dlmm_pool(token_mint, quote_mint)
-    if verified and verified.get("pool_address"):
-        pool_address = verified["pool_address"]
-
     return {
-        "status": created.get("status") or "created",
-        "pool_exists": True,
-        "pool_address": pool_address,
-        "pool_type": "dlmm",
-        "source": "meteora",
-        "meteora_url": meteora_pool_app_url(pool_address, "dlmm"),
-        "signature": created.get("signature"),
-        "explorer_url": created.get("explorer_url"),
-        "verified_pool": verified,
-        "liquidity": created.get("liquidity") or {"status": "skipped"},
-        "message": f"Meteora DLMM pool created: {pool_address}",
+        **checked,
+        "status": "missing",
+        "error": checked.get("error") or NO_ROUTE_MESSAGE,
     }
 
-
-def create_dlmm_pool(
-    *,
-    token_mint: str,
-    quote_mint: str = SOL_MINT,
-    initial_price: float = 1.0,
-    bin_step: Optional[int] = None,
-    fee_bps: Optional[int] = None,
-    token_amount: float = 0.0,
-    quote_amount: float = 0.0,
-) -> dict[str, Any]:
-    """
-    Create a Meteora DLMM pool via the Node helper script when available.
-    Falls back to a clear error if the script is not installed.
-    """
-    existing = find_dlmm_pool(token_mint, quote_mint)
-    if existing and existing.get("pool_address"):
-        return {
-            "status": "exists",
-            "pool_address": existing["pool_address"],
-            "pool_type": "dlmm",
-            "pool": existing,
-            "meteora_url": existing.get("meteora_url"),
-            "message": "DLMM pool already exists; reusing it.",
-        }
-
-    if not METEORA_POOL_SCRIPT.exists():
-        return {
-            "error": (
-                "Meteora pool creation script missing. Install with: "
-                "cd agent/new/scripts && npm install --omit=dev"
-            ),
-            "script": str(METEORA_POOL_SCRIPT),
-        }
-
-    deps_error = ensure_pool_script_deps()
-    if deps_error:
-        return {"error": deps_error}
-
-    payload = {
-        "tokenMint": token_mint.strip(),
-        "quoteMint": (quote_mint or SOL_MINT).strip(),
-        "initialPrice": float(initial_price),
-        "binStep": int(bin_step or METEORA_DEFAULT_BIN_STEP),
-        "feeBps": int(fee_bps or METEORA_DEFAULT_FEE_BPS),
-        "tokenAmount": float(token_amount),
-        "quoteAmount": float(quote_amount),
-    }
-
-    env = os.environ.copy()
-    node_modules = str(METEORA_SCRIPTS_DIR / "node_modules")
-    existing_node_path = env.get("NODE_PATH", "")
-    env["NODE_PATH"] = (
-        node_modules if not existing_node_path else f"{node_modules}{os.pathsep}{existing_node_path}"
-    )
-
-    try:
-        proc = subprocess.run(
-            ["node", str(METEORA_POOL_SCRIPT), json.dumps(payload)],
-            capture_output=True,
-            text=True,
-            timeout=180,
-            check=False,
-            cwd=str(METEORA_SCRIPTS_DIR),
-            env=env,
-        )
-        stdout = (proc.stdout or "").strip()
-        stderr = (proc.stderr or "").strip()
-        if proc.returncode != 0:
-            return {"error": _pool_script_error(stderr, stdout, proc.returncode)}
-        try:
-            result = json.loads(stdout)
-        except json.JSONDecodeError:
-            return {"error": f"Invalid pool creation output: {stdout[:300]}"}
-
-        if result.get("error"):
-            return result
-
-        pool_address = result.get("pool_address") or result.get("lbPair")
-        if pool_address:
-            time.sleep(2)
-            verified = find_dlmm_pool(token_mint, quote_mint)
-            return {
-                "status": "created",
-                "pool_address": pool_address,
-                "pool_type": "dlmm",
-                "signature": result.get("signature"),
-                "explorer_url": result.get("explorer_url"),
-                "verified_pool": verified,
-                "liquidity": result.get("liquidity") or {"status": "skipped"},
-                "meteora_url": meteora_pool_app_url(pool_address, "dlmm"),
-                "message": f"Meteora DLMM pool created at {pool_address}.",
-            }
-        return {"error": "Pool creation script returned no pool address.", "raw": result}
-    except FileNotFoundError:
-        return {"error": "Node.js is not installed. Install Node 18+ to create Meteora pools."}
-    except subprocess.TimeoutExpired:
-        return {"error": "Meteora pool creation timed out after 180s."}
-    except Exception as exc:
-        return {"error": str(exc)}

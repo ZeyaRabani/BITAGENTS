@@ -240,7 +240,7 @@ def get_volume_agent_wallet_info() -> dict[str, Any]:
         "cluster": SOLANA_CLUSTER,
         "rpc": SOLANA_RPC,
         "platform_fee_rate": VOLUME_PLATFORM_FEE_RATE,
-        "pool_creation_cost_sol": float(os.environ.get("METEORA_POOL_CREATION_SOL", "0.02669")),
+        "pool_creation_cost_sol": 0.0,
         "any_spl_token": True,
         "common_tokens": ["SOL", "USDC", "USDT"],
     }
