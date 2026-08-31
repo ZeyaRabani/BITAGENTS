@@ -280,6 +280,13 @@ class WithdrawRequest(BaseModel):
     amount: float = Field(gt=0)
 
 
+class VolumeWithdrawRequest(BaseModel):
+    token: str = Field(min_length=1)
+    amount: float = Field(gt=0)
+    convert_to_quote: bool = False
+    quote_token: str = Field(default="SOL", min_length=1)
+
+
 class PlanStatusRequest(BaseModel):
     action: str = Field(min_length=3)
 
@@ -1059,10 +1066,16 @@ def volume_deposit_verify(
 
 @app.post("/volume/wallet/withdraw")
 def volume_wallet_withdraw(
-    body: WithdrawRequest,
+    body: VolumeWithdrawRequest,
     auth_wallet: str = Depends(require_wallet_session),
 ) -> dict[str, Any]:
-    result = withdraw_volume_tokens(auth_wallet, body.token.strip(), body.amount)
+    result = withdraw_volume_tokens(
+        auth_wallet,
+        body.token.strip(),
+        body.amount,
+        convert_to_quote=body.convert_to_quote,
+        quote_token=body.quote_token.strip(),
+    )
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result

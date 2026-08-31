@@ -2,6 +2,7 @@ export type TokenBalanceRow = {
   token: string;
   mint?: string | null;
   deposited: number;
+  acquired_from_campaigns?: number;
   spent_in_campaigns?: number;
   reserved_for_campaigns: number;
   withdrawn?: number;
@@ -136,15 +137,27 @@ export async function verifyVolumeDepositWithRetry(
 export async function withdrawVolumeTokens(
   token: string,
   amount: number,
-  authToken: string
-): Promise<{ status: string; signature?: string; balances?: UserDepositBalances }> {
+  authToken: string,
+  options?: { convertToQuote?: boolean; quoteToken?: string }
+): Promise<{
+  status: string;
+  signature?: string;
+  balances?: UserDepositBalances;
+  swap?: { swap_signature?: string; output_amount?: number; output_token?: string };
+  converted_from?: { token: string; amount: number };
+}> {
   const res = await fetch("/api/agents/volume/wallet/withdraw", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${authToken}`,
     },
-    body: JSON.stringify({ token, amount }),
+    body: JSON.stringify({
+      token,
+      amount,
+      convert_to_quote: options?.convertToQuote ?? false,
+      quote_token: options?.quoteToken ?? "SOL",
+    }),
   });
   const data = await res.json();
   if (!res.ok) {

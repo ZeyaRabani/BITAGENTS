@@ -622,7 +622,7 @@ export async function proxyVolumeDepositVerify(
 }
 
 export async function proxyVolumeWithdraw(
-  body: { token: string; amount: number },
+  body: { token: string; amount: number; convert_to_quote?: boolean; quote_token?: string },
   authToken: string
 ): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/volume/wallet/withdraw`, {

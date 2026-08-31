@@ -183,7 +183,7 @@ def _volume_rows(user_wallet: str) -> list[dict[str, Any]]:
 
 def _ledger_totals(user_wallet: str, token_symbol: str, rows: list[dict[str, Any]]) -> dict[str, float]:
     token_symbol = token_symbol.strip().upper()
-    deposited = spent = withdrawn = 0.0
+    deposited = spent = acquired = withdrawn = 0.0
     for row in rows:
         if row.get("status") != "confirmed":
             continue
@@ -195,11 +195,14 @@ def _ledger_totals(user_wallet: str, token_symbol: str, rows: list[dict[str, Any
             deposited += amount
         elif direction == "spend":
             spent += amount
+        elif direction == "acquire":
+            acquired += amount
         elif direction == "withdraw":
             withdrawn += amount
     return {
         "deposited": round(deposited, 9),
         "spent_ledger": round(spent, 9),
+        "acquired": round(acquired, 9),
         "withdrawn": round(withdrawn, 9),
     }
 
@@ -272,13 +275,15 @@ def get_volume_user_balances(
         reserved = _reserved_for_campaigns(user_wallet, token, exclude_campaign_id=exclude_campaign_id)
         deposited = totals["deposited"]
         spent = totals["spent_ledger"]
+        acquired = totals["acquired"]
         withdrawn = totals["withdrawn"]
-        available = round(max(0.0, deposited - spent - withdrawn - reserved), 9)
+        available = round(max(0.0, deposited + acquired - spent - withdrawn - reserved), 9)
         balances.append(
             {
                 "token": token,
                 "mint": meta.get("mint"),
                 "deposited": deposited,
+                "acquired_from_campaigns": acquired,
                 "spent_in_campaigns": spent,
                 "reserved_for_campaigns": reserved,
                 "withdrawn": withdrawn,
@@ -385,6 +390,42 @@ def record_user_spend_volume(
         }
     )
     return {"ok": True}
+
+
+def record_user_acquire_volume(
+    user_wallet: str,
+    token: str,
+    amount: float,
+    *,
+    reference_id: str,
+    signature: Optional[str] = None,
+) -> dict[str, Any]:
+    """Credit base tokens bought during a volume cycle (e.g. when sell leg fails later)."""
+    if amount <= 0:
+        return {"acquired": 0.0}
+    tok = resolve_token(token)
+    if "error" in tok:
+        return tok
+    agent_wallet = get_volume_wallet_pubkey()
+    if not agent_wallet:
+        return {"error": "Volume agent wallet not configured."}
+    insert_ledger_entry(
+        {
+            "id": str(uuid.uuid4())[:8],
+            "user_wallet": user_wallet.strip(),
+            "agent_wallet": agent_wallet,
+            "signature": signature,
+            "token": tok["symbol"],
+            "mint": tok["mint"],
+            "amount": float(amount),
+            "direction": "acquire",
+            "reference_type": "volume_swap_buy",
+            "reference_id": reference_id[:128],
+            "status": "confirmed",
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    return {"acquired": float(amount), "token": tok["symbol"]}
 
 
 def record_user_credit_volume(
@@ -547,7 +588,93 @@ def verify_and_record_volume_deposit(signature: str, user_wallet: str) -> dict[s
         }
 
 
-def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[str, Any]:
+def _volume_withdrawable(user_wallet: str, token_symbol: str, rows: Optional[list[dict[str, Any]]] = None) -> float:
+    rows = rows if rows is not None else _volume_rows(user_wallet)
+    ledger = _ledger_totals(user_wallet, token_symbol, rows)
+    reserved = _reserved_for_campaigns(user_wallet, token_symbol)
+    return round(
+        max(
+            ledger["deposited"] + ledger["acquired"] - ledger["spent_ledger"] - ledger["withdrawn"] - reserved,
+            0.0,
+        ),
+        9,
+    )
+
+
+def _liquidate_volume_token_via_pool(
+    user_wallet: str,
+    base_token: str,
+    amount: float,
+    quote_token: str = "SOL",
+    *,
+    reference_id: str,
+) -> dict[str, Any]:
+    """
+    Swap base → quote through Jupiter (often routing via Meteora DLMM) before withdrawal.
+    Updates the user's ledger with the sell leg proceeds.
+    """
+    from volume_agent import _execute_meteora_swap
+
+    base = resolve_token(base_token)
+    quote = resolve_token(quote_token)
+    if "error" in base:
+        return base
+    if "error" in quote:
+        return quote
+    amount = round(float(amount), 9)
+    if amount <= 0:
+        return {"error": "Swap amount must be greater than zero."}
+
+    swap = _execute_meteora_swap(
+        base["mint"],
+        quote["mint"],
+        amount,
+        base["decimals"],
+        slippage_bps=200,
+        pool_address=None,
+    )
+    if swap.get("status") != "success":
+        return {
+            "error": swap.get("error") or "Could not swap token through Jupiter/Meteora liquidity.",
+            "swap": swap,
+        }
+
+    record_user_spend_volume(
+        user_wallet,
+        base["symbol"],
+        amount,
+        reference_id=f"{reference_id}-withdraw-sell-base",
+        signature=swap.get("signature"),
+    )
+    out_raw = int(swap.get("output_amount_raw") or 0)
+    proceeds = out_raw / (10 ** quote["decimals"]) if out_raw > 0 else 0.0
+    if proceeds > 0:
+        record_user_credit_volume(
+            user_wallet,
+            quote["symbol"],
+            proceeds,
+            reference_id=f"{reference_id}-withdraw-sell-return",
+            signature=swap.get("signature"),
+        )
+    return {
+        "status": "success",
+        "swap_signature": swap.get("signature"),
+        "input_token": base["symbol"],
+        "input_amount": amount,
+        "output_token": quote["symbol"],
+        "output_amount": proceeds,
+        "explorer_url": swap.get("explorer_url"),
+    }
+
+
+def withdraw_volume_tokens(
+    user_wallet: str,
+    token: str,
+    amount: float,
+    *,
+    convert_to_quote: bool = False,
+    quote_token: str = "SOL",
+) -> dict[str, Any]:
     from deposit_ledger import _ledger_lock
     from dca_agent import send_tokens_to_user
 
@@ -560,21 +687,59 @@ def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[
         return {"error": "Withdraw amount must be greater than zero."}
 
     rows = _volume_rows(user_wallet)
-    ledger = _ledger_totals(user_wallet, tok["symbol"], rows)
-    reserved = _reserved_for_campaigns(user_wallet, tok["symbol"])
-    withdrawable = round(max(ledger["deposited"] - ledger["spent_ledger"] - ledger["withdrawn"] - reserved, 0.0), 9)
+    withdrawable = _volume_withdrawable(user_wallet, tok["symbol"], rows)
+    payout_token = tok["symbol"]
+    payout_amount = amount
+    payout_mint = tok["mint"]
+    payout_decimals = tok["decimals"]
+    swap_meta: Optional[dict[str, Any]] = None
 
     with _ledger_lock:
         if withdrawable + 1e-12 < amount:
             return {
-                "error": f"Insufficient withdrawable {tok['symbol']}. Withdrawable: {withdrawable}, requested: {amount}.",
+                "error": (
+                    f"Insufficient withdrawable {tok['symbol']}. Withdrawable: {withdrawable}, requested: {amount}. "
+                    "Funds reserved for active volume campaigns cannot be withdrawn until those campaigns end."
+                ),
                 "withdrawable": withdrawable,
             }
+
+        if convert_to_quote and tok["symbol"].upper() != quote_token.strip().upper():
+            swap_meta = _liquidate_volume_token_via_pool(
+                user_wallet,
+                tok["symbol"],
+                amount,
+                quote_token,
+                reference_id=f"withdraw-{uuid.uuid4().hex[:8]}",
+            )
+            if swap_meta.get("error"):
+                return swap_meta
+            quote = resolve_token(quote_token)
+            if "error" in quote:
+                return quote
+            payout_token = quote["symbol"]
+            payout_amount = round(float(swap_meta.get("output_amount") or 0), 9)
+            payout_mint = quote["mint"]
+            payout_decimals = quote["decimals"]
+            if payout_amount <= 0:
+                return {"error": "Swap completed but produced no output to withdraw."}
+
+        payout_withdrawable = _volume_withdrawable(user_wallet, payout_token)
+        if payout_withdrawable + 1e-12 < payout_amount:
+            return {
+                "error": (
+                    f"Insufficient withdrawable {payout_token} after swap. "
+                    f"Available: {payout_withdrawable}, needed: {payout_amount}."
+                ),
+                "withdrawable": payout_withdrawable,
+                "swap": swap_meta,
+            }
+
         transfer = send_tokens_to_user(
             user_wallet,
-            tok["mint"],
-            amount,
-            tok["decimals"],
+            payout_mint,
+            payout_amount,
+            payout_decimals,
             signing_keypair=load_volume_keypair(),
         )
         if transfer.get("error") or transfer.get("status") != "success":
@@ -585,9 +750,9 @@ def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[
             "user_wallet": user_wallet,
             "agent_wallet": get_volume_wallet_pubkey(),
             "signature": signature,
-            "token": tok["symbol"],
-            "mint": tok["mint"],
-            "amount": amount,
+            "token": payout_token,
+            "mint": payout_mint,
+            "amount": payout_amount,
             "direction": "withdraw",
             "reference_type": "volume_withdraw",
             "reference_id": (signature or "withdraw")[:128],
@@ -596,7 +761,16 @@ def withdraw_volume_tokens(user_wallet: str, token: str, amount: float) -> dict[
             "explorer_url": transfer.get("explorer_url"),
         }
         insert_ledger_entry(record)
-    return {"status": "success", "withdraw": record, "signature": signature, "balances": get_volume_user_balances(user_wallet)}
+    result: dict[str, Any] = {
+        "status": "success",
+        "withdraw": record,
+        "signature": signature,
+        "balances": get_volume_user_balances(user_wallet),
+    }
+    if swap_meta:
+        result["swap"] = swap_meta
+        result["converted_from"] = {"token": tok["symbol"], "amount": amount}
+    return result
 
 
 def list_volume_user_ledger(user_wallet: str, limit: int = 50) -> list[dict[str, Any]]:

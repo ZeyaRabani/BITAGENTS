@@ -9,7 +9,6 @@ import { VOLUME_AGENT } from "@/lib/volumeAgentSimulation";
 import { fetchVolumeAgentHealth, type VolumeAgentHealth } from "@/lib/volumeAgentClient";
 import { createVolumeCampaign } from "@/lib/volumePlanClient";
 import { useVolumeWalletAuth } from "@/hooks/useVolumeWalletAuth";
-import { withdrawVolumeTokens, type UserDepositBalances } from "@/lib/volumeWalletClient";
 
 const BITAGENTS_MINT = "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY";
 
@@ -57,14 +56,10 @@ export function VolumeAgentSimpleConsole() {
   const { publicKey } = useWallet();
   const { token, busy: authBusy, error: authError, isAuthenticated } = useVolumeWalletAuth();
   const [health, setHealth] = useState<VolumeAgentHealth | null>(null);
-  const [userBalances, setUserBalances] = useState<UserDepositBalances | null>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [withdrawBusy, setWithdrawBusy] = useState(false);
-  const [withdrawError, setWithdrawError] = useState<string | null>(null);
-  const [withdrawSuccess, setWithdrawSuccess] = useState<string | null>(null);
 
   const cluster = health?.cluster;
 
@@ -95,27 +90,6 @@ export function VolumeAgentSimpleConsole() {
       setError(err instanceof Error ? err.message : "Could not start campaign");
     } finally {
       setBusyKey(null);
-    }
-  }
-
-  async function withdrawAll() {
-    if (!token || !userBalances) return;
-    const toWithdraw = userBalances.balances.filter((row) => (row.withdrawable ?? row.available) > 0);
-    if (toWithdraw.length === 0) return;
-
-    setWithdrawBusy(true);
-    setWithdrawError(null);
-    setWithdrawSuccess(null);
-    try {
-      for (const row of toWithdraw) {
-        await withdrawVolumeTokens(row.token, row.withdrawable ?? row.available, token);
-      }
-      setWithdrawSuccess("Withdrawal sent — funds are on their way back to your wallet.");
-      setRefreshTick((t) => t + 1);
-    } catch (err) {
-      setWithdrawError(err instanceof Error ? err.message : "Withdraw failed");
-    } finally {
-      setWithdrawBusy(false);
     }
   }
 
@@ -151,7 +125,6 @@ export function VolumeAgentSimpleConsole() {
         cluster={cluster}
         authToken={token}
         refreshTick={refreshTick}
-        onBalancesChange={setUserBalances}
       />
 
       {!publicKey && (
@@ -165,28 +138,6 @@ export function VolumeAgentSimpleConsole() {
           Approve the wallet sign-in prompt to continue.
         </div>
       )}
-
-      {userBalances && userBalances.balances.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border border-grid bg-surface/40 px-4 py-3">
-          <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            <span className="text-foreground">
-              {userBalances.user_wallet.slice(0, 4)}…{userBalances.user_wallet.slice(-4)}
-            </span>{" "}
-            · {userBalances.balances.length} deposited token{userBalances.balances.length === 1 ? "" : "s"}
-          </div>
-          <button
-            type="button"
-            disabled={withdrawBusy || !userBalances.balances.some((row) => (row.withdrawable ?? row.available) > 0)}
-            onClick={() => void withdrawAll()}
-            className="border border-signal px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {withdrawBusy ? "Withdrawing…" : "Withdraw all to my wallet"}
-          </button>
-        </div>
-      )}
-
-      {withdrawError && <p className="font-mono text-[11px] text-warn">{withdrawError}</p>}
-      {withdrawSuccess && <p className="font-mono text-[11px] text-signal">{withdrawSuccess}</p>}
 
       <Panel title="Start a BITAGENTS volume campaign">
         <div className="space-y-4">

@@ -157,7 +157,13 @@ TOOLS = [
                     },
                     "take_profit_pct": {"type": "number"},
                     "stop_loss_pct": {"type": "number"},
-                    "capital_usd": {"type": "number", "description": f"USDC sleeve, max {HF_MAX_STRATEGY_USDC}"},
+                    "capital_usd": {
+                        "type": "number",
+                        "description": (
+                            f"USDC sleeve, max {HF_MAX_STRATEGY_USDC}. "
+                            "Always copy the user's stated amount into notes too; omit here if unsure."
+                        ),
+                    },
                     "horizon_days": {
                         "type": "number",
                         "description": f"Trading days (min {HF_MIN_HORIZON_DAYS}; omit/0 = open-ended)",
@@ -432,19 +438,25 @@ TOOLS = [
 ]
 
 
-def _paper_tools(user_wallet: Optional[str] = None):
+def _paper_tools(user_wallet: Optional[str] = None, last_user_input: Optional[str] = None):
     wallet = (user_wallet or "").strip()
+    prompt_context = (last_user_input or "").strip()
+
+    def _capital_source_text(notes: str) -> str:
+        parts = [p for p in (notes.strip(), prompt_context) if p]
+        return "\n".join(parts)
 
     def create_paper_strategy(**kwargs):
         if not wallet:
             return {"error": "Wallet sign-in required for paper trading"}
         from covenant_picker import filter_real_tickers
 
-        notes = kwargs.get("notes") or ""
+        notes = (kwargs.get("notes") or "").strip()
+        source_text = _capital_source_text(notes)
         rules = {
             "take_profit_pct": kwargs.get("take_profit_pct", 15),
             "stop_loss_pct": kwargs.get("stop_loss_pct", 8),
-            "notes": notes,
+            "notes": notes or source_text[:500],
             "objective": "max_profit",
         }
         tokens = filter_real_tickers(kwargs.get("tokens"))
@@ -455,10 +467,12 @@ def _paper_tools(user_wallet: Optional[str] = None):
         created_by = "user" if tokens else "agent"
         horizon_days = kwargs.get("horizon_days")
         if horizon_days is None:
-            horizon_days = parse_horizon_days(notes)
+            horizon_days = parse_horizon_days(notes or prompt_context)
         capital = kwargs.get("capital_usd")
-        if capital is None and notes:
-            capital = _extract_capital(notes)
+        if source_text and _capital_explicit_in_text(source_text):
+            capital = _extract_capital(source_text)
+        elif capital is None and source_text:
+            capital = _extract_capital(source_text)
         max_names = kwargs.get("max_names")
         return create_strategy(
             user_wallet=wallet,
@@ -702,7 +716,26 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
     if result.get("error"):
         return f"**Could not propose strategy:** {result['error']}"
     sid = result.get("id") or (result.get("strategy") or {}).get("id")
+    trading_mode = (result.get("trading_mode") or "live").strip().lower()
+    is_paper = trading_mode == "paper" or bool(result.get("paper"))
+
+    if is_paper:
+        banner = (
+            "**PAPER strategy** (simulated fills — no real USDC is spent)\n\n"
+            "This proposal runs in paper mode only. To trade with **real deposited USDC**, "
+            "say **create a live strategy** with the same assets — do not say “propose” or "
+            "“confirm” on this paper sleeve.\n"
+        )
+        confirm_line = f"**Reply `confirm {sid}` to activate this paper strategy** (virtual fills)."
+    else:
+        banner = (
+            "**LIVE strategy** (real USDC — deposit to the Hedge Fund wallet before confirm)\n\n"
+            "After you confirm, the agent debits your USDC deposit and executes Jupiter swaps.\n"
+        )
+        confirm_line = f"**Reply `confirm {sid}` to deploy live Jupiter buys** (after depositing USDC)."
+
     lines = [
+        banner,
         f"**Strategy proposed — awaiting confirmation** `{sid}`",
         f"- Status: `{result.get('status')}` (no fills yet)",
         f"- Mode: {result.get('mode')} · Horizon: "
@@ -714,11 +747,18 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
         f"- Capital sleeve: ${_fmt(result.get('capital_usd'))} USDC "
         f"(max ${_fmt(result.get('max_capital_usd') or HF_MAX_STRATEGY_USDC)})",
         f"- Symbols: {', '.join(result.get('symbols') or [])}",
-        f"- Trading: **{result.get('trading_mode') or 'live'}** · funding: {result.get('funding_token') or 'USDC'}",
-        "- Deposit USDC to the Hedge Fund wallet before confirm (1% fee on start)",
-        "",
-        "**Solana mints (catalog / Jupiter) — correct before confirm if needed**",
+        f"- Trading: **{trading_mode or 'live'}** · funding: {result.get('funding_token') or 'USDC'}",
     ]
+    if is_paper:
+        lines.append("- Paper mode: virtual portfolio only (not on-chain)")
+    else:
+        lines.append("- Deposit USDC to the Hedge Fund wallet before confirm (1% fee on start)")
+    lines.extend(
+        [
+            "",
+            "**Solana mints (catalog / Jupiter) — correct before confirm if needed**",
+        ]
+    )
     for a in result.get("solana_assets") or []:
         lines.append(
             f"- **{a.get('display_symbol') or a.get('symbol')}** → `{a.get('symbol')}` "
@@ -736,7 +776,7 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
         [
             f"- Liquidation: USDC `{result.get('usdc_mint')}` when horizon ends or you close (10% of profit)",
             "",
-            f"**Reply `confirm {sid}` to deploy live Jupiter buys** (after depositing).",
+            confirm_line,
             "Or edit TP/SL / symbols / mint_overrides before confirming.",
         ]
     )
@@ -754,34 +794,67 @@ def _extract_tokens(text: str) -> list[str]:
     return found[:12]
 
 
+def _capital_explicit_in_text(text: str) -> bool:
+    """True when the user named a dollar amount (not just a default sleeve cap)."""
+    if not (text or "").strip():
+        return False
+    markers = (
+        r"\$\s*\d",
+        r"\b\d+(?:\.\d+)?\s*(?:k|K)?\s*(?:usd|USDC|usdc|dollars?)\b",
+        r"\b\d+(?:\.\d+)?(?:usd|USDC|usdc)\b",
+        r"\b(?:capital|amount|budget|invest(?:ment)?|allocate|allocat(?:e|ing)|using|with|for)\b.{0,32}\d",
+        r"\d.{0,20}\b(?:capital|amount|budget|usd|USDC|usdc|dollars?)\b",
+    )
+    return any(re.search(p, text, re.I) for p in markers)
+
+
+def _parse_capital_match(m: re.Match[str], pattern: str) -> Optional[float]:
+    raw = m.group(1).replace(",", "")
+    try:
+        val = float(raw)
+    except ValueError:
+        return None
+    if (
+        "$" not in pattern
+        and "k" not in pattern.lower()
+        and not re.search(r"(?:usd|USDC|usdc|dollar|amount|budget|invest)", pattern, re.I)
+    ):
+        if 1900 <= val <= 2100:
+            return None
+    suffix = m.group(2) if m.lastindex and m.lastindex >= 2 and m.group(2) else None
+    if suffix and str(suffix).lower() == "k":
+        val *= 1000
+    return max(1.0, min(HF_MAX_STRATEGY_USDC, val))
+
+
 def _extract_capital(text: str) -> float:
-    # Prefer explicit $ amounts or amounts with usd/capital/k markers — avoid years like 2025
-    patterns = [
-        r"\$\s*([\d,]+(?:\.\d+)?)\s*([kK])?\b",
-        r"\b([\d,]+(?:\.\d+)?)\s*([kK])\s*(?:usd|USD)?\b",
-        r"\b([\d,]+(?:\.\d+)?)\s*(?:usd|USD)\b",
-        r"\b(?:capital|aum|portfolio)\s*(?:of|=|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)\s*([kK])?\b",
+    """Parse USDC sleeve size from user text; defaults to max when no amount is stated."""
+    if not (text or "").strip():
+        return float(HF_MAX_STRATEGY_USDC)
+
+    patterns: list[tuple[str, int]] = [
+        (r"\b(?:amount|budget|invest(?:ment)?|allocate|allocat(?:e|ing)|using|with|for)\s*(?:to\s+be\s+)?(?:of|=|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)\s*([kK])?\b", 5),
+        (r"\$\s*([\d,]+(?:\.\d+)?)\s*([kK])?\b", 4),
+        (r"\b([\d,]+(?:\.\d+)?)\s*([kK])\s*(?:usd|USDC|usdc|dollars?)?\b", 4),
+        (r"\b([\d,]+(?:\.\d+)?)\s*(?:usd|USDC|usdc|dollars?)\b", 4),
+        (r"\b([\d,]+(?:\.\d+)?)(?:usd|USDC|usdc)\b", 4),
+        (r"\b(?:capital|aum|portfolio)\s*(?:of|=|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)\s*([kK])?\b", 3),
     ]
-    for pattern in patterns:
-        m = re.search(pattern, text, re.I)
-        if not m:
-            continue
-        raw = m.group(1).replace(",", "")
-        try:
-            val = float(raw)
-        except ValueError:
-            continue
-        # Skip year-like bare numbers without $ or k
-        if "$" not in pattern and "k" not in pattern.lower() and "usd" not in pattern.lower():
-            if 1900 <= val <= 2100:
+
+    best_val: Optional[float] = None
+    best_score = -1
+    for pattern, priority in patterns:
+        for m in re.finditer(pattern, text, re.I):
+            val = _parse_capital_match(m, pattern)
+            if val is None:
                 continue
-        suffix = m.group(2) if m.lastindex and m.lastindex >= 2 else None
-        if suffix and suffix.lower() == "k":
-            val *= 1000
-        elif re.search(r"\b[\d,]+(?:\.\d+)?\s*[kK]\b", text) and "$" in (m.group(0) or ""):
-            pass
-        # Paper sleeve cap
-        return max(1.0, min(HF_MAX_STRATEGY_USDC, val))
+            score = priority * 10_000 - m.start()
+            if score > best_score:
+                best_score = score
+                best_val = val
+
+    if best_val is not None:
+        return best_val
     return float(HF_MAX_STRATEGY_USDC)
 
 
@@ -1495,7 +1568,7 @@ def run_hedge_fund_agent(
     session_id: Optional[str] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
     prompt = user_input.strip()
-    tools = _paper_tools(user_wallet)
+    tools = _paper_tools(user_wallet, last_user_input=prompt)
 
     if re.search(r"\b(fee|fees|pricing|1/10|2/20|management fee|performance fee)\b", prompt, re.I):
         if not BACKTEST_INTENT_RE.search(prompt) and not re.search(r"\b(BTC|ETH|SOL|backtest|mock)\b", prompt, re.I):

@@ -62,6 +62,7 @@ from volume_ledger import (
     load_volume_keypair,
     reclaim_token_account_rent,
     record_user_credit_volume,
+    record_user_acquire_volume,
     record_user_spend_volume,
     record_volume_platform_fee,
     validate_volume_trade_amount,
@@ -540,7 +541,17 @@ def _run_volume_execution(campaign_id: str, *, dry_run: bool = False, force: boo
         record_volume_platform_fee(user_wallet, quote_token, trade_amount, reference_id=f"{campaign_id}-buy-fee", signature=buy.get("signature"))
 
     out_raw = int(buy.get("output_amount_raw") or 0)
-    sell_amount = out_raw / (10 ** base["decimals"]) if out_raw > 0 else trade_amount * 0.98
+    buy_amount_base = out_raw / (10 ** base["decimals"]) if out_raw > 0 else trade_amount * 0.98
+    sell_amount = buy_amount_base
+
+    if user_wallet:
+        record_user_acquire_volume(
+            user_wallet,
+            base_token,
+            buy_amount_base,
+            reference_id=f"{campaign_id}-buy-base",
+            signature=buy.get("signature"),
+        )
 
     sell = _execute_meteora_swap(
         base["mint"], quote["mint"], sell_amount, base["decimals"], slippage_bps, pool_address
@@ -551,6 +562,13 @@ def _run_volume_execution(campaign_id: str, *, dry_run: bool = False, force: boo
         return result
 
     if user_wallet:
+        record_user_spend_volume(
+            user_wallet,
+            base_token,
+            sell_amount,
+            reference_id=f"{campaign_id}-sell-base",
+            signature=sell.get("signature"),
+        )
         # Fee must be recorded in quote-currency (SOL) terms — sell_amount above is
         # the base-token quantity sold, not SOL, and was wrongly passed here before
         # (produced fee "spends" thousands of times too large, corrupting the ledger).
