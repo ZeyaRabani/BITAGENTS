@@ -2992,7 +2992,7 @@ _MULTIWALLET_TOOL_OVERRIDES: dict[str, Any] = {}
 
 def _multiwallet_tool_overrides() -> dict:
     """Chat-driven mutations for multi-wallet plans must land on the user's own
-    derived wallet, not the pooled agent wallet TOOL_MAP points at -- these
+    derived wallet, not the pooled agent wallet TOOL_MAP points at. These
     wrap the same tool names with dca_multiwallet's implementations instead.
     Built lazily (not at import time) to avoid a circular import with
     dca_multiwallet, which itself imports from this module.
@@ -3034,14 +3034,14 @@ def _multiwallet_tool_overrides() -> dict:
             return dca_multiwallet.execute_plan_now(plan_id)
 
         def _get_agent_wallet(user_wallet: Optional[str] = None, **_ignored) -> dict:
-            # Unlike the pooled agent, there is no single shared deposit address --
+            # Unlike the pooled agent, there is no single shared deposit address:
             # every user gets their own derived wallet, so this must be tied to
             # whoever is asking rather than answered the same for everyone.
             if not user_wallet:
                 return {"error": "Wallet authentication required to look up your deposit address."}
             return {
                 "agent_wallet": dca_multiwallet.get_deposit_address(user_wallet),
-                "note": "This is your own personal deposit address, unique to your connected wallet -- not shared with any other user.",
+                "note": "This is your own personal deposit address, unique to your connected wallet, not shared with any other user.",
             }
 
         _MULTIWALLET_TOOL_OVERRIDES = {
@@ -3076,7 +3076,7 @@ def execute_tool(
 
         if wallet_mode == "multiwallet" and tool_name == "get_agent_wallet":
             # Pooled mode answers this the same for everyone (no auth needed);
-            # multi-wallet mode can't -- each user has a different address.
+            # multi-wallet mode can't, since each user has a different address.
             if not auth_wallet:
                 return json.dumps({"error": "Wallet authentication required for this action."})
             args["user_wallet"] = auth_wallet
@@ -3149,12 +3149,12 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
     if mint_match:
         output_token = mint_match.group(0)
     else:
-        # No raw mint address in the message -- by far the more common case is
+        # No raw mint address in the message: by far the more common case is
         # a ticker symbol ("...into BITAGENTS every minute"), which the UI's own
         # deposit form explicitly supports ("ANY SPL TOKEN - SYMBOL OR MINT
         # ADDRESS"). Missing this meant every symbol-phrased request silently
         # fell through to the free-text LLM loop instead of this deterministic,
-        # guaranteed-to-actually-execute path -- confirmed live: the model
+        # guaranteed-to-actually-execute path. Confirmed live: the model
         # described a plan as created and running without ever calling the
         # tool that would make that real (no DB row, no on-chain transaction).
         symbol_match = re.search(r"\b(?:into|of)\s+([a-zA-Z][a-zA-Z0-9]{1,14})\b", text)

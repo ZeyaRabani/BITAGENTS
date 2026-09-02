@@ -2,8 +2,8 @@
 Multi-wallet DCA — real Vercel serverless deployment.
 
 Deliberately NOT a lift-and-shift of agents_api.py. That app starts
-in-process background threads at startup (the DCA/Volume schedulers) --
-which has no meaning in a serverless function, since there's no persistent
+in-process background threads at startup (the DCA/Volume schedulers), which
+has no meaning in a serverless function, since there's no persistent
 process for a thread to run in between invocations. This is the actual
 architectural point of the whole exercise: this file has zero background
 threads, zero startup-time state. Every request is a fresh, independent
@@ -11,9 +11,9 @@ invocation. The recurring-execution side lives in api/cron/tick.py instead,
 triggered by Vercel Cron, not a thread.
 
 Two route surfaces are exposed:
-  - /api/multi-wallet/dca/* -- the original minimal REST surface (used by
+  - /api/multi-wallet/dca/*: the original minimal REST surface (used by
     the standalone MultiWalletDcaConsole page).
-  - Everything else (/api/chat, /api/wallet/*, /api/plans/*, /api/auth/*) --
+  - Everything else (/api/chat, /api/wallet/*, /api/plans/*, /api/auth/*):
     the SAME path shape the pooled DCA agent's frontend (DcaAgentConsole /
     DcaAgentDeposit / DcaPlanPanel) already calls, so that UI can be reused
     here completely unmodified, pointed at this backend instead. Same
@@ -21,9 +21,9 @@ Two route surfaces are exposed:
     through dca_multiwallet, which reads/writes each user's own derived
     wallet on-chain instead of the pooled agent wallet.
 
-Only the DCA agent is exposed here, not the other 14 agents -- scoped
-deliberately so this stays something that can actually be reasoned about
-end-to-end, not a partial port of a much larger app.
+Only the DCA agent is exposed here, not the other 14 agents. This is
+scoped deliberately so this stays something that can actually be reasoned
+about end-to-end, not a partial port of a much larger app.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from typing import Any, Optional
 
 # The actual agent code (agent_wallets.py, dca_multiwallet.py, dca_agent.py,
 # db.py, etc.) is bundled alongside this function via vercel.json's
-# includeFiles, at agent/new relative to the repo root -- reused as-is, not
+# includeFiles, at agent/new relative to the repo root, reused as-is, not
 # rewritten, since it's already tested.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "agent" / "new"))
 
@@ -196,7 +196,7 @@ def _balance_payload(auth_wallet: str) -> dict[str, Any]:
 
 @app.get("/api/wallet/agent")
 def wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
-    # No single shared deposit address here (unlike the pooled agent) --
+    # No single shared deposit address here (unlike the pooled agent):
     # every signed-in user gets their own, so this route requires auth.
     return {
         "agent_wallet": dca_multiwallet.get_deposit_address(auth_wallet),
@@ -219,9 +219,9 @@ class DepositVerifyRequest(BaseModel):
 def wallet_deposit_verify(
     body: DepositVerifyRequest, auth_wallet: str = Depends(require_wallet_session)
 ) -> dict[str, Any]:
-    # Multi-wallet balances are read live on-chain, not credited to a ledger --
-    # "verifying" a deposit here just confirms the transfer landed and hands
-    # back the now-current balance, instead of writing a deposit row.
+    # Multi-wallet balances are read live on-chain, not credited to a ledger,
+    # so "verifying" a deposit here just confirms the transfer landed and
+    # hands back the now-current balance, instead of writing a deposit row.
     tx = sol_rpc(
         "getTransaction",
         [body.signature.strip(), {"commitment": "confirmed", "maxSupportedTransactionVersion": 0}],

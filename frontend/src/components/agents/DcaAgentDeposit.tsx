@@ -110,7 +110,7 @@ export function DcaAgentDeposit({
   useEffect(() => {
     // Pooled deployments answer this the same for everyone and don't need a
     // token; multi-wallet deployments hand back a different address per user
-    // and require one -- refetching once authToken arrives covers both.
+    // and require one, so refetching once authToken arrives covers both.
     void fetchAgentWallet(authToken ?? undefined).then((info) => {
       setAgentWallet(info?.agent_wallet ?? null);
       setAnySplToken(info?.any_spl_token ?? true);
