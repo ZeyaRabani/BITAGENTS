@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const appLinks = [
+  { href: "/launch", label: "Launchpad", match: (path: string) => path.startsWith("/launch") },
   { href: "/agents", label: "Marketplace", match: (path: string) => path.startsWith("/agents") },
 ];
 
