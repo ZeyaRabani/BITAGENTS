@@ -28,7 +28,7 @@ export default function LaunchPage() {
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter(
-        (a) => a.name.toLowerCase().includes(q) || a.ticker.toLowerCase().includes(q) || a.creator.toLowerCase().includes(q)
+        (a) => a.name.toLowerCase().includes(q) || a.handle.toLowerCase().includes(q) || a.creator.toLowerCase().includes(q)
       );
     }
     if (sort === "newest") list.sort((a, b) => a.ageDays - b.ageDays);
@@ -76,7 +76,7 @@ export default function LaunchPage() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search agents by name, ticker, creator"
+              placeholder="Search agents by name, handle, creator"
               className="w-full bg-transparent font-mono text-xs uppercase tracking-[0.08em] text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
             />
           </div>

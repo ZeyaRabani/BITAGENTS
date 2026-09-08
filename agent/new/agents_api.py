@@ -40,13 +40,19 @@ from deposit_ledger import (
 from db import (
     append_chat_messages,
     assert_chat_session_access,
+    create_draft_agent,
     db_configured,
     delete_chat_session,
+    get_custom_agent,
+    get_draft_agent_by_session,
     get_platform_metrics,
     init_db,
+    list_custom_agents,
     list_watchlist,
     load_chat_history,
 )
+from agent_builder import run_builder_agent
+from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
     CAPIX_API_URL,
     CAPIX_MAX_RETRIES,
@@ -757,6 +763,102 @@ def clear_dca_session(
         raise HTTPException(status_code=403, detail=access_error)
     deleted = delete_chat_session(session_id)
     return {"ok": deleted}
+
+
+# ─── Agent launchpad (custom agents) ──────────────────────────────────────────
+
+@app.post("/agents/builder/chat", response_model=ChatResponse)
+def agent_builder_chat(
+    body: ChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    session_id = body.session_id or str(uuid.uuid4())
+    access_error = assert_chat_session_access(session_id, auth_wallet)
+    if access_error:
+        raise HTTPException(status_code=403, detail=access_error)
+
+    draft = get_draft_agent_by_session(session_id)
+    if not draft:
+        draft = create_draft_agent(auth_wallet, session_id)
+
+    history = load_chat_history(session_id)
+    user_message = body.message.strip()
+
+    try:
+        reply, history, actions = run_builder_agent(
+            user_message,
+            history,
+            agent_id=draft["id"],
+            session_id=session_id,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="Cannot reach LLM API.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
+    return ChatResponse(reply=reply, session_id=session_id, actions=actions)
+
+
+@app.get("/agents/custom")
+def list_launched_agents(status: str = Query(default="live")) -> dict[str, Any]:
+    if status not in ("live", "testing"):
+        status = "live"
+    agents = list_custom_agents(status=status)
+    return {"agents": agents}
+
+
+@app.get("/agents/custom/mine")
+def list_my_agents(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return {"agents": list_custom_agents(creator_wallet=auth_wallet)}
+
+
+@app.get("/agents/custom/{agent_id}")
+def get_launched_agent(agent_id: str) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["status"] not in ("live", "testing"):
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return agent
+
+
+@app.post("/agents/custom/{agent_id}/chat", response_model=ChatResponse)
+def custom_agent_chat(
+    agent_id: str,
+    body: ChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["status"] == "testing" and agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=403, detail="This agent is still in its private testing window.")
+    if agent["status"] not in ("testing", "live"):
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    session_id = body.session_id or str(uuid.uuid4())
+    access_error = assert_chat_session_access(session_id, auth_wallet)
+    if access_error:
+        raise HTTPException(status_code=403, detail=access_error)
+
+    history = load_chat_history(session_id)
+    user_message = body.message.strip()
+
+    try:
+        reply, history, actions = run_custom_agent(
+            agent_id,
+            user_message,
+            history,
+            session_id=session_id,
+        )
+    except requests.exceptions.ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="Cannot reach LLM API.") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
+    return ChatResponse(reply=reply, session_id=session_id, actions=actions)
 
 
 # ─── Kickstart Copilot routes ─────────────────────────────────────────────────

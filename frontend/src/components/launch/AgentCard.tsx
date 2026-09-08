@@ -4,8 +4,7 @@ import { formatUsd, type LaunchedAgent } from "@/lib/launchpadMock";
 
 const STATUS_STYLE: Record<LaunchedAgent["status"], string> = {
   LIVE: "border-signal text-signal",
-  BONDING: "border-warn text-warn",
-  TESTING: "border-grid text-muted-foreground",
+  TESTING: "border-warn text-warn",
 };
 
 export function AgentCard({ agent }: { agent: LaunchedAgent }) {
@@ -20,7 +19,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
           <div>
             <div className="font-display text-sm font-bold leading-tight">{agent.name}</div>
             <div className="font-mono text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
-              ${agent.ticker} · by {agent.creator}
+              @{agent.handle} · by {agent.creator}
             </div>
           </div>
         </div>

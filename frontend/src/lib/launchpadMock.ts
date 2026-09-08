@@ -1,11 +1,11 @@
 export type LaunchedAgent = {
   id: string;
   name: string;
-  ticker: string;
+  handle: string;
   avatarSeed: string;
   creator: string;
   description: string;
-  status: "LIVE" | "BONDING" | "TESTING";
+    status: "LIVE" | "TESTING";
   ageDays: number;
   runs: number;
   volumeUsd: number;
@@ -17,7 +17,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "dca-agent",
     name: "DCA Agent",
-    ticker: "DCA",
+    handle: "DCA",
     avatarSeed: "dca",
     creator: "bitagents",
     description: "Recurring Jupiter buys on autopilot — set an interval, a budget, and let it run.",
@@ -31,7 +31,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "hedge-fund",
     name: "Hedge Fund Agent",
-    ticker: "HFND",
+    handle: "HFND",
     avatarSeed: "hedgefund",
     creator: "bitagents",
     description: "18-analyst Covenant framework proposes strategies, you confirm, it trades live on Jupiter.",
@@ -45,7 +45,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "volume-agent",
     name: "Volume Agent",
-    ticker: "VOL",
+    handle: "VOL",
     avatarSeed: "volume",
     creator: "bitagents",
     description: "Wash-free liquidity cycling through Meteora DLMM pools for real on-chain volume.",
@@ -59,7 +59,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "whale-tracking",
     name: "Whale Tracking Agent",
-    ticker: "WHALE",
+    handle: "WHALE",
     avatarSeed: "whale",
     creator: "bitagents",
     description: "Watch top wallets, get alerted on their moves, research the trades before you copy them.",
@@ -73,7 +73,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "kickstart-copilot",
     name: "EasyA Analysis Agent",
-    ticker: "EZA",
+    handle: "EZA",
     avatarSeed: "easya",
     creator: "souleixbt",
     description: "Research copilot for EasyA Kickstart launches, with optional low-fee execution.",
@@ -87,7 +87,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "token-research",
     name: "Token Research Agent",
-    ticker: "TKR",
+    handle: "TKR",
     avatarSeed: "tokenresearch",
     creator: "bitagents",
     description: "Fundamentals, holder distribution, and risk flags on any Solana token in seconds.",
@@ -101,7 +101,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "due-diligence",
     name: "Due Diligence Agent",
-    ticker: "DD",
+    handle: "DD",
     avatarSeed: "diligence",
     creator: "bitagents",
     description: "Deep-dive contract, team, and liquidity checks before you ape into anything.",
@@ -115,7 +115,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "wallet-monitoring",
     name: "Wallet Monitoring Agent",
-    ticker: "WMON",
+    handle: "WMON",
     avatarSeed: "walletmon",
     creator: "bitagents",
     description: "Free real-time alerts on any wallet — deposits, withdrawals, new token activity.",
@@ -129,11 +129,11 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "yield-scout",
     name: "Yield Scout",
-    ticker: "YIELD",
+    handle: "YIELD",
     avatarSeed: "yieldscout",
     creator: "0xharshal",
     description: "Community-built agent scanning Solana lending markets for the best risk-adjusted APY.",
-    status: "BONDING",
+    status: "TESTING",
     ageDays: 3,
     runs: 84,
     volumeUsd: 4100,
@@ -143,7 +143,7 @@ export const LAUNCHED_AGENTS: LaunchedAgent[] = [
   {
     id: "nft-sniper",
     name: "Floor Sniper",
-    ticker: "SNIPE",
+    handle: "SNIPE",
     avatarSeed: "floorsniper",
     creator: "jaymar",
     description: "Watches NFT floor prices across marketplaces and executes buys under a target threshold.",
