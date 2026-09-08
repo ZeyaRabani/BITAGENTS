@@ -18,13 +18,15 @@ from typing import Any, Optional
 
 import db
 from agent_tool_runner import run_tool_agent
+from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
 
 BUILDER_MODEL = "openai/gpt-4o-mini"
 
 CATEGORIES = ("Trading", "Research", "Monitoring", "Utility")
 TOOL_SCOPES = ("read_only", "trading")
 
-SYSTEM_PROMPT = """You are the BITAGENTS agent-builder — you help someone launch a new AI agent \
+def _build_system_prompt() -> str:
+    return f"""You are the BITAGENTS agent-builder — you help someone launch a new AI agent \
 on the marketplace by having a natural, open-ended conversation. You are not a form; do not \
 demand fields in a fixed order. Ask whatever follow-up questions make sense given what they've \
 told you so far.
@@ -41,19 +43,29 @@ Your job across the conversation:
    ("You are..."), specific about behavior, tone, and any limits, based on what they told you.
 6. Determine tool_scope: ask directly whether this agent needs to move user funds or execute trades. \
    If yes, tool_scope is "trading" (explain this requires manual review before it can go live with \
-   real funds). If it only researches, monitors, or advises, tool_scope is "read_only" (launches \
-   automatically after a 24h testing window, no review needed). Default to read_only unless they \
-   clearly want trading capability.
+   real funds — this capability isn't wired up yet, so say the agent will launch read-only for now \
+   and trading comes later). If it only researches, monitors, or advises, tool_scope is "read_only" \
+   (launches automatically after a 24h testing window, no review needed). Default to read_only.
+7. Pick which real capabilities the agent needs from this fixed catalog — never invent a tool name \
+   that isn't listed here, and never suggest the agent can execute custom code:
 
-Call set_agent_field / set_agent_personality / set_tool_scope as you learn each piece — don't wait \
-until the end to set everything at once. Use show_draft whenever you want to check what's already \
-been captured before asking your next question.
+{catalog_summary_for_builder()}
+
+   Infer which of these fit from what the user described (e.g. "watches whale wallets" needs \
+   analyze_wallet + wallet_recent_activity; "researches a token before I buy" needs lookup_token + \
+   research_token). Call select_agent_capabilities with your chosen list, then say in plain language \
+   what you gave it and why — never show this as a checklist, just narrate it naturally. If nothing \
+   in the catalog fits, that's fine — the agent can still be a pure conversational advisor.
+
+Call set_agent_field / set_agent_personality / set_tool_scope / select_agent_capabilities as you \
+learn each piece — don't wait until the end to set everything at once. Use show_draft whenever you \
+want to check what's already been captured before asking your next question.
 
 When you believe the draft is complete, call show_draft, present the full configuration clearly to \
-the user (name, handle, category, description, the system prompt you wrote, and whether it's \
-read_only or trading), and explicitly ask them to confirm before launching. Only call \
-finalize_and_launch after they clearly confirm (e.g. "yes", "launch it", "confirm") — never call it \
-speculatively or before showing the draft."""
+the user (name, handle, category, description, the system prompt you wrote, which capabilities it \
+has, and whether it's read_only or trading), and explicitly ask them to confirm before launching. \
+Only call finalize_and_launch after they clearly confirm (e.g. "yes", "launch it", "confirm") — \
+never call it speculatively or before showing the draft."""
 
 TOOLS = [
     {
@@ -111,6 +123,23 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "select_agent_capabilities",
+            "description": (
+                "Set which tools from the fixed catalog this agent can use. Replaces any "
+                "previous selection. Pass an empty list for a pure conversational agent."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "tool_names": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["tool_names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "show_draft",
             "description": "Return the current state of the draft agent so you can check what's already set.",
             "parameters": {"type": "object", "properties": {}},
@@ -157,6 +186,16 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         updated = db.update_custom_agent_fields(agent_id, tool_scope=scope)
         return {"ok": True, "draft": updated}
 
+    def select_agent_capabilities(**kwargs):
+        requested = kwargs.get("tool_names") or []
+        valid = valid_tool_names([str(n).strip() for n in requested])
+        invalid = [n for n in requested if n not in valid]
+        updated = db.update_custom_agent_fields(agent_id, enabled_tools=valid)
+        result = {"ok": True, "enabled_tools": valid, "draft": updated}
+        if invalid:
+            result["ignored_unknown_tools"] = invalid
+        return result
+
     def show_draft(**_kwargs):
         return db.get_custom_agent(agent_id) or {"error": "draft not found"}
 
@@ -179,6 +218,7 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         "set_agent_field": set_agent_field,
         "set_agent_personality": set_agent_personality,
         "set_tool_scope": set_tool_scope,
+        "select_agent_capabilities": select_agent_capabilities,
         "show_draft": show_draft,
         "finalize_and_launch": finalize_and_launch,
     }
@@ -194,7 +234,7 @@ def run_builder_agent(
     return run_tool_agent(
         user_input,
         conversation_history,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=_build_system_prompt(),
         tools=TOOLS,
         tool_registry=_builder_tools(agent_id),
         model=BUILDER_MODEL,

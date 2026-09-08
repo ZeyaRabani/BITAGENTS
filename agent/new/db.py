@@ -350,6 +350,7 @@ MIGRATION_STATEMENTS = [
         model_tier              VARCHAR(20) NOT NULL DEFAULT 'balanced',
         tool_scope              VARCHAR(20) NOT NULL DEFAULT 'read_only',
         creator_fee_share_pct   DOUBLE PRECISION NOT NULL DEFAULT 20.0,
+        enabled_tools           JSONB NOT NULL DEFAULT '[]'::jsonb,
         status                  VARCHAR(20) NOT NULL DEFAULT 'draft',
         builder_session_id      UUID,
         runs                    INTEGER NOT NULL DEFAULT 0,
@@ -359,6 +360,7 @@ MIGRATION_STATEMENTS = [
         updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS enabled_tools JSONB NOT NULL DEFAULT '[]'::jsonb",
     "CREATE INDEX IF NOT EXISTS idx_custom_agents_status ON custom_agents (status)",
     "CREATE INDEX IF NOT EXISTS idx_custom_agents_creator ON custom_agents (creator_wallet)",
 ]
@@ -992,7 +994,7 @@ def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[st
     allowed = {
         "name", "handle", "category", "description", "system_prompt",
         "model_tier", "tool_scope", "creator_fee_share_pct", "status",
-        "testing_started_at",
+        "testing_started_at", "enabled_tools",
     }
     sets = []
     values: list[Any] = []
@@ -1000,7 +1002,7 @@ def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[st
         if key not in allowed:
             continue
         sets.append(f"{key} = %s")
-        values.append(value)
+        values.append(Json(value) if key == "enabled_tools" else value)
     if not sets:
         return get_custom_agent(agent_id)
     sets.append("updated_at = NOW()")
