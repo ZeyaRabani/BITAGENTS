@@ -64,7 +64,6 @@ export function AgentBuilderChat() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Request failed";
       setError(msg);
-      setMessages((prev) => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: msg }]);
     } finally {
       setBusy(false);
     }
