@@ -57,8 +57,18 @@ from dca_agent import (
     sol_rpc,
     update_dca_plan_status,
 )
-from db import append_chat_messages, assert_chat_session_access, load_chat_history
+from db import (
+    append_chat_messages,
+    assert_chat_session_access,
+    create_draft_agent,
+    get_custom_agent,
+    get_draft_agent_by_session,
+    list_custom_agents,
+    load_chat_history,
+)
 from deposit_ledger import get_user_dca_executions, list_user_ledger_history
+from agent_builder import run_builder_agent
+from custom_agent_runtime import run_custom_agent
 from wallet_auth import (
     create_auth_challenge,
     get_session_info,
@@ -362,3 +372,83 @@ def multi_wallet_withdraw(
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+# ─── Agent launchpad (custom agents) ───────────────────────────────────────
+# Same stateless shape as everything above: no background threads, every
+# request is an independent invocation. The builder/custom-agent chat
+# routes never needed a scheduler to begin with, so they carry over here
+# unmodified from agents_api.py's version.
+
+@app.post("/api/agents/builder/chat")
+def agent_builder_chat(body: ChatRequest, auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    session_id = body.session_id or str(uuid.uuid4())
+    access_error = assert_chat_session_access(session_id, auth_wallet)
+    if access_error:
+        raise HTTPException(status_code=403, detail=access_error)
+
+    draft = get_draft_agent_by_session(session_id)
+    if not draft:
+        draft = create_draft_agent(auth_wallet, session_id)
+
+    history = load_chat_history(session_id)
+    user_message = body.message.strip()
+
+    try:
+        reply, history, actions = run_builder_agent(
+            user_message, history, agent_id=draft["id"], session_id=session_id
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
+    return {"reply": reply, "session_id": session_id, "actions": actions}
+
+
+@app.get("/api/agents/custom")
+def list_launched_agents(status: str = Query(default="live")) -> dict[str, Any]:
+    if status not in ("live", "testing"):
+        status = "live"
+    return {"agents": list_custom_agents(status=status)}
+
+
+@app.get("/api/agents/custom/mine")
+def list_my_agents(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return {"agents": list_custom_agents(creator_wallet=auth_wallet)}
+
+
+@app.get("/api/agents/custom/{agent_id}")
+def get_launched_agent(agent_id: str) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent or agent["status"] not in ("live", "testing"):
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return agent
+
+
+@app.post("/api/agents/custom/{agent_id}/chat")
+def custom_agent_chat(
+    agent_id: str, body: ChatRequest, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["status"] == "testing" and agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=403, detail="This agent is still in its private testing window.")
+    if agent["status"] not in ("testing", "live"):
+        raise HTTPException(status_code=404, detail="Agent not found.")
+
+    session_id = body.session_id or str(uuid.uuid4())
+    access_error = assert_chat_session_access(session_id, auth_wallet)
+    if access_error:
+        raise HTTPException(status_code=403, detail=access_error)
+
+    history = load_chat_history(session_id)
+    user_message = body.message.strip()
+
+    try:
+        reply, history, actions = run_custom_agent(agent_id, user_message, history, session_id=session_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
+    return {"reply": reply, "session_id": session_id, "actions": actions}

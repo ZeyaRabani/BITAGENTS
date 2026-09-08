@@ -338,6 +338,31 @@ MIGRATION_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_volume_campaigns_next_execution ON volume_campaigns (next_execution_at)
         WHERE status = 'active'
     """,
+    """
+    CREATE TABLE IF NOT EXISTS custom_agents (
+        id                      UUID PRIMARY KEY,
+        creator_wallet          VARCHAR(64) NOT NULL,
+        name                    TEXT,
+        handle                  VARCHAR(40),
+        category                VARCHAR(20),
+        description             TEXT,
+        system_prompt           TEXT,
+        model_tier              VARCHAR(20) NOT NULL DEFAULT 'balanced',
+        tool_scope              VARCHAR(20) NOT NULL DEFAULT 'read_only',
+        creator_fee_share_pct   DOUBLE PRECISION NOT NULL DEFAULT 20.0,
+        enabled_tools           JSONB NOT NULL DEFAULT '[]'::jsonb,
+        status                  VARCHAR(20) NOT NULL DEFAULT 'draft',
+        builder_session_id      UUID,
+        runs                    INTEGER NOT NULL DEFAULT 0,
+        volume_usd              DOUBLE PRECISION NOT NULL DEFAULT 0,
+        testing_started_at      TIMESTAMPTZ,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS enabled_tools JSONB NOT NULL DEFAULT '[]'::jsonb",
+    "CREATE INDEX IF NOT EXISTS idx_custom_agents_status ON custom_agents (status)",
+    "CREATE INDEX IF NOT EXISTS idx_custom_agents_creator ON custom_agents (creator_wallet)",
 ]
 
 
@@ -917,6 +942,162 @@ def delete_chat_session(session_id: str) -> bool:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM chat_sessions WHERE id = %s", (session_id,))
             return cur.rowcount > 0
+
+
+# ─── Custom agents (marketplace launchpad) ────────────────────────────────────
+
+def _custom_agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    d = dict(row)
+    d["id"] = str(d["id"])
+    if d.get("builder_session_id"):
+        d["builder_session_id"] = str(d["builder_session_id"])
+    d["created_at"] = _iso(d.get("created_at"))
+    d["updated_at"] = _iso(d.get("updated_at"))
+    d["testing_started_at"] = _iso(d.get("testing_started_at"))
+    return d
+
+
+def create_draft_agent(creator_wallet: str, builder_session_id: str) -> dict[str, Any]:
+    init_db()
+    agent_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO custom_agents (id, creator_wallet, builder_session_id, status)
+                VALUES (%s, %s, %s, 'draft')
+                RETURNING *
+                """,
+                (agent_id, creator_wallet.strip(), builder_session_id),
+            )
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row)
+
+
+def get_draft_agent_by_session(builder_session_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM custom_agents WHERE builder_session_id = %s ORDER BY created_at DESC LIMIT 1",
+                (builder_session_id,),
+            )
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row) if row else None
+
+
+def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[str, Any]]:
+    """Patch arbitrary allowed columns on a draft/testing agent."""
+    if not fields:
+        return get_custom_agent(agent_id)
+    init_db()
+    allowed = {
+        "name", "handle", "category", "description", "system_prompt",
+        "model_tier", "tool_scope", "creator_fee_share_pct", "status",
+        "testing_started_at", "enabled_tools",
+    }
+    sets = []
+    values: list[Any] = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        sets.append(f"{key} = %s")
+        values.append(Json(value) if key == "enabled_tools" else value)
+    if not sets:
+        return get_custom_agent(agent_id)
+    sets.append("updated_at = NOW()")
+    values.append(agent_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE custom_agents SET {', '.join(sets)} WHERE id = %s RETURNING *",
+                values,
+            )
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row) if row else None
+
+
+def get_custom_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM custom_agents WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row) if row else None
+
+
+def list_custom_agents(status: Optional[str] = None, creator_wallet: Optional[str] = None) -> list[dict[str, Any]]:
+    init_db()
+    clauses = []
+    values: list[Any] = []
+    if status:
+        clauses.append("status = %s")
+        values.append(status)
+    if creator_wallet:
+        clauses.append("creator_wallet = %s")
+        values.append(creator_wallet.strip())
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT * FROM custom_agents {where} ORDER BY created_at DESC LIMIT 200",
+                values,
+            )
+            rows = cur.fetchall()
+    return [_custom_agent_row_to_dict(r) for r in rows]
+
+
+def record_custom_agent_run(agent_id: str, volume_usd: float = 0.0) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE custom_agents
+                SET runs = runs + 1, volume_usd = volume_usd + %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (volume_usd, agent_id),
+            )
+
+
+def finalize_custom_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    """Move a draft agent into the 24h testing window, creator-only access."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE custom_agents
+                SET status = 'testing', testing_started_at = NOW(), updated_at = NOW()
+                WHERE id = %s AND status = 'draft'
+                RETURNING *
+                """,
+                (agent_id,),
+            )
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row) if row else None
+
+
+def promote_ready_test_agents(testing_hours: float = 24.0) -> list[str]:
+    """Flip read_only agents from testing -> live once the testing window has elapsed."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE custom_agents
+                SET status = 'live', updated_at = NOW()
+                WHERE status = 'testing'
+                  AND tool_scope = 'read_only'
+                  AND testing_started_at IS NOT NULL
+                  AND testing_started_at <= NOW() - (%s || ' hours')::interval
+                RETURNING id
+                """,
+                (testing_hours,),
+            )
+            rows = cur.fetchall()
+    return [str(r["id"]) for r in rows]
 
 
 # ─── Platform metrics ─────────────────────────────────────────────────────────
