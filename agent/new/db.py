@@ -630,6 +630,7 @@ def init_db() -> None:
                 for stmt in MIGRATION_STATEMENTS:
                     cur.execute(stmt)
             _repair_bitagents_decimal_scale(conn)
+            _repair_dca_circle_ledger_migration(conn)
         _schema_ready = True
 
     if _import_done:
@@ -749,6 +750,194 @@ def _repair_bitagents_decimal_scale(conn) -> None:
         print(
             f"  Reverted BITAGENTS decimal inflation /{scale:g}: "
             f"ledger={ledger_n}, orders={orders_n}, executions={exec_n}"
+        )
+
+
+def _repair_dca_circle_ledger_migration(conn) -> None:
+    """
+    Move ledger credits from shared DCA wallet -> Circle wallets for completed
+    on-chain migration transfers (idempotent by signature).
+
+    Without this, the UI shows the Circle address but still credits old shared
+    (and cross-agent) ledger rows — e.g. SOL/USDC that were never migrated.
+    """
+    repair_id = "dca_circle_ledger_migration_v1"
+    env_path = os.environ.get("DCA_CIRCLE_MIGRATION_LEDGER_FILE", "").strip()
+    candidates = []
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates.extend(
+        [
+            AGENT_DIR / "migrations" / "dca_transfers_final.json",
+            REPO_ROOT / "temp" / "wallet_migration" / "dca_transfers_final.json",
+        ]
+    )
+    path = next((p for p in candidates if p.is_file()), None)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_repairs (
+                id          VARCHAR(64) PRIMARY KEY,
+                applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                notes       TEXT
+            )
+            """
+        )
+        cur.execute("SELECT 1 FROM schema_repairs WHERE id = %s", (repair_id,))
+        if cur.fetchone():
+            return
+
+        if path is None:
+            print(
+                "  [skip] DCA Circle ledger migration file missing "
+                f"(checked {[str(p) for p in candidates]})"
+            )
+            return
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            print(f"  [warn] Could not read {path}: {exc}")
+            return
+
+        shared = str(payload.get("from") or "").strip()
+        transfers = payload.get("transfers") or []
+        if not shared or not isinstance(transfers, list):
+            print(f"  [warn] Invalid migration ledger file: {path}")
+            return
+
+        # circle address -> user wallet
+        cur.execute(
+            """
+            SELECT agent_wallet_address, user_wallet
+            FROM user_agent_wallets
+            WHERE agent_type = 'dca'
+            """
+        )
+        circle_to_user = {
+            str(r["agent_wallet_address"]).strip(): str(r["user_wallet"]).strip()
+            for r in cur.fetchall()
+            if r.get("agent_wallet_address") and r.get("user_wallet")
+        }
+
+        moved = 0
+        already = 0
+        pending_unmapped = 0
+        invalid = 0
+        now = datetime.now(timezone.utc).isoformat()
+
+        for t in transfers:
+            if not isinstance(t, dict):
+                invalid += 1
+                continue
+            circle = str(t.get("to") or "").strip()
+            token = str(t.get("token") or "").strip().upper()
+            mint = str(t.get("mint") or "").strip() or None
+            trx = str(t.get("trx") or "").strip()
+            try:
+                amount = float(t.get("amount") or 0)
+            except (TypeError, ValueError):
+                amount = 0.0
+            if not circle or not token or amount <= 0 or not trx:
+                invalid += 1
+                continue
+            user = circle_to_user.get(circle)
+            if not user:
+                pending_unmapped += 1
+                continue
+
+            # Keep under VARCHAR(128); Solana sigs are ~88 chars.
+            sig_in = f"{trx}:c-in"
+            sig_out = f"{trx}:s-out"
+            cur.execute(
+                "SELECT 1 FROM user_ledger WHERE signature = %s LIMIT 1",
+                (sig_in,),
+            )
+            if cur.fetchone():
+                already += 1
+                continue
+
+            # Debit shared wallet liability
+            cur.execute(
+                """
+                INSERT INTO user_ledger (
+                    id, user_wallet, agent_wallet, signature, token, mint,
+                    amount, direction, reference_type, reference_id,
+                    status, verified_at, explorer_url
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, 'withdraw', 'circle_migration', %s,
+                    'confirmed', %s, %s
+                )
+                """,
+                (
+                    str(uuid.uuid4())[:8],
+                    user,
+                    shared,
+                    sig_out,
+                    token,
+                    mint,
+                    amount,
+                    trx[:120],
+                    now,
+                    f"https://explorer.solana.com/tx/{trx}",
+                ),
+            )
+            # Credit Circle wallet (acquire keeps withdrawable semantics for SPL)
+            direction_in = "deposit" if token == "SOL" else "acquire"
+            cur.execute(
+                """
+                INSERT INTO user_ledger (
+                    id, user_wallet, agent_wallet, signature, token, mint,
+                    amount, direction, reference_type, reference_id,
+                    status, verified_at, explorer_url
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s,
+                    %s, %s, 'circle_migration', %s,
+                    'confirmed', %s, %s
+                )
+                """,
+                (
+                    str(uuid.uuid4())[:8],
+                    user,
+                    circle,
+                    sig_in,
+                    token,
+                    mint,
+                    amount,
+                    direction_in,
+                    trx[:120],
+                    now,
+                    f"https://explorer.solana.com/tx/{trx}",
+                ),
+            )
+            moved += 1
+
+        # Do not seal the repair while Circle rows are still missing — retry next boot.
+        if pending_unmapped > 0:
+            print(
+                f"  DCA Circle ledger migration pending: moved={moved} "
+                f"already={already} unmapped={pending_unmapped} invalid={invalid} "
+                f"from {path.name} (will retry)"
+            )
+            return
+
+        cur.execute(
+            """
+            INSERT INTO schema_repairs (id, notes)
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO NOTHING
+            """,
+            (
+                repair_id,
+                f"Moved {moved} transfer(s) shared->Circle ledger "
+                f"(already={already}, invalid={invalid}, file={path.name})",
+            ),
+        )
+        print(
+            f"  DCA Circle ledger migration: moved={moved} already={already} "
+            f"invalid={invalid} from {path.name}"
         )
 
 

@@ -529,6 +529,52 @@ def _user_plan_usage_from_plans(
     return usage
 
 
+def _dca_balance_agent_wallets(user_wallet: str) -> set[str]:
+    """
+    Ledger agent_wallet values that count toward this user's DCA credited balance.
+
+    If a Circle DCA wallet is provisioned, ONLY that address is used so shared-wallet
+    leftovers (and EasyA/HF rows) do not appear on the Circle deposit UI.
+    """
+    user_wallet = (user_wallet or "").strip()
+    addresses: set[str] = set()
+    try:
+        from circle_dca_wallets import circle_dca_enabled
+        from db import get_user_agent_wallet
+
+        if user_wallet and circle_dca_enabled():
+            row = get_user_agent_wallet(user_wallet, "dca")
+            addr = (row or {}).get("agent_wallet_address")
+            if addr:
+                addresses.add(str(addr).strip())
+    except Exception:
+        pass
+    if addresses:
+        return addresses
+    try:
+        from dca_agent import load_keypair
+
+        kp = load_keypair()
+        if kp:
+            addresses.add(str(kp.pubkey()))
+    except Exception:
+        pass
+    return {a for a in addresses if a}
+
+
+def _filter_dca_ledger_rows(
+    user_wallet: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    allowed = _dca_balance_agent_wallets(user_wallet)
+    if not allowed:
+        return list(rows)
+    return [
+        r
+        for r in rows
+        if str(r.get("agent_wallet") or "").strip() in allowed
+    ]
+
+
 def _ledger_totals_for_user_token(
     user_wallet: str,
     token_symbol: str,
@@ -568,7 +614,9 @@ def _ledger_totals_for_user_token(
 
 def get_user_token_withdrawable(user_wallet: str, token_symbol: str) -> float:
     """Unused deposits plus DCA-acquired tokens, minus prior withdrawals and active plan reserves."""
-    totals = _ledger_totals_for_user_token(user_wallet, token_symbol)
+    user_wallet = user_wallet.strip()
+    rows = _filter_dca_ledger_rows(user_wallet, _load_user_ledger(user_wallet))
+    totals = _ledger_totals_for_user_token(user_wallet, token_symbol, rows=rows)
     usage = _user_plan_usage(user_wallet.strip())
     reserved = float(usage.get(token_symbol, {}).get("reserved", 0.0))
     return round(
@@ -583,6 +631,7 @@ def get_user_token_withdrawable(user_wallet: str, token_symbol: str) -> float:
 def get_user_balances(user_wallet: str) -> dict[str, Any]:
     user_wallet = user_wallet.strip()
     user_rows, user_plans = load_user_balance_data(user_wallet)
+    user_rows = _filter_dca_ledger_rows(user_wallet, user_rows)
     ledger_tokens: set[str] = set()
     for row in user_rows:
         if row.get("status") != "confirmed":
@@ -590,7 +639,9 @@ def get_user_balances(user_wallet: str) -> dict[str, Any]:
         ledger_tokens.add(str(row.get("token", "SOL")))
 
     usage = _user_plan_usage_from_plans(user_wallet, user_plans)
-    tokens = sorted(ledger_tokens | set(usage))
+    # When on Circle-only ledger, do not surface plan-reserved tokens that only
+    # exist on the old shared wallet (no matching ledger rows).
+    tokens = sorted(ledger_tokens)
     breakdown = []
     for token in tokens:
         ledger = _ledger_totals_for_user_token(user_wallet, token, rows=user_rows)
@@ -632,7 +683,7 @@ def get_user_token_spend_totals(user_wallet: str, token_symbol: str) -> dict[str
     """Deposited and spent amounts for one user + token."""
     user_wallet = user_wallet.strip()
     token_symbol = token_symbol.strip().upper()
-    user_rows = _load_user_ledger(user_wallet)
+    user_rows = _filter_dca_ledger_rows(user_wallet, _load_user_ledger(user_wallet))
     ledger = _ledger_totals_for_user_token(user_wallet, token_symbol, rows=user_rows)
     deposited = ledger["deposited"]
     spent_ledger = ledger["spent_ledger"]
