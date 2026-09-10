@@ -642,10 +642,20 @@ def init_db() -> None:
 
 
 def _repair_bitagents_decimal_scale(conn) -> None:
-    """BITAGENTS was catalogued as 9 decimals but is 6 on-chain (1000x under-scale)."""
-    repair_id = "bitagents_decimals_9_to_6_v1"
+    """
+    BITAGENTS decimal repair guard + automatic reverse of the bad v1 multiply.
+
+    v1 (`bitagents_decimals_9_to_6_v1`) wrongly multiplied live amounts x1000
+    on 2026-09-10. That multiply path must never run again.
+
+    When v1 notes show it actually scaled rows (`user_ledger=`), this applies
+    `bitagents_decimals_9_to_6_v1_revert` once: divide the same tables by 1000.
+    """
     mint = "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY"
     scale = 1000.0  # 10 ** (9 - 6)
+    repair_id_v1 = "bitagents_decimals_9_to_6_v1"
+    repair_id_revert = "bitagents_decimals_9_to_6_v1_revert"
+
     with conn.cursor() as cur:
         cur.execute(
             """
@@ -656,14 +666,42 @@ def _repair_bitagents_decimal_scale(conn) -> None:
             )
             """
         )
-        cur.execute("SELECT 1 FROM schema_repairs WHERE id = %s", (repair_id,))
-        if cur.fetchone():
+        cur.execute(
+            "SELECT id, notes FROM schema_repairs WHERE id IN (%s, %s)",
+            (repair_id_v1, repair_id_revert),
+        )
+        rows = {str(r["id"]): str(r.get("notes") or "") for r in cur.fetchall()}
+
+        # If v1 never ran on this DB, insert a SKIPPED marker so the old
+        # multiply code path can never fire on a fresh deploy.
+        if repair_id_v1 not in rows:
+            cur.execute(
+                """
+                INSERT INTO schema_repairs (id, notes)
+                VALUES (%s, %s)
+                ON CONFLICT (id) DO NOTHING
+                """,
+                (
+                    repair_id_v1,
+                    "SKIPPED: original x1000 repair was incorrect for live data; "
+                    "marker only so it cannot run.",
+                ),
+            )
+            print("  BITAGENTS x1000 repair skipped (marker only).")
+            return
+
+        if repair_id_revert in rows:
+            return
+
+        notes_v1 = rows.get(repair_id_v1, "")
+        # Do not reverse marker-only / already-clean DBs.
+        if "SKIPPED" in notes_v1 or "user_ledger=" not in notes_v1:
             return
 
         cur.execute(
             """
             UPDATE user_ledger
-            SET amount = amount * %s
+            SET amount = amount / %s
             WHERE mint = %s AND amount IS NOT NULL AND amount <> 0
             """,
             (scale, mint),
@@ -673,7 +711,7 @@ def _repair_bitagents_decimal_scale(conn) -> None:
         cur.execute(
             """
             UPDATE easya_orders
-            SET output_amount = output_amount * %s
+            SET output_amount = output_amount / %s
             WHERE output_mint = %s
               AND output_amount IS NOT NULL
               AND output_amount <> 0
@@ -685,7 +723,7 @@ def _repair_bitagents_decimal_scale(conn) -> None:
         cur.execute(
             """
             UPDATE easya_order_executions e
-            SET output_amount = e.output_amount * %s
+            SET output_amount = e.output_amount / %s
             FROM easya_orders o
             WHERE e.order_id = o.id
               AND o.output_mint = %s
@@ -699,19 +737,17 @@ def _repair_bitagents_decimal_scale(conn) -> None:
         cur.execute(
             """
             INSERT INTO schema_repairs (id, notes)
-            VALUES (
-                %s,
-                %s
-            )
+            VALUES (%s, %s)
+            ON CONFLICT (id) DO NOTHING
             """,
             (
-                repair_id,
-                f"Scaled BITAGENTS ledger/order amounts x{scale:g} "
+                repair_id_revert,
+                f"Reverted BITAGENTS x{scale:g} inflation "
                 f"(user_ledger={ledger_n}, easya_orders={orders_n}, executions={exec_n})",
             ),
         )
         print(
-            f"  Repaired BITAGENTS decimal scale x{scale:g}: "
+            f"  Reverted BITAGENTS decimal inflation /{scale:g}: "
             f"ledger={ledger_n}, orders={orders_n}, executions={exec_n}"
         )
 
