@@ -235,9 +235,9 @@ app.add_middleware(
 )
 
 
-# Scheduled maintenance: 10 Sep 2026, 1:00–2:30 PM IST (07:30–09:00 UTC).
+# Scheduled maintenance: 10 Sep 2026, 1:00–3:30 PM IST (07:30–10:00 UTC).
 _MAINTENANCE_START_UTC = datetime(2026, 9, 10, 7, 30, 0, tzinfo=timezone.utc)
-_MAINTENANCE_END_UTC = datetime(2026, 9, 10, 9, 0, 0, tzinfo=timezone.utc)
+_MAINTENANCE_END_UTC = datetime(2026, 9, 10, 10, 0, 0, tzinfo=timezone.utc)
 _MAINTENANCE_ALLOW_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
 
 
@@ -259,12 +259,12 @@ async def maintenance_gate(request, call_next):
             content={
                 "error": (
                     "BIT Agents is under scheduled maintenance "
-                    "(1:00–2:30 PM IST, 10 Sep 2026). Please try again shortly."
+                    "(1:00–3:30 PM IST, 10 Sep 2026). Please try again shortly."
                 ),
                 "maintenance": True,
-                "until_ist": "2026-09-10T14:30:00+05:30",
+                "until_ist": "2026-09-10T15:30:00+05:30",
             },
-            headers={"Retry-After": "5400"},
+            headers={"Retry-After": "9000"},
         )
     return await call_next(request)
 

@@ -20,11 +20,11 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(
       {
-        error: "BIT Agents is under scheduled maintenance. Please try again after 2:30 PM IST.",
+        error: "BIT Agents is under scheduled maintenance. Please try again after 3:30 PM IST.",
         maintenance: true,
-        until_ist: "2026-09-10T14:30:00+05:30",
+        until_ist: "2026-09-10T15:30:00+05:30",
       },
-      { status: 503, headers: { "Retry-After": "5400" } }
+      { status: 503, headers: { "Retry-After": "9000" } }
     );
   }
 
