@@ -320,17 +320,17 @@ def create_strategy(
     require_confirm: bool = True,
     deploy: bool = False,
     trading_mode: str = "live",
-    funding_token: str = "USDC",
+    funding_token: str = "SOL",
     mint_overrides: Optional[dict[str, str]] = None,
     max_names: Optional[int] = None,
 ) -> dict[str, Any]:
     """
     Create strategy (live by default). Pending until confirm_strategy().
-    Live: requires USDC deposit, Jupiter swaps, 1% start fee / 10% perf on profit.
+    Live: requires SOL deposit, Jupiter swaps, 1% start fee / 10% perf on profit.
     Paper: virtual fills only (trading_mode='paper').
-    Capital sleeve capped at HF_MAX_STRATEGY_USDC (default $100).
+    Capital sleeve capped at HF_MAX_STRATEGY_USDC (default $100 USD notional).
     """
-    from hedge_fund_assets import USDC_MINT, resolve_hf_book_mints
+    from hedge_fund_assets import SOL_MINT, resolve_hf_book_mints
     from covenant_picker import (
         filter_real_tickers,
         horizon_days_for_picker,
@@ -344,7 +344,7 @@ def create_strategy(
     trading_mode = (trading_mode or "live").strip().lower()
     if trading_mode not in ("live", "paper"):
         trading_mode = "live"
-    funding_token = "USDC"
+    funding_token = "SOL"
 
     portfolio = get_or_create_portfolio(user_wallet, capital_usd or DEFAULT_PAPER_CAPITAL)
     sleeve_capital = clamp_strategy_capital(capital_usd)
@@ -490,8 +490,8 @@ def create_strategy(
     rules_final["max_capital_usd"] = HF_MAX_STRATEGY_USDC
     rules_final["mint_map"] = mint_info.get("mint_map") or {}
     rules_final["solana_assets"] = mint_info.get("assets") or []
-    rules_final["liquidation_asset"] = "USDC"
-    rules_final["liquidation_mint"] = USDC_MINT
+    rules_final["liquidation_asset"] = "SOL"
+    rules_final["liquidation_mint"] = SOL_MINT
     rules_final["objective"] = rules_final.get("objective") or "max_profit"
     rules_final["trading_mode"] = trading_mode
     rules_final["funding_token"] = funding_token
@@ -550,7 +550,7 @@ def create_strategy(
     horizon_note = (
         f"Open-ended — liquidate anytime with **liquidate {sid}**."
         if not days
-        else f"Horizon {days}d — auto-liquidates to USDC when ended (or liquidate early)."
+        else f"Horizon {days}d — auto-liquidates to SOL when ended (or liquidate early)."
         + (
             f" (raised to the {HF_MIN_HORIZON_DAYS}d minimum)"
             if (
@@ -562,7 +562,7 @@ def create_strategy(
         )
     )
     mode_note = (
-        f"LIVE · deposit USDC first · 1% fee at start · 10% of profit on liquidate · max ${HF_MAX_STRATEGY_USDC:,.0f}"
+        f"LIVE · deposit SOL first · 1% fee at start · 10% of profit on liquidate · max ${HF_MAX_STRATEGY_USDC:,.0f}"
         if trading_mode == "live"
         else f"PAPER · virtual fills · max ${HF_MAX_STRATEGY_USDC:,.0f}"
     )
@@ -584,7 +584,7 @@ def create_strategy(
         "funding_token": funding_token,
         "solana_assets": mint_info.get("assets") or [],
         "mint_map": mint_info.get("mint_map") or {},
-        "usdc_mint": USDC_MINT,
+        "sol_mint": SOL_MINT,
         "status": status,
         "awaiting_confirmation": status == "pending",
         "confirm_hint": (
@@ -760,9 +760,9 @@ def confirm_strategy(
     rules["paper_mode"] = trading_mode == "paper"
     rules["deposits_required"] = trading_mode == "live"
     if funding_token:
-        rules["funding_token"] = "USDC"
-    funding = "USDC"
-    rules["funding_token"] = "USDC"
+        rules["funding_token"] = "SOL"
+    funding = "SOL"
+    rules["funding_token"] = "SOL"
 
     # Apply mint corrections
     if mint_overrides:
@@ -832,7 +832,9 @@ def confirm_strategy(
                 strategy,
                 capital_usd=sleeve,
                 funding_token=funding,
-                mint_overrides=mint_overrides or rules.get("mint_map"),
+                # Re-resolve mints on deploy. Do not lock stale mint_map (e.g. Ondo
+                # NVDAon with no Jupiter routes) from the proposal step.
+                mint_overrides=mint_overrides,
             )
             _finish_live_deploy(strategy_id, dict(rules), deploy)
 
@@ -928,11 +930,11 @@ def strategy_live_pnl(strategy_id: str, user_wallet: str) -> dict[str, Any]:
             "expired": expired,
             "never_deployed": not mark.get("trades"),
             "hint": (
-                f"No live fills yet — confirm {strategy_id} after depositing USDC."
+                f"No live fills yet — confirm {strategy_id} after depositing SOL."
                 if not mark.get("trades") and status in ("pending", "closed")
                 else None
             ),
-            "liquidation_asset": "USDC",
+            "liquidation_asset": "SOL",
             "liquidation_mint": rules.get("liquidation_mint"),
             "trading_mode": "live",
             "note": "LIVE Jupiter marks — real on-chain positions.",
@@ -1066,7 +1068,7 @@ def strategy_live_pnl(strategy_id: str, user_wallet: str) -> dict[str, Any]:
             "sell_notional_usd": round(sell_notional, 2),
         },
         "recent_trades": trades[:20],
-        "liquidation_asset": rules.get("liquidation_asset") or "USDC",
+        "liquidation_asset": rules.get("liquidation_asset") or "SOL",
         "liquidation_mint": rules.get("liquidation_mint"),
         "note": "Live paper mark-to-market — not a mock historical backtest.",
     }
@@ -1105,7 +1107,7 @@ def _apply_live_usdc_exit(
     *,
     reopen_on_partial: bool,
 ) -> dict[str, Any]:
-    from hedge_fund_assets import USDC_MINT
+    from hedge_fund_assets import SOL_MINT
     from hedge_fund_live import liquidate_live_strategy
 
     strategy_id = strategy["id"]
@@ -1138,7 +1140,7 @@ def _apply_live_usdc_exit(
     rules0["liquidation_total_proceeds_usd"] = live.get("total_proceeds_usdc")
     rules0["liquidation_profit_usd"] = live.get("profit_usd")
     rules0["perf_fee_usd"] = live.get("perf_fee_usd")
-    rules0["liquidation_mint"] = USDC_MINT
+    rules0["liquidation_mint"] = SOL_MINT
     rules0["swapped_to_usdc"] = True
     init_db()
     with get_conn() as conn:
@@ -1204,9 +1206,9 @@ def _claim_usdc_exit(
 def liquidate_strategy(
     strategy_id: str,
     user_wallet: str,
-    reason: str = "Horizon ended — liquidate to USDC",
+    reason: str = "Horizon ended — liquidate to SOL",
 ) -> dict[str, Any]:
-    """Sell all strategy positions to USDC (live Jupiter or paper). Marks strategy closed."""
+    """Sell all strategy positions to SOL (live Jupiter or paper). Marks strategy closed."""
     from hedge_fund_live import open_live_holdings
 
     strategy = get_strategy(strategy_id, user_wallet)
@@ -1223,7 +1225,7 @@ def liquidate_strategy(
                 latest = get_strategy(strategy_id, user_wallet)
                 return {
                     "strategy": latest,
-                    "note": "USDC exit already in progress",
+                    "note": "SOL exit already in progress",
                     "liquidating": True,
                     "trades": [],
                 }
@@ -1342,13 +1344,13 @@ def _liquidate_paper(strategy_id: str, user_wallet: str, reason: str) -> dict[st
             bool(result.get("trade")),
             (result.get("trade") or {}).get("id"),
             [],
-            {"liquidation": True, "to": "USDC", "mint": USDC_MINT},
+            {"liquidation": True, "to": "SOL", "mint": SOL_MINT},
         )
 
     rules = dict(strategy.get("rules") or {})
     rules["liquidated_at"] = _now().isoformat()
     rules["liquidation_proceeds_usd"] = round(proceeds, 2)
-    rules["liquidation_mint"] = USDC_MINT
+    rules["liquidation_mint"] = SOL_MINT
 
     init_db()
     with get_conn() as conn:
@@ -1366,11 +1368,11 @@ def _liquidate_paper(strategy_id: str, user_wallet: str, reason: str) -> dict[st
         "strategy": strategy,
         "liquidated": True,
         "proceeds_usd": round(proceeds, 2),
-        "to_asset": "USDC",
-        "to_mint": USDC_MINT,
+        "to_asset": "SOL",
+        "to_mint": SOL_MINT,
         "trades": trades,
         "message": (
-            f"Strategy {strategy_id} liquidated to USDC (paper). "
+            f"Strategy {strategy_id} liquidated to SOL (paper). "
             f"Proceeds ${proceeds:,.2f} credited as cash."
         ),
     }
@@ -1400,7 +1402,7 @@ def maybe_liquidate_expired(strategy_id: str) -> Optional[dict[str, Any]]:
         return liquidate_strategy(
             strategy_id,
             strategy["user_wallet"],
-            reason=f"Horizon {horizon}d ended — auto-liquidate to USDC",
+            reason=f"Horizon {horizon}d ended — auto-liquidate to SOL",
         )
     return None
 
@@ -1429,7 +1431,7 @@ def complete_unswapped_closed_strategies() -> dict[str, Any]:
             continue
         result = _apply_live_usdc_exit(
             claimed,
-            "Closed strategy still held tokens — swap remaining to USDC",
+            "Closed strategy still held tokens — swap remaining to SOL",
             reopen_on_partial=False,
         )
         results.append({"strategy_id": strategy["id"], **result})
@@ -1549,7 +1551,7 @@ def add_capital_to_strategy(
     add = min(max(HF_MIN_STRATEGY_USDC, float(add_usd)), room) if room > 0 else 0.0
     if add <= 0:
         return {
-            "error": f"Sleeve already at max ${HF_MAX_STRATEGY_USDC:,.0f} paper USDC",
+            "error": f"Sleeve already at max ${HF_MAX_STRATEGY_USDC:,.0f} paper USD",
             "capital_usd": current,
             "max_capital_usd": HF_MAX_STRATEGY_USDC,
         }
@@ -2469,6 +2471,46 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
     # Avoid Yahoo market refresh on live-only dashboards (was making loads ~20s+)
     market = get_market_snapshots(list_watched_symbols()[:12]) if has_paper else []
 
+    def _closed_pnl_fields(
+        strategy: dict[str, Any],
+        trade_rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Realized PnL snapshot for closed / liquidated strategies."""
+        if strategy.get("status") != "closed":
+            return {}
+        rules_local = strategy.get("rules") or {}
+        capital = float(rules_local.get("capital_usd") or 0)
+        proceeds = rules_local.get("liquidation_proceeds_usd")
+        buy_notional = sum(
+            float(t.get("notional_usd") or 0)
+            for t in trade_rows
+            if str(t.get("side") or "").upper() == "BUY"
+        )
+        sell_notional = sum(
+            float(t.get("notional_usd") or 0)
+            for t in trade_rows
+            if str(t.get("side") or "").upper() == "SELL"
+        )
+        fee_notional = sum(
+            float(t.get("notional_usd") or t.get("fee_usd") or 0)
+            for t in trade_rows
+            if str(t.get("side") or "").upper() == "FEE"
+        )
+        if proceeds is not None:
+            basis = buy_notional or capital
+            realized = float(proceeds) - basis
+        else:
+            realized = sell_notional - buy_notional
+        basis_pct = buy_notional or capital
+        return {
+            "closed": True,
+            "realized_pnl_usd": round(realized, 2),
+            "realized_pnl_pct": round((realized / basis_pct) * 100, 2) if basis_pct else 0.0,
+            "liquidation_proceeds_usd": float(proceeds) if proceeds is not None else None,
+            "capital_usd": capital or None,
+            "perf_fee_usd": round(fee_notional, 2) if fee_notional else rules_local.get("perf_fee_usd"),
+        }
+
     all_live_trades: list[dict[str, Any]] = []
     # Per-strategy breakdown (same asset can appear under multiple strategies)
     by_strategy: list[dict[str, Any]] = []
@@ -2508,6 +2550,7 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
                     "horizon_days": s.get("horizon_days"),
                     "horizon_label": s.get("horizon_label"),
                     "liquidation_txs": (rules.get("liquidation_txs") or []),
+                    **_closed_pnl_fields(s, live_tr),
                 }
             )
             continue
@@ -2530,7 +2573,8 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
                     "unrealized_pnl_usd": round(mv - cost, 2),
                 }
             )
-        s_trades = [t for t in trades if t.get("strategy_id") == sid][:15]
+        s_trades_all = [t for t in trades if t.get("strategy_id") == sid]
+        s_trades = s_trades_all[:15]
         s_decisions = [d for d in decisions if d.get("strategy_id") == sid][:10]
         by_strategy.append(
             {
@@ -2544,6 +2588,7 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
                 "symbols": s.get("symbols") or [],
                 "horizon_days": s.get("horizon_days"),
                 "horizon_label": s.get("horizon_label"),
+                **_closed_pnl_fields(s, s_trades_all),
             }
         )
 
@@ -2583,7 +2628,7 @@ def paper_dashboard(user_wallet: str) -> dict[str, Any]:
 def _scheduler_loop() -> None:
     global _last_market_refresh_at
     try:
-        print("  HF close cycle on startup (expired + unswapped closed → USDC)")
+        print("  HF close cycle on startup (expired + unswapped closed → SOL)")
         startup = run_horizon_close_cycle()
         if startup["expired_count"] or startup["unswapped_count"]:
             print(

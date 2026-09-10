@@ -69,6 +69,7 @@ Start development:
 
 ## Do Not
 
+- Do not remove or do any modifications in the `temp` folder.
 - Do not commit `.env` files or secrets.
 - Do not modify production configuration without being asked.
 - Do not remove tests because they are failing.

@@ -24,6 +24,9 @@ export type EasyaAgentWalletInfo = {
   common_tokens?: string[];
   platform_fee_pct?: string;
   platform_fee_rate?: number;
+  wallet_provider?: "circle" | "local";
+  per_user_wallet?: boolean;
+  circle_error?: string;
 };
 
 export type EasyaDepositRecord = {
@@ -43,9 +46,14 @@ export type EasyaDepositVerifyResponse = {
   balances?: EasyaUserBalances;
 };
 
-export async function fetchEasyaAgentWallet(): Promise<EasyaAgentWalletInfo | null> {
+export async function fetchEasyaAgentWallet(
+  authToken: string
+): Promise<EasyaAgentWalletInfo | null> {
   try {
-    const res = await fetch("/api/agents/kickstart-copilot/wallet/agent", { cache: "no-store" });
+    const res = await fetch("/api/agents/kickstart-copilot/wallet/agent", {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
     if (!res.ok) return null;
     return (await res.json()) as EasyaAgentWalletInfo;
   } catch {

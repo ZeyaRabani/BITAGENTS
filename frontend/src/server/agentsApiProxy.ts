@@ -284,10 +284,10 @@ export async function proxyHedgeFundLiveTrades(
   );
 }
 
-export async function proxyHedgeFundWalletAgent(): Promise<Response> {
+export async function proxyHedgeFundWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/hedge-fund/wallet/agent`, {
     cache: "no-store",
-    headers: buildHeaders(),
+    headers: buildHeaders(authToken),
   });
 }
 
@@ -331,10 +331,10 @@ export async function proxyHedgeFundWalletLedger(
   });
 }
 
-export async function proxyKickstartWalletAgent(): Promise<Response> {
+export async function proxyKickstartWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/kickstart/wallet/agent`, {
     cache: "no-store",
-    headers: buildHeaders(),
+    headers: buildHeaders(authToken),
   });
 }
 
@@ -450,10 +450,10 @@ export async function proxyDcaChat(
   });
 }
 
-export async function proxyDcaWalletAgent(): Promise<Response> {
+export async function proxyDcaWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/wallet/agent`, {
     cache: "no-store",
-    headers: buildHeaders(),
+    headers: buildHeaders(authToken),
   });
 }
 

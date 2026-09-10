@@ -1,7 +1,7 @@
 """
 Per-user deposit ledger for the Hedge Fund agent wallet (live trading).
-Users may deposit USDC only. Leftover SOL can still be withdrawn. Withdrawals
-are blocked while capital is reserved by active/pending live strategies.
+Users may deposit SOL only. Strategies fund from SOL and liquidate back to SOL.
+Leftover USDC (from older strategies) can still be withdrawn.
 """
 
 from __future__ import annotations
@@ -19,8 +19,12 @@ from hedge_fund_assets import SOL_MINT, USDC_MINT
 HF_MGMT_FEE_RATE = float(os.environ.get("HF_MGMT_FEE_RATE", "0.01"))  # 1% at start
 HF_PERF_FEE_RATE = float(os.environ.get("HF_PERF_FEE_RATE", "0.10"))  # 10% of profit on liquidate
 HF_MAX_STRATEGY_USDC = float(os.environ.get("HF_MAX_STRATEGY_USDC", "100"))
-ALLOWED_DEPOSIT_TOKENS = {"USDC"}
-ALLOWED_WITHDRAW_TOKENS = {"USDC", "SOL"}
+HF_MIN_PER_ASSET_USDC = float(os.environ.get("HF_MIN_PER_ASSET_USDC", "5"))
+ALLOWED_DEPOSIT_TOKENS = {"SOL"}
+ALLOWED_FUNDING_TOKENS = {"SOL"}
+ALLOWED_WITHDRAW_TOKENS = {"SOL", "USDC"}  # USDC kept for leftover balances from older strategies
+DEFAULT_FUNDING_TOKEN = "SOL"
+DEFAULT_LIQUIDATION_ASSET = "SOL"
 
 
 def load_hf_keypair():
@@ -46,21 +50,65 @@ def load_hf_keypair():
         return None
 
 
-def get_hf_wallet_pubkey() -> Optional[str]:
+def _shared_hf_pubkey() -> Optional[str]:
     kp = load_hf_keypair()
     return str(kp.pubkey()) if kp else None
 
 
-def get_hf_agent_wallet_info() -> dict[str, Any]:
-    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC
+def get_hf_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
+    user_wallet = (user_wallet or "").strip()
+    if user_wallet:
+        from circle_dca_wallets import get_agent_wallet_address
 
-    return {
-        "agent_wallet": get_hf_wallet_pubkey(),
+        address = get_agent_wallet_address(user_wallet, "hedge_fund")
+        if address:
+            return address
+    return _shared_hf_pubkey()
+
+
+def _hf_agent_addresses(user_wallet: str) -> set[str]:
+    addresses: set[str] = set()
+    primary = get_hf_wallet_pubkey(user_wallet)
+    if primary:
+        addresses.add(primary)
+    shared = _shared_hf_pubkey()
+    if shared:
+        addresses.add(shared)
+    return addresses
+
+
+def get_hf_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
+    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC
+    from circle_dca_wallets import circle_dca_enabled, get_agent_wallet_address
+
+    user_wallet = (user_wallet or "").strip()
+    wallet = get_hf_wallet_pubkey(user_wallet) if user_wallet else _shared_hf_pubkey()
+    provider = "local"
+    circle_error = None
+    per_user = False
+    if user_wallet and circle_dca_enabled():
+        circle_addr = get_agent_wallet_address(user_wallet, "hedge_fund")
+        if circle_addr:
+            wallet = circle_addr
+            provider = "circle"
+            per_user = True
+        else:
+            circle_error = (
+                "Circle Hedge Fund wallet provisioning failed. Check CIRCLE_ENTITY_SECRET. "
+                "Falling back to shared HEDGE_FUND_WALLET_PRIVATE_KEY if configured."
+            )
+
+    result = {
+        "agent_wallet": wallet,
+        "configured": bool(wallet),
+        "wallet_provider": provider,
+        "per_user_wallet": per_user,
         "cluster": SOLANA_CLUSTER,
         "rpc": SOLANA_RPC,
         "allowed_tokens": sorted(ALLOWED_DEPOSIT_TOKENS),
         "allowed_withdraw_tokens": sorted(ALLOWED_WITHDRAW_TOKENS),
         "max_strategy_usdc": HF_MAX_STRATEGY_USDC,
+        "min_per_asset_usdc": HF_MIN_PER_ASSET_USDC,
         "management_fee_pct": HF_MGMT_FEE_RATE * 100,
         "performance_fee_pct": HF_PERF_FEE_RATE * 100,
         "usdc_mint": USDC_MINT,
@@ -68,14 +116,17 @@ def get_hf_agent_wallet_info() -> dict[str, Any]:
         "live_trading": True,
         "paper_trading": True,
     }
+    if circle_error and not per_user:
+        result["circle_error"] = circle_error
+    return result
 
 
 def _hf_rows(user_wallet: str) -> list[dict[str, Any]]:
-    agent_wallet = get_hf_wallet_pubkey()
-    if not agent_wallet:
+    addresses = _hf_agent_addresses(user_wallet)
+    if not addresses:
         return []
     rows = load_ledger_for_user(user_wallet.strip())
-    return [r for r in rows if r.get("agent_wallet") == agent_wallet]
+    return [r for r in rows if r.get("agent_wallet") in addresses]
 
 
 def _ledger_totals(user_wallet: str, token_symbol: str, rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -126,7 +177,7 @@ def _reserved_for_live_strategies(
         # Failed/dismissed/closed never reserve.
         if s.get("status") not in ("paused",):
             continue
-        funding = str(rules.get("funding_token") or "USDC").upper()
+        funding = str(rules.get("funding_token") or DEFAULT_FUNDING_TOKEN).upper()
         if funding != token_symbol:
             continue
         # Skip if already deployed (has live spend reference)
@@ -155,14 +206,14 @@ def get_hf_user_balances(
 
     rows = _hf_rows(user_wallet)
     strategies = list_strategies(user_wallet)
-    tokens = ["USDC"]
-    sol_totals = _ledger_totals(user_wallet, "SOL", rows)
+    tokens = ["SOL"]
+    usdc_totals = _ledger_totals(user_wallet, "USDC", rows)
     if (
-        sol_totals["deposited"] > 0
-        or sol_totals["spent_ledger"] > 0
-        or sol_totals["withdrawn"] > 0
+        usdc_totals["deposited"] > 0
+        or usdc_totals["spent_ledger"] > 0
+        or usdc_totals["withdrawn"] > 0
     ):
-        tokens.append("SOL")
+        tokens.append("USDC")
     balances = []
     for token in tokens:
         totals = _ledger_totals(user_wallet, token, rows)
@@ -188,9 +239,11 @@ def get_hf_user_balances(
         )
     return {
         "user_wallet": user_wallet.strip(),
-        "agent_wallet": get_hf_wallet_pubkey(),
+        "agent_wallet": get_hf_wallet_pubkey(user_wallet),
         "balances": balances,
         "max_strategy_usdc": HF_MAX_STRATEGY_USDC,
+        "funding_token": DEFAULT_FUNDING_TOKEN,
+        "liquidation_asset": DEFAULT_LIQUIDATION_ASSET,
     }
 
 
@@ -201,8 +254,8 @@ def check_hf_can_spend(
     exclude_strategy_id: Optional[str] = None,
 ) -> dict[str, Any]:
     token = token.strip().upper()
-    if token not in ALLOWED_WITHDRAW_TOKENS:
-        return {"error": f"Only USDC can fund strategies (got {token})."}
+    if token not in ALLOWED_FUNDING_TOKENS:
+        return {"error": f"Only SOL can fund strategies (got {token})."}
     balances = get_hf_user_balances(user_wallet, exclude_strategy_id=exclude_strategy_id)
     amount = float(amount)
     for row in balances.get("balances") or []:
@@ -234,7 +287,7 @@ def record_hf_spend(
     tok = resolve_token(token)
     if "error" in tok:
         return tok
-    agent_wallet = get_hf_wallet_pubkey()
+    agent_wallet = get_hf_wallet_pubkey(user_wallet)
     if not agent_wallet:
         return {"error": "Hedge Fund wallet not configured."}
     insert_ledger_entry(
@@ -270,7 +323,7 @@ def record_hf_credit(
     tok = resolve_token(token)
     if "error" in tok:
         return tok
-    agent_wallet = get_hf_wallet_pubkey()
+    agent_wallet = get_hf_wallet_pubkey(user_wallet)
     if not agent_wallet:
         return {"error": "Hedge Fund wallet not configured."}
     insert_ledger_entry(
@@ -343,7 +396,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
 
     signature = signature.strip()
     user_wallet = user_wallet.strip()
-    agent_wallet = get_hf_wallet_pubkey()
+    agent_wallet = get_hf_wallet_pubkey(user_wallet)
     if not agent_wallet:
         return {"error": "Hedge Fund wallet is not configured (HEDGE_FUND_WALLET_PRIVATE_KEY)."}
     if not signature or not _valid_signature(signature):
@@ -391,7 +444,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
         if not inbound:
             return {
                 "error": (
-                    "No verifiable USDC deposit from your wallet to the Hedge Fund wallet "
+                    "No verifiable SOL deposit from your wallet to the Hedge Fund wallet "
                     "was found in this transaction."
                 ),
                 "status": "rejected",
@@ -407,7 +460,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
             token = str(tok.get("symbol") or "").upper()
             if token not in ALLOWED_DEPOSIT_TOKENS:
                 return {
-                    "error": f"Only USDC deposits are accepted (got {token}).",
+                    "error": f"Only SOL deposits are accepted (got {token}).",
                     "status": "rejected",
                 }
             record = {
@@ -429,7 +482,7 @@ def verify_and_record_hf_deposit(signature: str, user_wallet: str) -> dict[str, 
             records.append(record)
         if not records:
             return {
-                "error": "No USDC transfer to the Hedge Fund wallet found in this transaction.",
+                "error": "No SOL transfer to the Hedge Fund wallet found in this transaction.",
                 "status": "rejected",
             }
         return {
@@ -447,7 +500,7 @@ def withdraw_hf_tokens(user_wallet: str, token: str, amount: float) -> dict[str,
     user_wallet = user_wallet.strip()
     token = token.strip().upper()
     if token not in ALLOWED_WITHDRAW_TOKENS:
-        return {"error": "Only USDC (or leftover SOL) can be withdrawn."}
+        return {"error": "Only SOL (or leftover USDC) can be withdrawn."}
     tok = resolve_token(token)
     if "error" in tok:
         return tok
@@ -476,7 +529,8 @@ def withdraw_hf_tokens(user_wallet: str, token: str, amount: float) -> dict[str,
             tok["mint"],
             amount,
             tok["decimals"],
-            signing_keypair=load_hf_keypair(),
+            signing_user_wallet=user_wallet,
+            agent_type="hedge_fund",
         )
         if transfer.get("error") or transfer.get("status") != "success":
             return transfer
@@ -484,7 +538,7 @@ def withdraw_hf_tokens(user_wallet: str, token: str, amount: float) -> dict[str,
         record = {
             "id": str(uuid.uuid4())[:8],
             "user_wallet": user_wallet,
-            "agent_wallet": get_hf_wallet_pubkey(),
+            "agent_wallet": get_hf_wallet_pubkey(user_wallet),
             "signature": signature,
             "token": tok["symbol"],
             "mint": tok["mint"],

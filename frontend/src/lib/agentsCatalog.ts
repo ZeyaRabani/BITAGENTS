@@ -187,7 +187,7 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     name: "Hedge Fund Agent",
     category: "Trading",
     description:
-      "A managed hedge fund strategy agent — portfolio construction, risk targeting, automated rebalancing, and simulated paper trading backtests.",
+      "Deposit SOL, run live Jupiter strategy sleeves (USD notional), and liquidate back to SOL with 1% start / 10% profit fees. Paper mode still available.",
     tagline: "Automated strategies · risk-managed",
     pricePerTask: "1% Fee & 10% Profit",
     runs: "-",

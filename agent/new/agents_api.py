@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -232,6 +233,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Scheduled maintenance: 10 Sep 2026, 1:00–2:30 PM IST (07:30–09:00 UTC).
+_MAINTENANCE_START_UTC = datetime(2026, 9, 10, 7, 30, 0, tzinfo=timezone.utc)
+_MAINTENANCE_END_UTC = datetime(2026, 9, 10, 9, 0, 0, tzinfo=timezone.utc)
+_MAINTENANCE_ALLOW_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+
+
+def _maintenance_active() -> bool:
+    if os.environ.get("MAINTENANCE_FORCE", "").strip() in ("1", "true", "True", "yes"):
+        return True
+    now = datetime.now(timezone.utc)
+    return _MAINTENANCE_START_UTC <= now < _MAINTENANCE_END_UTC
+
+
+@app.middleware("http")
+async def maintenance_gate(request, call_next):
+    path = request.url.path or "/"
+    if _maintenance_active() and path not in _MAINTENANCE_ALLOW_PATHS:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": (
+                    "BIT Agents is under scheduled maintenance "
+                    "(1:00–2:30 PM IST, 10 Sep 2026). Please try again shortly."
+                ),
+                "maintenance": True,
+                "until_ist": "2026-09-10T14:30:00+05:30",
+            },
+            headers={"Retry-After": "5400"},
+        )
+    return await call_next(request)
 
 
 class AuthChallengeResponse(BaseModel):
@@ -522,8 +557,8 @@ def resolve_token_info(
 
 
 @app.get("/wallet/agent")
-def wallet_agent(_: None = Depends(require_internal_key)) -> dict[str, Any]:
-    return get_agent_wallet_info()
+def wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_agent_wallet_info(auth_wallet)
 
 
 @app.get("/wallet/balance")
@@ -818,8 +853,8 @@ class EasyaUpdateLimitOrderRequest(BaseModel):
 
 
 @app.get("/kickstart/wallet/agent")
-def kickstart_wallet_agent(_: None = Depends(require_internal_key)) -> dict[str, Any]:
-    return get_easya_agent_wallet_info()
+def kickstart_wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_easya_agent_wallet_info(auth_wallet)
 
 
 @app.get("/kickstart/wallet/balance")
@@ -1389,8 +1424,8 @@ class HfPaperAnalyzeRequest(BaseModel):
 
 
 @app.get("/hedge-fund/wallet/agent")
-def hedge_fund_wallet_agent(_: None = Depends(require_internal_key)) -> dict[str, Any]:
-    return get_hf_agent_wallet_info()
+def hedge_fund_wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_hf_agent_wallet_info(auth_wallet)
 
 
 @app.get("/hedge-fund/wallet/balance")

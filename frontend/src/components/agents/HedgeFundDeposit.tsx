@@ -1,21 +1,13 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import {
-  createAssociatedTokenAccountInstruction,
-  createTransferInstruction,
-  getAssociatedTokenAddress,
-  getAccount,
-} from "@solana/spl-token";
-import { PublicKey, Transaction } from "@solana/web3.js";
+import { PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Panel } from "@/components/AppShell";
 import { LegalSignInNotice } from "@/components/legal/LegalSignInNotice";
 import { explorerUrlForSignature } from "@/lib/dcaActionResults";
 import {
-  HF_DEPOSIT_TOKEN_DECIMALS,
-  HF_DEPOSIT_TOKEN_MINTS,
   fetchHfAgentWallet,
   fetchHfUserBalances,
   verifyHfDepositWithRetry,
@@ -25,7 +17,7 @@ import {
   type HfUserDepositBalances,
 } from "@/lib/hedgeFundWalletClient";
 
-const PRESET_TOKENS = ["USDC"] as const;
+const PRESET_TOKENS = ["SOL"] as const;
 const PENDING_DEPOSIT_KEY = "hf_pending_deposit_signature";
 
 function savePendingDepositSignature(signature: string) {
@@ -69,7 +61,7 @@ export function HedgeFundDeposit({
   const { publicKey, sendTransaction, connected } = useWallet();
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
   const [balances, setBalances] = useState<HfTokenBalanceRow[]>([]);
-  const token: PresetToken = "USDC";
+  const token: PresetToken = "SOL";
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
@@ -103,10 +95,14 @@ export function HedgeFundDeposit({
   }, [publicKey, authToken, onBalancesChange]);
 
   useEffect(() => {
-    void fetchHfAgentWallet().then((info) => {
+    if (!authToken) {
+      setAgentWallet(null);
+      return;
+    }
+    void fetchHfAgentWallet(authToken).then((info) => {
       setAgentWallet(info?.agent_wallet ?? null);
     });
-  }, []);
+  }, [authToken]);
 
   useEffect(() => {
     void refreshBalances();
@@ -239,23 +235,16 @@ export function HedgeFundDeposit({
       const tx = new Transaction();
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
 
-      if (token !== "USDC") {
-        throw new Error("Only USDC deposits are accepted");
+      if (token !== "SOL") {
+        throw new Error("Only SOL deposits are accepted");
       }
-      const mintAddress = HF_DEPOSIT_TOKEN_MINTS.USDC;
-      const decimals = HF_DEPOSIT_TOKEN_DECIMALS.USDC ?? 6;
-      const mint = new PublicKey(mintAddress);
-      const rawAmount = BigInt(Math.round(parsed * 10 ** decimals));
-      const userAta = await getAssociatedTokenAddress(mint, publicKey);
-      const agentAta = await getAssociatedTokenAddress(mint, agentPk);
-
-      try {
-        await getAccount(connection, agentAta);
-      } catch {
-        tx.add(createAssociatedTokenAccountInstruction(publicKey, agentAta, agentPk, mint));
-      }
-
-      tx.add(createTransferInstruction(userAta, agentAta, publicKey, rawAmount));
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: agentPk,
+          lamports: Math.round(parsed * LAMPORTS_PER_SOL),
+        })
+      );
 
       tx.recentBlockhash = blockhash;
       tx.feePayer = publicKey;
@@ -349,19 +338,24 @@ export function HedgeFundDeposit({
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Deposit <span className="text-foreground">USDC only</span> to the Hedge Fund
+            Deposit <span className="text-foreground">SOL only</span> to the Hedge Fund
             wallet on <span className="text-foreground">{cluster ?? "Solana"}</span>. After you
             send funds, your deposit is verified automatically and credited. Active strategy
-            capital stays reserved until you liquidate.
+            capital stays reserved until you liquidate. Leave ~0.01 SOL spare beyond each
+            strategy size so buys can pay token-account rent and fees.
           </p>
 
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="uppercase tracking-[0.16em] text-signal">Agent wallet</span>
             <div className="mt-1 break-all text-foreground">
-              {agentWallet ?? "Not configured — set HEDGE_FUND_WALLET_PRIVATE_KEY"}
+              {agentWallet ?? (
+                authToken
+                  ? "Provisioning your personal Hedge Fund agent wallet…"
+                  : "Sign in to provision your personal agent wallet"
+              )}
             </div>
             <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-signal">
-              USDC · 1% start fee · 10% of profit on liquidate
+              SOL · max $100 sleeve · min $5/asset · 1% start · 10% profit on liquidate
             </div>
           </div>
 
@@ -376,7 +370,7 @@ export function HedgeFundDeposit({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 disabled={busy || verifyBusy || !connected}
-                placeholder="USDC amount"
+                placeholder="SOL amount"
                 className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
@@ -448,7 +442,7 @@ export function HedgeFundDeposit({
               Withdraw to your wallet
             </div>
             <p className="mt-2 text-sm text-muted-foreground">
-              Withdraw free USDC. Amounts reserved for pending strategies or already deployed
+              Withdraw free SOL. Amounts reserved for pending strategies or already deployed
               cannot be withdrawn until you liquidate.
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">

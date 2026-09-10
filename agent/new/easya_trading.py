@@ -1,4 +1,4 @@
-﻿"""
+"""
 EasyA Analysis Agent trading ΓÇö Jupiter market/limit buy orders (one-time, non-recurring).
 
 Users deposit SOL to EASYA_ANALYSIS_AGENT_WALLET_PRIVATE_KEY; orders execute via Jupiter.
@@ -544,9 +544,14 @@ def execute_easya_swap_buy(
     if not _is_mainnet():
         return {"error": "Jupiter swaps require mainnet. Set SOLANA_CLUSTER=mainnet."}
 
-    keypair = load_easya_keypair()
-    if not keypair or not HAS_SOLDERS:
-        return {"error": "EASYA_ANALYSIS_AGENT_WALLET_PRIVATE_KEY is not configured."}
+    from circle_dca_wallets import resolve_agent_signing_context
+
+    signing = resolve_agent_signing_context(user_wallet, "easya")
+    keypair = signing.get("keypair") if signing.get("mode") == "local" else None
+    circle_wallet_id = signing.get("wallet_id") if signing.get("mode") == "circle" else None
+    wallet_pubkey = signing.get("pubkey")
+    if not wallet_pubkey or (signing.get("mode") == "local" and not keypair) or not HAS_SOLDERS:
+        return {"error": "EasyA agent wallet is not configured (Circle or EASYA_ANALYSIS_AGENT_WALLET_PRIVATE_KEY)."}
 
     inp = resolve_token("SOL")
     out = resolve_output_token(output_token)
@@ -555,7 +560,6 @@ def execute_easya_swap_buy(
     if "error" in out:
         return out
 
-    wallet_pubkey = str(keypair.pubkey())
     raw_amount = _lamports(amount_sol, inp["decimals"])
     result = _build_and_execute_swap(
         inp["mint"],
@@ -564,6 +568,7 @@ def execute_easya_swap_buy(
         wallet_pubkey,
         keypair,
         slippage_bps,
+        circle_wallet_id=circle_wallet_id,
     )
 
     if result.get("status") != "success":
@@ -750,18 +755,52 @@ def place_limit_buy_order(
         if metrics.get("market_cap_usd") is not None
         else "n/a"
     )
-    return {
+
+    # If the trigger is already true, fill immediately instead of waiting for the poller.
+    immediate_fill = None
+    if _buy_trigger_met(order, metrics):
+        try:
+            _try_fill_limit_order(order)
+            refreshed = get_easya_order(order_id)
+            if refreshed:
+                order = refreshed
+                if refreshed.get("signature") and refreshed.get("status") in {"filled", "completed"}:
+                    immediate_fill = {
+                        "status": "filled",
+                        "signature": refreshed.get("signature"),
+                        "output_amount": refreshed.get("output_amount"),
+                    }
+                elif refreshed.get("error_message"):
+                    immediate_fill = {
+                        "status": "pending_retry",
+                        "error": refreshed.get("error_message"),
+                    }
+        except Exception as exc:
+            immediate_fill = {"status": "error", "error": str(exc)}
+
+    message = (
+        f"Limit buy placed: spend {amount_sol} SOL for {out['symbol']} "
+        f"when {_format_trigger_summary(order)} (one-time, 1 execution). "
+        f"Current price: ${metrics.get('price_usd') if metrics.get('price_usd') is not None else 'n/a'}, "
+        f"market cap: {mcap_str}"
+    )
+    if immediate_fill and immediate_fill.get("status") == "filled":
+        message += f" Trigger already met — filled on-chain (tx `{immediate_fill['signature']}`)."
+    elif immediate_fill and immediate_fill.get("error"):
+        message += f" Trigger is met but the first fill attempt failed: {immediate_fill['error']}"
+
+    result = {
         **order,
-        "message": (
-            f"Limit buy placed: spend {amount_sol} SOL for {out['symbol']} "
-            f"when {_format_trigger_summary(order)} (one-time, 1 execution). "
-            f"Current price: ${metrics.get('price_usd') if metrics.get('price_usd') is not None else 'n/a'}, "
-            f"market cap: {mcap_str}"
-        ),
+        "message": message,
         "current_price_usd": metrics.get("price_usd"),
         "current_market_cap_usd": metrics.get("market_cap_usd"),
         "platform_fee_rate": 0.001,
     }
+    if immediate_fill is not None:
+        result["immediate_fill"] = immediate_fill
+        if immediate_fill.get("signature"):
+            result["signature"] = immediate_fill["signature"]
+    return result
 
 
 def place_threshold_buy_order(
@@ -1194,7 +1233,9 @@ def _order_scheduler_loop() -> None:
 
 def start_easya_order_scheduler() -> bool:
     global _order_scheduler_running
-    if not get_easya_wallet_pubkey():
+    from circle_dca_wallets import circle_dca_enabled
+
+    if not get_easya_wallet_pubkey() and not circle_dca_enabled():
         return False
     with _order_lock:
         if _order_scheduler_running:

@@ -237,13 +237,61 @@ def _raw_amount(amount: float, decimals: int) -> int:
     return max(1, int(round(float(amount) * (10 ** int(decimals)))))
 
 
-SWAP_TIMEOUT_S = 150
+SWAP_TIMEOUT_S = 220
 # Minimum SOL the HF wallet must hold to reliably pay tx fees + Jupiter's
 # priority fee (computeUnitPricePercentile=high) + possible new-ATA rent.
 # Below this, transactions get signed and submitted but never land — they
 # just silently fail to confirm (skipPreflight bypasses the fee-payer check
 # client-side), burning the full 60s confirmation wait for nothing.
 MIN_SOL_FOR_FEES = 0.01
+# Creating a new SPL token account costs ~0.00203928 SOL rent. After switching
+# HF funding to SOL, swaps that spend nearly the whole wallet balance fail with
+# InstructionError Custom:1 because nothing is left for the destination ATA.
+ATA_RENT_SOL = 0.00204
+HF_SOL_FEE_HEADROOM = 0.006  # base fee + Jupiter priority fee cushion
+
+
+def _sol_operating_reserve(n_assets: int = 1) -> float:
+    """SOL that must remain in the HF wallet after funding swaps (ATA rent + fees)."""
+    legs = max(1, int(n_assets or 1))
+    return round(ATA_RENT_SOL * legs + HF_SOL_FEE_HEADROOM, 9)
+
+
+def _on_chain_sol_balance(user_wallet: Optional[str] = None) -> Optional[float]:
+    from dca_agent import sol_rpc
+
+    pubkey = get_hf_wallet_pubkey(user_wallet)
+    if not pubkey:
+        return None
+    try:
+        lamports = int((sol_rpc("getBalance", [pubkey]) or {}).get("value", 0))
+        return lamports / 1e9
+    except Exception:
+        return None
+
+
+def _humanize_hf_swap_error(err: Any) -> str:
+    raw = str(err)
+    compact = raw.replace(" ", "")
+    lower = raw.lower()
+    if "'Custom':1" in compact or '"Custom":1' in compact:
+        return (
+            "Insufficient SOL left for token-account rent/fees (Custom:1). "
+            f"Keep at least ~{_sol_operating_reserve(1):.4f} SOL in the Hedge Fund wallet "
+            "beyond the strategy size, then retry."
+        )
+    if "no routes found" in lower:
+        return (
+            "Jupiter has no swap route for this mint (often an illiquid Ondo *on token). "
+            "Retry the strategy — we now prefer Backed xStocks (e.g. NVDAx) when available."
+        )
+    if "confirmation timed out" in lower or ("timed out" in lower and "swap" not in lower):
+        return (
+            "Solana did not confirm the buy in time (tx likely dropped by the RPC). "
+            "Your capital was refunded if no fill landed — dismiss, wait a few seconds, "
+            "and try again. A private SOLANA_RPC_URL improves landing rates."
+        )
+    return raw
 
 
 def execute_hf_jupiter_swap(
@@ -253,16 +301,23 @@ def execute_hf_jupiter_swap(
     amount: float,
     input_decimals: int,
     slippage_bps: int = 100,
+    user_wallet: Optional[str] = None,
+    sol_reserve: Optional[float] = None,
 ) -> dict[str, Any]:
     import os
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
     from dca_agent import _build_and_execute_swap, sol_rpc
+    from circle_dca_wallets import resolve_agent_signing_context
 
-    keypair = load_hf_keypair()
-    pubkey = get_hf_wallet_pubkey()
-    if not keypair or not pubkey:
-        return {"error": "Hedge Fund wallet not configured (HEDGE_FUND_WALLET_PRIVATE_KEY)"}
+    signing = resolve_agent_signing_context(user_wallet, "hedge_fund")
+    keypair = signing.get("keypair") if signing.get("mode") == "local" else None
+    circle_wallet_id = signing.get("wallet_id") if signing.get("mode") == "circle" else None
+    pubkey = signing.get("pubkey")
+    if not pubkey or (signing.get("mode") == "local" and not keypair):
+        return {"error": "Hedge Fund wallet not configured (Circle or HEDGE_FUND_WALLET_PRIVATE_KEY)"}
+    amount = float(amount)
+    reserve = float(sol_reserve) if sol_reserve is not None else _sol_operating_reserve(1)
     try:
         lamports = int((sol_rpc("getBalance", [pubkey]) or {}).get("value", 0))
         sol_balance = lamports / 1e9
@@ -275,6 +330,18 @@ def execute_hf_jupiter_swap(
                     "and sent but silently never confirms)."
                 ),
                 "sol_balance": sol_balance,
+            }
+        # SOL→token buys must leave rent/fee headroom or Jupiter creates the ATA and fails Custom:1.
+        if input_mint == SOL_MINT and sol_balance - amount < reserve - 1e-12:
+            return {
+                "error": (
+                    f"Swap of {amount:.6f} SOL would leave only "
+                    f"{max(0.0, sol_balance - amount):.6f} SOL in the HF wallet; "
+                    f"need ≥{reserve:.4f} SOL for token-account rent and fees. "
+                    f"Deposit more SOL (wallet has {sol_balance:.6f}) or use a smaller size."
+                ),
+                "sol_balance": sol_balance,
+                "sol_reserve": reserve,
             }
     except Exception:
         pass  # Balance check is advisory — don't block the swap on an RPC hiccup here.
@@ -297,11 +364,16 @@ def execute_hf_jupiter_swap(
         pubkey,
         keypair,
         slippage_bps=slippage_bps,
+        retries=3,
         api_key=hf_jupiter_api_key,
+        circle_wallet_id=circle_wallet_id,
+        compute_unit_price_percentile="veryHigh",
     )
     try:
         result = future.result(timeout=SWAP_TIMEOUT_S)
         pool.shutdown(wait=False)
+        if result.get("status") != "success" and result.get("error") is not None:
+            result = {**result, "error": _humanize_hf_swap_error(result.get("error"))}
         return result
     except _FutureTimeout:
         pool.shutdown(wait=False)
@@ -324,7 +396,7 @@ def deploy_live_allocations(
     strategy: dict[str, Any],
     *,
     capital_usd: float,
-    funding_token: str = "USDC",
+    funding_token: str = "SOL",
     mint_overrides: Optional[dict[str, str]] = None,
 ) -> dict[str, Any]:
     """
@@ -337,9 +409,9 @@ def deploy_live_allocations(
         return {"error": "No symbols to deploy"}
 
     capital = min(HF_MAX_STRATEGY_USDC, max(1.0, float(capital_usd)))
-    funding_token = (funding_token or "USDC").upper()
-    if funding_token not in ("SOL", "USDC"):
-        return {"error": "Funding token must be SOL or USDC"}
+    funding_token = (funding_token or "SOL").upper()
+    if funding_token != "SOL":
+        return {"error": "Funding token must be SOL"}
 
     # How much funding token to spend for this USDC notional
     if funding_token == "USDC":
@@ -358,6 +430,36 @@ def deploy_live_allocations(
     assets = mint_info.get("assets") or []
     if not assets:
         return {"error": "Could not resolve mints", "details": mint_info.get("errors")}
+
+    # SOL funding spends the same asset used for ATA rent / priority fees. Require
+    # spare SOL beyond the strategy size so Jupiter can create destination ATAs.
+    sol_reserve = _sol_operating_reserve(len(assets))
+    if funding_token == "SOL":
+        available = float(check.get("available") or 0)
+        leftover = available - funding_amount
+        if leftover + 1e-12 < sol_reserve:
+            need = round(funding_amount + sol_reserve, 9)
+            return {
+                "error": (
+                    f"Need ~{sol_reserve:.4f} SOL left after funding for token-account rent and fees. "
+                    f"Available {available:.6f} SOL; strategy needs {funding_amount:.6f} SOL. "
+                    f"Deposit at least {need:.6f} SOL total, then retry."
+                ),
+                "available": available,
+                "funding_amount": funding_amount,
+                "sol_reserve": sol_reserve,
+            }
+        on_chain = _on_chain_sol_balance(user_wallet)
+        if on_chain is not None and on_chain + 1e-12 < funding_amount + sol_reserve:
+            return {
+                "error": (
+                    f"HF wallet on-chain SOL is {on_chain:.6f}; need ≥"
+                    f"{funding_amount + sol_reserve:.6f} (strategy + rent/fee reserve). "
+                    "Deposit more SOL to the agent wallet."
+                ),
+                "sol_balance": on_chain,
+                "sol_reserve": sol_reserve,
+            }
 
     mgmt_fee_usd = round(capital * HF_MGMT_FEE_RATE, 6)
     deploy_usd = round(capital - mgmt_fee_usd, 6)
@@ -387,6 +489,29 @@ def deploy_live_allocations(
         deploy_funding = deploy_usd
     else:
         deploy_funding = round(funding_amount - fee_token_amt, 9)
+        on_chain = _on_chain_sol_balance(user_wallet)
+        if on_chain is not None:
+            max_spend = max(0.0, round(on_chain - sol_reserve, 9))
+            if deploy_funding > max_spend:
+                deploy_funding = max_spend
+        if deploy_funding <= 0:
+            refund = record_hf_credit(
+                user_wallet,
+                funding_token,
+                funding_amount,
+                reference_id=f"{strategy_id}-deploy-refund",
+                reference_type="hf_strategy_deploy_refund",
+            )
+            return {
+                "ok": False,
+                "error": (
+                    f"Not enough SOL left after reserving {sol_reserve:.4f} SOL for rent/fees. "
+                    "Deposit more SOL and retry."
+                ),
+                "refunded": True,
+                "refund": refund,
+                "sol_reserve": sol_reserve,
+            }
 
     per = deploy_funding / len(assets)
     trades = []
@@ -394,13 +519,39 @@ def deploy_live_allocations(
     for asset in assets:
         out_mint = asset["mint"]
         sym = asset.get("display_symbol") or asset.get("symbol")
+        out_decimals = int(asset.get("decimals") or 6)
         swap = execute_hf_jupiter_swap(
             input_mint=input_mint,
             output_mint=out_mint,
             amount=per,
             input_decimals=input_decimals,
             slippage_bps=150,
+            user_wallet=user_wallet,
+            sol_reserve=_sol_operating_reserve(1),
         )
+        # Illiquid catalog mints (often Ondo *on) → fall back to Jupiter xStock.
+        if (
+            swap.get("status") != "success"
+            and "no routes found" in str(swap.get("error") or "").lower()
+        ):
+            from hedge_fund_assets import _equity_xstock_from_jupiter
+
+            alt = _equity_xstock_from_jupiter(str(sym))
+            alt_mint = (alt or {}).get("mint")
+            if alt_mint and alt_mint != out_mint:
+                print(f"    ↳ No routes for {sym} ({out_mint[:8]}…); trying {alt.get('symbol')}…")
+                out_mint = alt_mint
+                out_decimals = int(alt.get("decimals") or out_decimals)
+                asset = {**asset, **alt, "mint": out_mint, "decimals": out_decimals}
+                swap = execute_hf_jupiter_swap(
+                    input_mint=input_mint,
+                    output_mint=out_mint,
+                    amount=per,
+                    input_decimals=input_decimals,
+                    slippage_bps=150,
+                    user_wallet=user_wallet,
+                    sol_reserve=_sol_operating_reserve(1),
+                )
         out_raw = int(swap.get("output_amount_raw") or 0)
         # A signature does NOT mean the swap succeeded — the tx may have been
         # submitted but never confirmed (expired blockhash) before our 60s
@@ -426,7 +577,6 @@ def deploy_live_allocations(
                 reason=f"Buy failed: {err_msg}"[:500],
             )
             continue
-        out_decimals = int(asset.get("decimals") or 6)
         units = out_raw / (10 ** out_decimals)
         notional = per if funding_token == "USDC" else per * (sol_usd_price() or 0)
         price = (notional / units) if units else None
@@ -579,7 +729,9 @@ def retry_live_deploy(
         return {"ok": True, "message": "Nothing to retry — every leg already filled.", "trades": []}
 
     capital = float(rules.get("capital_usd") or 0)
-    funding_token = (rules.get("funding_token") or "USDC").upper()
+    funding_token = (rules.get("funding_token") or "SOL").upper()
+    if funding_token != "SOL":
+        funding_token = "SOL"
     total_legs = max(1, len(symbols))
     per_leg_capital_usd = round((capital * (1.0 - HF_MGMT_FEE_RATE)) / total_legs, 6)
     per_leg_fee_usd = round((capital * HF_MGMT_FEE_RATE) / total_legs, 6)
@@ -605,6 +757,23 @@ def retry_live_deploy(
     if not assets:
         return {"error": "Could not resolve mints for retry", "details": mint_info.get("errors")}
 
+    sol_reserve = _sol_operating_reserve(len(assets))
+    if funding_token == "SOL":
+        available = float(check.get("available") or 0)
+        leftover = available - funding_needed
+        if leftover + 1e-12 < sol_reserve:
+            need = round(funding_needed + sol_reserve, 9)
+            return {
+                "error": (
+                    f"Need ~{sol_reserve:.4f} SOL left after funding for token-account rent and fees. "
+                    f"Available {available:.6f} SOL; retry needs {funding_needed:.6f} SOL. "
+                    f"Deposit at least {need:.6f} SOL total, then retry."
+                ),
+                "available": available,
+                "funding_amount": funding_needed,
+                "sol_reserve": sol_reserve,
+            }
+
     spend = record_hf_spend(
         user_wallet,
         funding_token,
@@ -617,6 +786,32 @@ def retry_live_deploy(
 
     input_mint = USDC_MINT if funding_token == "USDC" else SOL_MINT
     input_decimals = 6 if funding_token == "USDC" else 9
+    per_leg_swap = per_leg_deploy_funding
+    if funding_token == "SOL":
+        on_chain = _on_chain_sol_balance(user_wallet)
+        if on_chain is not None:
+            max_total = max(0.0, round(on_chain - sol_reserve, 9))
+            max_per = max_total / max(1, len(assets))
+            if per_leg_swap > max_per:
+                per_leg_swap = max_per
+        if per_leg_swap <= 0:
+            refund = record_hf_credit(
+                user_wallet,
+                funding_token,
+                funding_needed,
+                reference_id=f"{strategy_id}-retry-refund",
+                reference_type="hf_deploy_partial_refund",
+            )
+            return {
+                "ok": False,
+                "error": (
+                    f"Not enough SOL left after reserving {sol_reserve:.4f} SOL for rent/fees. "
+                    "Deposit more SOL and retry."
+                ),
+                "refunded": True,
+                "refund": refund,
+                "sol_reserve": sol_reserve,
+            }
 
     trades = []
     errors = []
@@ -626,9 +821,11 @@ def retry_live_deploy(
         swap = execute_hf_jupiter_swap(
             input_mint=input_mint,
             output_mint=out_mint,
-            amount=per_leg_deploy_funding,
+            amount=per_leg_swap,
             input_decimals=input_decimals,
             slippage_bps=150,
+            user_wallet=user_wallet,
+            sol_reserve=_sol_operating_reserve(1),
         )
         out_raw = int(swap.get("output_amount_raw") or 0)
         if swap.get("status") != "success" or out_raw <= 0:
@@ -653,7 +850,7 @@ def retry_live_deploy(
             continue
         out_decimals = int(asset.get("decimals") or 6)
         units = out_raw / (10 ** out_decimals)
-        notional = per_leg_deploy_funding if funding_token == "USDC" else per_leg_deploy_funding * (sol_usd_price() or 0)
+        notional = per_leg_swap if funding_token == "USDC" else per_leg_swap * (sol_usd_price() or 0)
         price = (notional / units) if units else None
         explorer = swap.get("explorer_url")
         sig = swap.get("signature")
@@ -751,9 +948,9 @@ def retry_live_deploy(
 
 def liquidate_live_strategy(
     strategy: dict[str, Any],
-    reason: str = "Liquidate to USDC",
+    reason: str = "Liquidate to SOL",
 ) -> dict[str, Any]:
-    """Swap positions to USDC; charge performance fee only after every leg exits."""
+    """Swap positions to SOL; charge performance fee only after every leg exits."""
     strategy_id = strategy["id"]
     user_wallet = strategy["user_wallet"]
     rules = dict(strategy.get("rules") or {})
@@ -762,23 +959,27 @@ def liquidate_live_strategy(
 
     positions = open_live_holdings(strategy_id)
     trades = []
-    proceeds_usdc = 0.0
+    proceeds_sol = 0.0
+    proceeds_usd = 0.0
     errors = []
+    sol_px = sol_usd_price() or 0.0
     if not positions:
         existing = _liquidation_txs(list_live_trades(strategy_id, limit=200))
         return {
             "ok": True,
             "liquidated": True,
             "already_flat": True,
+            "proceeds_sol": 0.0,
             "proceeds_usdc": 0.0,
             "perf_fee_usd": 0.0,
+            "net_credited_sol": 0.0,
             "net_credited_usdc": 0.0,
             "trades": [],
             "errors": [],
             "liquidation_txs": existing,
-            "to_asset": "USDC",
-            "to_mint": USDC_MINT,
-            "message": "No remaining live positions to swap to USDC.",
+            "to_asset": "SOL",
+            "to_mint": SOL_MINT,
+            "message": "No remaining live positions to swap to SOL.",
         }
 
     for pos in positions:
@@ -786,15 +987,48 @@ def liquidate_live_strategy(
         mint = pos.get("mint")
         if units <= 0 or not mint:
             continue
+        # Already SOL holdings: credit without a swap.
+        if mint in (SOL_MINT, "So11111111111111111111111111111111111111112"):
+            sol_out = units
+            proceeds_sol += sol_out
+            usd_out = sol_out * sol_px if sol_px else 0.0
+            proceeds_usd += usd_out
+            trade = _insert_live_trade(
+                strategy_id=strategy_id,
+                user_wallet=user_wallet,
+                symbol=pos.get("symbol") or "SOL",
+                mint=mint,
+                side="SELL",
+                units=units,
+                price_usd=sol_px or None,
+                notional_usd=round(usd_out, 6),
+                input_mint=mint,
+                output_mint=SOL_MINT,
+                signature=None,
+                explorer_url=None,
+                reason=reason,
+            )
+            trades.append(trade)
+            _upsert_live_position(
+                strategy_id=strategy_id,
+                user_wallet=user_wallet,
+                symbol=pos.get("symbol") or "SOL",
+                mint=mint,
+                units_delta=-units,
+                cost_delta_usd=0,
+            )
+            continue
+
         # Resolve decimals via Jupiter/catalog
         asset = resolve_hf_solana_asset(pos.get("symbol") or mint, mint_override=mint)
         decimals = int(asset.get("decimals") or 6)
         swap = execute_hf_jupiter_swap(
             input_mint=mint,
-            output_mint=USDC_MINT,
+            output_mint=SOL_MINT,
             amount=units,
             input_decimals=decimals,
             slippage_bps=150,
+            user_wallet=user_wallet,
         )
         out_raw = int(swap.get("output_amount_raw") or 0)
         if swap.get("status") != "success" or out_raw <= 0:
@@ -804,8 +1038,10 @@ def liquidate_live_strategy(
                 "signature": swap.get("signature"),
             })
             continue
-        usdc_out = out_raw / 1e6
-        proceeds_usdc += usdc_out
+        sol_out = out_raw / 1e9
+        proceeds_sol += sol_out
+        usd_out = sol_out * sol_px if sol_px else 0.0
+        proceeds_usd += usd_out
         trade = _insert_live_trade(
             strategy_id=strategy_id,
             user_wallet=user_wallet,
@@ -813,10 +1049,10 @@ def liquidate_live_strategy(
             mint=mint,
             side="SELL",
             units=units,
-            price_usd=(usdc_out / units) if units else None,
-            notional_usd=round(usdc_out, 6),
+            price_usd=(usd_out / units) if units else None,
+            notional_usd=round(usd_out, 6),
             input_mint=mint,
-            output_mint=USDC_MINT,
+            output_mint=SOL_MINT,
             signature=swap.get("signature"),
             explorer_url=swap.get("explorer_url"),
             reason=reason,
@@ -841,8 +1077,8 @@ def liquidate_live_strategy(
     )
     credit = record_hf_credit(
         user_wallet,
-        "USDC",
-        proceeds_usdc,
+        "SOL",
+        proceeds_sol,
         reference_id=credit_reference,
         reference_type="hf_liquidate_return",
         signature=first_signature,
@@ -856,18 +1092,20 @@ def liquidate_live_strategy(
             "ok": False,
             "liquidated": False,
             "partial": bool(trades),
-            "proceeds_usdc": round(proceeds_usdc, 8),
+            "proceeds_sol": round(proceeds_sol, 9),
+            "proceeds_usdc": round(proceeds_usd, 8),
             "perf_fee_usd": 0.0,
-            "net_credited_usdc": round(proceeds_usdc, 8),
+            "net_credited_sol": round(proceeds_sol, 9),
+            "net_credited_usdc": round(proceeds_usd, 8),
             "trades": trades,
             "errors": errors,
             "remaining_positions": remaining,
             "liquidation_txs": liquidation_txs,
             "credit": credit,
-            "to_asset": "USDC",
-            "to_mint": USDC_MINT,
+            "to_asset": "SOL",
+            "to_mint": SOL_MINT,
             "message": (
-                f"Partial liquidation: ${proceeds_usdc:,.6f} USDC credited; "
+                f"Partial liquidation: {proceeds_sol:,.6f} SOL credited; "
                 f"{len(remaining)} position(s) remain. No performance fee charged yet."
             ),
         }
@@ -889,49 +1127,70 @@ def liquidate_live_strategy(
     profit = round(total_proceeds - deploy_usd, 8)
     target_perf_fee = round(max(0.0, profit) * HF_PERF_FEE_RATE, 8)
     perf_fee = round(max(0.0, target_perf_fee - prior_perf_fees), 8)
+    perf_fee_sol = 0.0
     if perf_fee > 0:
-        record_hf_spend(
-            user_wallet,
-            "USDC",
-            perf_fee,
-            reference_id=f"{strategy_id}-perf-fee",
-            reference_type="hf_perf_fee",
-        )
-        _insert_live_trade(
-            strategy_id=strategy_id,
-            user_wallet=user_wallet,
-            symbol="FEE",
-            mint=USDC_MINT,
-            side="FEE",
-            units=0,
-            price_usd=1.0,
-            notional_usd=perf_fee,
-            fee_usd=perf_fee,
-            reason=f"10% performance fee on profit ${profit}",
-        )
+        if not sol_px:
+            return {
+                "ok": False,
+                "liquidated": False,
+                "partial": True,
+                "proceeds_sol": round(proceeds_sol, 9),
+                "proceeds_usdc": round(proceeds_usd, 8),
+                "error": "Could not price SOL to charge the performance fee.",
+                "trades": trades,
+                "credit": credit,
+                "to_asset": "SOL",
+                "to_mint": SOL_MINT,
+            }
+        perf_fee_sol = round(perf_fee / sol_px, 9)
+        # Cap fee to available proceeds from this liquidation wave.
+        perf_fee_sol = min(perf_fee_sol, proceeds_sol)
+        if perf_fee_sol > 0:
+            record_hf_spend(
+                user_wallet,
+                "SOL",
+                perf_fee_sol,
+                reference_id=f"{strategy_id}-perf-fee",
+                reference_type="hf_perf_fee",
+            )
+            _insert_live_trade(
+                strategy_id=strategy_id,
+                user_wallet=user_wallet,
+                symbol="FEE",
+                mint=SOL_MINT,
+                side="FEE",
+                units=0,
+                price_usd=sol_px,
+                notional_usd=perf_fee,
+                fee_usd=perf_fee,
+                reason=f"10% performance fee on profit ${profit}",
+            )
 
-    net_to_user = round(proceeds_usdc - perf_fee, 8)
+    net_to_user = round(proceeds_sol - perf_fee_sol, 9)
     return {
         "ok": True,
         "liquidated": True,
-        "proceeds_usdc": round(proceeds_usdc, 8),
+        "proceeds_sol": round(proceeds_sol, 9),
+        "proceeds_usdc": round(proceeds_usd, 8),
         "total_proceeds_usdc": round(total_proceeds, 8),
         "deploy_usd": deploy_usd,
         "profit_usd": profit,
         "perf_fee_usd": perf_fee,
-        "net_credited_usdc": net_to_user,
+        "perf_fee_sol": perf_fee_sol,
+        "net_credited_sol": net_to_user,
+        "net_credited_usdc": round(net_to_user * sol_px, 8) if sol_px else None,
         "trades": trades,
         "errors": errors,
         "credit": credit,
         "liquidation_txs": _liquidation_txs(
             [t for t in list_live_trades(strategy_id, limit=200) if str(t.get("side") or "").upper() in ("SELL", "FEE")]
         ),
-        "to_asset": "USDC",
-        "to_mint": USDC_MINT,
+        "to_asset": "SOL",
+        "to_mint": SOL_MINT,
         "message": (
-            f"Liquidated to USDC: total proceeds ${total_proceeds:,.6f}, "
-            f"profit ${profit:,.6f}, perf fee ${perf_fee:,.6f}, "
-            f"this credit ${net_to_user:,.6f}."
+            f"Liquidated to SOL: total proceeds ${total_proceeds:,.6f}, "
+            f"profit ${profit:,.6f}, perf fee ${perf_fee:,.6f} ({perf_fee_sol:.6f} SOL), "
+            f"this credit {net_to_user:.6f} SOL."
         ),
     }
 

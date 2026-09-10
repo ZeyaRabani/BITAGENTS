@@ -1586,6 +1586,7 @@ def _try_execute_pending_confirmation(
     user_wallet: Optional[str],
     session_id: Optional[str],
     user_input: Optional[str],
+    conversation_history: Optional[list] = None,
 ) -> Optional[tuple[str, dict, str]]:
     if not user_wallet or not _user_confirmed(user_input) or _user_declined(user_input):
         return None
@@ -1593,6 +1594,13 @@ def _try_execute_pending_confirmation(
     key = _confirmation_key(user_wallet, session_id)
     with _CONFIRMATION_LOCK:
         pending = _pending_confirmations.pop(key, None)
+    if not pending and conversation_history:
+        recovered = _recover_trading_order_from_history(conversation_history)
+        if recovered:
+            pending = {
+                "tool": recovered["tool"],
+                "args": {**recovered["args"], "user_wallet": user_wallet.strip()},
+            }
     if not pending:
         return None
 
@@ -1607,6 +1615,208 @@ def _try_execute_pending_confirmation(
         skip_confirmation=True,
     )
     return tool_name, args, result
+
+
+def _json_compact(data: Any) -> str:
+    return json.dumps(data, separators=(",", ":"), default=str)
+
+
+def _parse_trading_order_request(user_input: str) -> Optional[dict[str, Any]]:
+    """Parse natural-language EasyA buy orders without relying on LLM tool calls."""
+    text = (user_input or "").strip()
+    lower = text.lower()
+    if not text or _user_confirmed(text) or _user_declined(text):
+        return None
+    if not re.search(r"\b(buy|swap|limit|threshold|market)\b", lower):
+        return None
+
+    amount_match = re.search(r"(\d+(?:\.\d+)?)\s*sol\b", lower)
+    if not amount_match:
+        return None
+    amount_sol = float(amount_match.group(1))
+
+    token: Optional[str] = None
+    for pattern in (
+        r"\b(?:of|into)\s+\$?([A-Za-z][A-Za-z0-9]{1,20})\b",
+        r"\bbuy\s+\$?([A-Za-z][A-Za-z0-9]{1,20})\b",
+    ):
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        candidate = match.group(1).strip()
+        if candidate.upper() in {
+            "SOL", "TIME", "TIMES", "MARKET", "CAP", "PRICE", "WHEN", "BELOW", "UNDER",
+            "EVERY", "MINUTE", "MINUTES", "SECOND", "SECONDS",
+        }:
+            continue
+        token = candidate
+        break
+    if not token:
+        mint_match = re.search(r"[1-9A-HJ-NP-Za-km-z]{32,44}", text)
+        if mint_match:
+            token = mint_match.group(0)
+    if not token:
+        return None
+
+    mcap_match = re.search(
+        r"market\s*caps?\s*(?:is\s*)?(?:below|under|<=|<|at\s+or\s+below)\s*\$?\s*([\d,]+(?:\.\d+)?)",
+        lower,
+    )
+    price_match = re.search(
+        r"(?:token\s+)?price\s*(?:is\s*)?(?:below|under|<=|<|at\s+or\s+below|drops?\s+to|falls?\s+to)\s*\$?\s*([\d.]+)",
+        lower,
+    )
+    if not price_match:
+        price_match = re.search(r"\bat\s+\$\s*([\d.]+)\b", lower)
+
+    once = bool(re.search(r"\b(?:once|one[- ]time|1[- ]time|for\s+1\s+times?)\b", lower))
+    max_match = re.search(r"(?:for\s+)?(\d+)\s*(?:times?|buys?|executions?)\b", lower)
+    max_executions = 1 if once else (int(max_match.group(1)) if max_match else None)
+
+    interval_match = re.search(
+        r"every\s+(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b",
+        lower,
+    )
+    check_interval_seconds = None
+    if interval_match:
+        count = int(interval_match.group(1))
+        unit = interval_match.group(2)
+        if unit.startswith("m"):
+            check_interval_seconds = count * 60
+        else:
+            check_interval_seconds = count
+
+    wants_market = bool(
+        re.search(r"\b(market\s+buy|buy\s+now|immediately|right\s+now)\b", lower)
+    ) and not mcap_match and not price_match
+
+    if wants_market:
+        return {
+            "tool": "place_market_buy",
+            "args": {"token": token, "amount_sol": amount_sol},
+        }
+
+    if not mcap_match and not price_match:
+        return None
+
+    args: dict[str, Any] = {"token": token, "amount_sol": amount_sol}
+    if mcap_match:
+        args["limit_market_cap_usd"] = float(mcap_match.group(1).replace(",", ""))
+        args["condition_mode"] = "market_cap"
+    if price_match:
+        args["limit_price_usd"] = float(price_match.group(1))
+        args["condition_mode"] = "both" if mcap_match else "price"
+
+    recurring = bool(
+        max_executions is not None and max_executions > 1
+        or check_interval_seconds is not None
+        or re.search(r"\b(until|recurring|threshold|keeps?\s+buying)\b", lower)
+    )
+    if recurring and not once:
+        if max_executions is not None:
+            args["max_executions"] = max_executions
+        if check_interval_seconds is not None:
+            args["check_interval_seconds"] = check_interval_seconds
+        return {"tool": "place_threshold_buy", "args": args}
+
+    return {"tool": "place_limit_buy", "args": args}
+
+
+def _recover_trading_order_from_history(conversation_history: list) -> Optional[dict[str, Any]]:
+    for msg in reversed(conversation_history or []):
+        if msg.get("role") != "user":
+            continue
+        content = str(msg.get("content") or "")
+        if content.startswith("[Connected user wallet:"):
+            content = content.split("\n", 1)[-1]
+        if content.startswith("[Instruction:"):
+            continue
+        parsed = _parse_trading_order_request(content)
+        if parsed:
+            return parsed
+    return None
+
+
+def _try_stage_trading_order_confirmation(
+    user_wallet: Optional[str],
+    session_id: Optional[str],
+    user_input: str,
+) -> Optional[str]:
+    if not user_wallet or _user_confirmed(user_input) or _user_declined(user_input):
+        return None
+    parsed = _parse_trading_order_request(user_input)
+    if not parsed:
+        return None
+
+    tool_name = parsed["tool"]
+    args = {**parsed["args"], "user_wallet": user_wallet.strip()}
+    key = _confirmation_key(user_wallet, session_id)
+    summary = _summarize_pending_action(tool_name, args)
+    details = _pending_action_details(tool_name, args)
+    with _CONFIRMATION_LOCK:
+        _pending_confirmations[key] = {
+            "tool": tool_name,
+            "args": args,
+            "summary": summary,
+            "details": details,
+        }
+    message = (
+        f"Please confirm before I proceed: {summary}. "
+        "Reply **yes** or **confirm** to proceed, or **no** to cancel."
+    )
+    return _json_compact(
+        {
+            "status": "confirmation_required",
+            "message": message,
+            "pending_action": summary,
+            "confirmation_details": details,
+            "tool": tool_name,
+        }
+    )
+
+
+def _format_trading_tool_reply(tool_name: str, result: str) -> str:
+    try:
+        data = json.loads(result)
+    except json.JSONDecodeError:
+        return result
+
+    if data.get("status") == "confirmation_required":
+        return str(data.get("message") or result)
+    if data.get("status") == "cancelled":
+        return str(data.get("message") or "Action cancelled.")
+    if data.get("error"):
+        return f"Could not complete the action: {data['error']}"
+
+    if tool_name in {"place_limit_buy", "place_threshold_buy", "place_market_buy"}:
+        msg = str(data.get("message") or "Order submitted.")
+        order_id = data.get("id")
+        if order_id:
+            msg = f"{msg}\n\nOrder ID: `{order_id}` · status: **{data.get('status', 'active')}**"
+        sig = data.get("signature") or (data.get("immediate_fill") or {}).get("signature")
+        if sig:
+            msg += f"\nOn-chain tx: `{sig}`"
+        msg += "\n\nNot financial advice. DYOR."
+        return msg
+
+    if tool_name == "cancel_trading_order":
+        return str(data.get("message") or f"Order cancelled. Status: {data.get('status')}")
+
+    if tool_name == "list_trading_orders":
+        orders = data.get("orders") or data if isinstance(data, list) else []
+        if isinstance(data, dict):
+            orders = data.get("orders") or []
+        if not orders:
+            return "You have no EasyA trading orders yet."
+        lines = [f"**{len(orders)} trading order(s):**"]
+        for order in orders[:20]:
+            lines.append(
+                f"- `{order.get('id')}` · {order.get('order_type')} · "
+                f"{order.get('pair') or order.get('output_token')} · **{order.get('status')}**"
+            )
+        return "\n".join(lines)
+
+    return data.get("message") or result
 
 
 def execute_tool(
@@ -1625,6 +1835,9 @@ def execute_tool(
         if tool_name in WALLET_SCOPED:
             if not user_wallet:
                 return json.dumps({"error": "Wallet authentication required for watchlist actions."})
+            claimed = (args.get("user_wallet") or "").strip()
+            if claimed and claimed != user_wallet.strip():
+                return json.dumps({"error": "Forbidden: user_wallet does not match authenticated wallet."})
             args["user_wallet"] = user_wallet
 
         blocked, args = _check_action_confirmation(
@@ -1654,18 +1867,34 @@ def run_kickstart_agent(
     actions: list[dict[str, Any]] = []
     prompt = user_input.strip()
 
-    pending = _try_execute_pending_confirmation(user_wallet, session_id, prompt)
+    pending = _try_execute_pending_confirmation(
+        user_wallet, session_id, prompt, conversation_history
+    )
     if pending:
         tool_name, args, result = pending
         actions.append({"tool": tool_name, "args": args, "result": result})
-        try:
-            data = json.loads(result)
-            reply = data.get("message") or result
-        except json.JSONDecodeError:
-            reply = result
+        reply = _format_trading_tool_reply(tool_name, result)
         conversation_history.append({"role": "user", "content": prompt})
         conversation_history.append({"role": "assistant", "content": reply})
         return reply, conversation_history, actions
+
+    if user_wallet and not _user_confirmed(prompt) and not _user_declined(prompt):
+        staged_payload = _try_stage_trading_order_confirmation(user_wallet, session_id, prompt)
+        if staged_payload:
+            try:
+                staged_data = json.loads(staged_payload)
+                staged_reply = str(staged_data.get("message") or staged_payload)
+            except json.JSONDecodeError:
+                staged_reply = staged_payload
+            parsed = _parse_trading_order_request(prompt) or {}
+            actions.append({
+                "tool": parsed.get("tool") or "place_limit_buy",
+                "args": parsed.get("args") or {},
+                "result": staged_payload,
+            })
+            conversation_history.append({"role": "user", "content": prompt})
+            conversation_history.append({"role": "assistant", "content": staged_reply})
+            return staged_reply, conversation_history, actions
 
     shortcut = (
         _try_health_shortcut(prompt)
@@ -1678,9 +1907,19 @@ def run_kickstart_agent(
         conversation_history.append({"role": "assistant", "content": reply})
         return reply, conversation_history, actions
 
+    if _user_confirmed(prompt) and not _user_declined(prompt):
+        prompt_for_llm = (
+            prompt
+            + "\n[Instruction: the user confirmed. Call the pending trading tool now "
+            "(place_limit_buy / place_threshold_buy / place_market_buy) with the prior parameters. "
+            "Do not invent transaction hashes.]"
+        )
+    else:
+        prompt_for_llm = prompt
+
     if user_wallet:
-        prompt = f"[Connected user wallet: {user_wallet}]\n{prompt}"
-    conversation_history.append({"role": "user", "content": prompt})
+        prompt_for_llm = f"[Connected user wallet: {user_wallet}]\n{prompt_for_llm}"
+    conversation_history.append({"role": "user", "content": prompt_for_llm})
     messages = [{"role": "system", "content": build_system_prompt()}] + conversation_history
 
     for i in range(12):
@@ -1688,8 +1927,83 @@ def run_kickstart_agent(
         message = response.get("message") or {}
         tool_calls = message.get("tool_calls") or []
         if not tool_calls:
-            reply = message.get("content") or ""
-            if _is_weak_reply(reply) and actions:
+            if _user_confirmed(user_input) and user_wallet:
+                recovered = _try_execute_pending_confirmation(
+                    user_wallet, session_id, user_input, conversation_history
+                )
+                if recovered:
+                    tool_name, args, result = recovered
+                    actions.append({"tool": tool_name, "args": args, "result": result})
+                    reply = _format_trading_tool_reply(tool_name, result)
+                    conversation_history.append({"role": "assistant", "content": reply})
+                    return reply, conversation_history, actions
+
+            reply = (message.get("content") or "").strip()
+            # Models invent fake "Transaction Executed" + nonsense hashes without tool_calls.
+            if user_wallet and re.search(
+                r"\b(transaction executed|transaction hash|tx hash|order (?:placed|created)|signature)\b",
+                reply,
+                flags=re.IGNORECASE,
+            ):
+                recovered_order = _recover_trading_order_from_history(conversation_history)
+                if recovered_order and _user_confirmed(user_input):
+                    result = execute_tool(
+                        recovered_order["tool"],
+                        {**recovered_order["args"], "user_wallet": user_wallet.strip()},
+                        user_wallet=user_wallet,
+                        user_input=user_input,
+                        session_id=session_id,
+                        skip_confirmation=True,
+                    )
+                    reply = _format_trading_tool_reply(recovered_order["tool"], result)
+                    actions.append({
+                        "tool": recovered_order["tool"],
+                        "args": recovered_order["args"],
+                        "result": result,
+                    })
+                    conversation_history.append({"role": "assistant", "content": reply})
+                    return reply, conversation_history, actions
+                if recovered_order:
+                    staged_payload = _try_stage_trading_order_confirmation(
+                        user_wallet,
+                        session_id,
+                        (
+                            f"Buy {recovered_order['args'].get('amount_sol')} SOL of "
+                            f"{recovered_order['args'].get('token')}"
+                            + (
+                                f" when market cap is below "
+                                f"${recovered_order['args'].get('limit_market_cap_usd')}"
+                                if recovered_order["args"].get("limit_market_cap_usd") is not None
+                                else ""
+                            )
+                            + (
+                                f" at ${recovered_order['args'].get('limit_price_usd')}"
+                                if recovered_order["args"].get("limit_price_usd") is not None
+                                else ""
+                            )
+                            + " for 1 time"
+                        ),
+                    )
+                    if staged_payload:
+                        try:
+                            staged_data = json.loads(staged_payload)
+                            staged = str(staged_data.get("message") or staged_payload)
+                        except json.JSONDecodeError:
+                            staged = staged_payload
+                        actions.append({
+                            "tool": recovered_order["tool"],
+                            "args": recovered_order["args"],
+                            "result": staged_payload,
+                        })
+                        conversation_history.append({"role": "assistant", "content": staged})
+                        return staged, conversation_history, actions
+                reply = (
+                    "I could not verify a real trading order (no tool result). "
+                    "Please restate the order "
+                    "(e.g. \"Buy 0.0001 SOL of BITAGENTS when market cap is below $46000 for 1 time\") "
+                    "and confirm with yes."
+                )
+            elif _is_weak_reply(reply) and actions:
                 synthesized = _synthesize_reply_from_actions(actions)
                 if synthesized:
                     reply = synthesized
@@ -1720,11 +2034,7 @@ def run_kickstart_agent(
             })
             parsed_calls.append((name, args, tc))
 
-        messages.append({
-            "role": "assistant",
-            "content": message.get("content") or "",
-            "tool_calls": sanitized_tool_calls,
-        })
+        results_this_round: list[tuple[str, dict[str, Any], str]] = []
         for name, args, tc in parsed_calls:
             result = execute_tool(
                 name,
@@ -1734,6 +2044,24 @@ def run_kickstart_agent(
                 session_id=session_id,
             )
             actions.append({"tool": name, "args": args, "result": result})
+            results_this_round.append((name, args, result))
+
+        # Always format trading/mutating tool results locally (no second LLM turn).
+        if any(name in CONFIRMATION_REQUIRED_TOOLS or name == "list_trading_orders" for name, _, _ in results_this_round):
+            reply_parts = [
+                _format_trading_tool_reply(name, result)
+                for name, _, result in results_this_round
+            ]
+            reply = "\n\n".join(part for part in reply_parts if part)
+            conversation_history.append({"role": "assistant", "content": reply})
+            return reply, conversation_history, actions
+
+        messages.append({
+            "role": "assistant",
+            "content": message.get("content") or "",
+            "tool_calls": sanitized_tool_calls,
+        })
+        for (name, _, result), (_, _, tc) in zip(results_this_round, parsed_calls):
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id", f"call_{i}"),

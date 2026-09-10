@@ -136,6 +136,8 @@ TOKEN_MINTS = {
     "PYTH":   {"mint": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",   "decimals": 6,  "coingecko_id": "pyth-network"},
     "JTO":    {"mint": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",    "decimals": 9,  "coingecko_id": "jito-governance-token"},
     "RENDER": {"mint": "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof",    "decimals": 8,  "coingecko_id": "render-token"},
+    # Official BITAGENTS mint (EasyA launch) — 6 decimals on-chain (not 9)
+    "BITAGENTS": {"mint": "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY", "decimals": 6, "coingecko_id": None},
 }
 
 MINT_TO_SYMBOL = {info["mint"]: sym for sym, info in TOKEN_MINTS.items() if sym != "WSOL"}
@@ -147,7 +149,7 @@ _metrics_lock      = threading.Lock()
 _metrics_running   = False
 
 # Plan feasibility limits
-MIN_INTERVAL_SECONDS = 10
+MIN_INTERVAL_SECONDS = 5
 MAX_MAX_EXECUTIONS = 10_000
 MAX_PLAN_DURATION_DAYS = 730
 MIN_TOKEN_AMOUNTS: dict[str, float] = {
@@ -306,9 +308,27 @@ def load_keypair() -> Optional["Keypair"]:
         return None
 
 
-def get_wallet_pubkey() -> Optional[str]:
+def get_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
+    """Return the DCA agent wallet pubkey for a user (Circle) or legacy shared key."""
+    user_wallet = (user_wallet or "").strip()
+    if user_wallet:
+        from circle_dca_wallets import circle_dca_enabled, get_dca_agent_wallet_address
+
+        if circle_dca_enabled():
+            try:
+                address = get_dca_agent_wallet_address(user_wallet)
+                if address:
+                    return address
+            except Exception as exc:
+                print(f"  ⚠️  Circle per-user wallet failed, using local fallback: {exc}")
     kp = load_keypair()
     return str(kp.pubkey()) if kp else None
+
+
+def resolve_dca_signing(user_wallet: Optional[str] = None) -> dict[str, Any]:
+    from circle_dca_wallets import resolve_dca_signing_context
+
+    return resolve_dca_signing_context(user_wallet)
 
 
 def sol_rpc(method: str, params: list, timeout: int = 30) -> Any:
@@ -423,7 +443,11 @@ def _resolve_by_mint(mint: str) -> dict:
 
     known_sym = MINT_TO_SYMBOL.get(mint)
     if known_sym:
-        result = {"symbol": known_sym, **TOKEN_MINTS[known_sym], "mint": mint}
+        info = dict(TOKEN_MINTS[known_sym])
+        onchain = _fetch_mint_decimals_rpc(mint)
+        if onchain is not None:
+            info["decimals"] = onchain
+        result = {"symbol": known_sym, **info, "mint": mint}
         return _cache_token_result(mint, result, cache_symbol=True)
 
     jup = _fetch_token_from_jupiter(mint)
@@ -462,7 +486,12 @@ def resolve_token(symbol_or_mint: str) -> dict:
 
     sym = raw.upper()
     if sym in TOKEN_MINTS:
-        return _cache_token_result(raw, {"symbol": sym, **TOKEN_MINTS[sym]})
+        info = dict(TOKEN_MINTS[sym])
+        # Prefer on-chain decimals so a bad catalog entry cannot under/over-scale balances.
+        onchain = _fetch_mint_decimals_rpc(info["mint"])
+        if onchain is not None:
+            info["decimals"] = onchain
+        return _cache_token_result(raw, {"symbol": sym, **info})
 
     if _looks_like_mint(raw):
         return _resolve_by_mint(raw)
@@ -722,18 +751,48 @@ def get_jupiter_quote(
         return {"error": str(e)}
 
 
-def _confirm_transaction(sig: str, timeout_s: int = 60, poll_s: float = 2.0) -> dict:
+def _confirm_transaction(
+    sig: str,
+    timeout_s: int = 90,
+    poll_s: float = 1.5,
+    *,
+    encoded_tx: Optional[str] = None,
+) -> dict:
     """
     Poll the RPC for signature confirmation - mirrors the polling loop
     in executeSwap() in the Node.js collateral-swap script.
+
+    When `encoded_tx` is provided, rebroadcast periodically so public RPCs
+    that drop the first send still have a chance to land the tx.
     """
     deadline = time.time() + timeout_s
+    polls = 0
     while time.time() < deadline:
         time.sleep(poll_s)
+        polls += 1
+        if encoded_tx and polls % 2 == 0:
+            try:
+                sol_rpc(
+                    "sendTransaction",
+                    [
+                        encoded_tx,
+                        {
+                            "encoding": "base64",
+                            "skipPreflight": True,
+                            "preflightCommitment": "processed",
+                            "maxRetries": 0,
+                        },
+                    ],
+                )
+            except Exception:
+                pass  # Already processed / duplicate / RPC flake — keep polling
         try:
+            # After ~half the wait, also search history — some RPCs hide
+            # recent statuses until history indexing catches up.
+            search_history = polls >= 4 or (deadline - time.time()) < 20
             result = sol_rpc(
                 "getSignatureStatuses",
-                [[sig], {"searchTransactionHistory": False}],
+                [[sig], {"searchTransactionHistory": search_history}],
             )
             info = result["value"][0] if result and result.get("value") else None
             if info:
@@ -742,10 +801,44 @@ def _confirm_transaction(sig: str, timeout_s: int = 60, poll_s: float = 2.0) -> 
                 status = info.get("confirmationStatus", "")
                 if status in ("confirmed", "finalized"):
                     return {"confirmed": True}
+                if status == "processed":
+                    # Keep waiting for confirmed, but note progress
+                    continue
         except Exception:
             pass  # RPC hiccup - keep polling
 
-    return {"confirmed": False, "error": f"Confirmation timed out after {timeout_s}s"}
+    # Final history lookup + getTransaction before giving up
+    try:
+        result = sol_rpc(
+            "getSignatureStatuses",
+            [[sig], {"searchTransactionHistory": True}],
+        )
+        info = result["value"][0] if result and result.get("value") else None
+        if info:
+            if info.get("err"):
+                return {"confirmed": False, "error": info["err"]}
+            if info.get("confirmationStatus") in ("processed", "confirmed", "finalized"):
+                return {"confirmed": True}
+    except Exception:
+        pass
+    try:
+        tx = sol_rpc(
+            "getTransaction",
+            [sig, {"encoding": "base64", "maxSupportedTransactionVersion": 0, "commitment": "confirmed"}],
+        )
+        if tx:
+            meta_err = (tx.get("meta") or {}).get("err")
+            if meta_err:
+                return {"confirmed": False, "error": meta_err}
+            return {"confirmed": True}
+    except Exception:
+        pass
+
+    return {
+        "confirmed": False,
+        "error": f"Confirmation timed out after {timeout_s}s",
+        "retryable": True,
+    }
 
 
 def _to_instruction(ix_data: dict):
@@ -819,7 +912,13 @@ def _fetch_lookup_tables(addresses_by_table: Optional[dict]) -> list:
     return luts
 
 
-def _execute_jupiter_swap_v2(build_data: dict, wallet_pubkey: str, keypair: "Keypair") -> dict:
+def _execute_jupiter_swap_v2(
+    build_data: dict,
+    wallet_pubkey: str,
+    keypair: Optional["Keypair"] = None,
+    *,
+    circle_wallet_id: Optional[str] = None,
+) -> dict:
     """
     Assemble, sign, and send a Jupiter v2 swap transaction.
 
@@ -878,54 +977,84 @@ def _execute_jupiter_swap_v2(build_data: dict, wallet_pubkey: str, keypair: "Key
     # ── 2. Fetch Address Lookup Tables ─────────────────────────────────────────
     luts = _fetch_lookup_tables(build_data.get("addressesByLookupTableAddress"))
 
-    # ── 3. Get latest blockhash ────────────────────────────────────────────────
-    try:
-        bh_result = sol_rpc("getLatestBlockhash", [{"commitment": "confirmed"}])
-        blockhash = Hash.from_string(bh_result["value"]["blockhash"])
-    except Exception as e:
-        return {"error": f"Failed to fetch blockhash: {e}"}
+    last_error: Any = None
+    for attempt in range(1, 4):
+        # ── 3. Get latest blockhash ────────────────────────────────────────────
+        try:
+            # Circle signing adds latency; finalized blockhashes stay valid longer.
+            commitment = "finalized" if circle_wallet_id else "confirmed"
+            bh_result = sol_rpc("getLatestBlockhash", [{"commitment": commitment}])
+            blockhash = Hash.from_string(bh_result["value"]["blockhash"])
+        except Exception as e:
+            last_error = e
+            if attempt < 3:
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"Failed to fetch blockhash: {e}"}
 
-    # ── 4. Compile MessageV0 with LUTs + sign ──────────────────────────────────
-    try:
-        payer = SPubkey.from_string(wallet_pubkey)
-        msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
-        tx    = VersionedTransaction(msg, [keypair])
-        encoded = base64.b64encode(bytes(tx)).decode("utf-8")
-    except Exception as e:
-        return {"error": f"Transaction compilation/signing failed: {e}"}
+        # ── 4. Compile MessageV0 with LUTs + sign ──────────────────────────────
+        try:
+            payer = SPubkey.from_string(wallet_pubkey)
+            msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
+            if circle_wallet_id:
+                from circle_dca_wallets import circle_sign_versioned_message
 
-    # ── 5. Send via RPC (skipPreflight mirrors Node.js) ───────────────────────
-    try:
-        sig = sol_rpc(
-            "sendTransaction",
-            [encoded, {
-                "encoding":            "base64",
-                "skipPreflight":       True,   # preflight uses stale state; real errors surface on-chain
-                "preflightCommitment": "confirmed",
-                "maxRetries":          3,
-            }],
-        )
-    except Exception as e:
-        return {"error": f"sendTransaction failed: {e}"}
+                encoded = circle_sign_versioned_message(circle_wallet_id, msg)
+            else:
+                if not keypair:
+                    return {"error": "No signing key available for Jupiter swap."}
+                tx = VersionedTransaction(msg, [keypair])
+                encoded = base64.b64encode(bytes(tx)).decode("utf-8")
+        except Exception as e:
+            last_error = e
+            if _is_blockhash_error(e) and attempt < 3:
+                print(f"    ⚠️  Blockhash stale while signing swap (attempt {attempt}/3), retrying…")
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"Transaction compilation/signing failed: {e}"}
 
-    print(f"    Signature: {sig}")
+        # ── 5. Send via RPC (skipPreflight mirrors Node.js) ───────────────────
+        # Avoid minContextSlot — public RPCs often drop or delay those sends.
+        send_opts: dict[str, Any] = {
+            "encoding":            "base64",
+            "skipPreflight":       True,
+            "preflightCommitment": "confirmed",
+            "maxRetries":          5,
+        }
+        try:
+            sig = sol_rpc("sendTransaction", [encoded, send_opts])
+        except Exception as e:
+            last_error = e
+            if _is_blockhash_error(e) and attempt < 3:
+                print(f"    ⚠️  Blockhash rejected on swap send (attempt {attempt}/3), retrying…")
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"sendTransaction failed: {e}"}
 
-    # ── 6. Poll for confirmation ───────────────────────────────────────────────
-    confirm = _confirm_transaction(sig)
-    if not confirm["confirmed"]:
-        err     = confirm.get("error", "unknown")
-        err_str = json.dumps(err)
-        if "'Custom':1" in err_str or (isinstance(err, dict) and err.get("InstructionError")):
-            print("    ↳ Custom:1 usually means insufficient SOL for ATA rent (~0.002 SOL per new token account)")
-        return {"status": "failed", "signature": sig, "error": err}
+        print(f"    Signature: {sig}")
 
-    print("    Status: ✅ Success")
-    explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
-    return {
-        "status":       "success",
-        "signature":    sig,
-        "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
-    }
+        # ── 6. Poll for confirmation (rebroadcast on the way) ─────────────────
+        confirm = _confirm_transaction(sig, timeout_s=75, encoded_tx=encoded)
+        if not confirm["confirmed"]:
+            err     = confirm.get("error", "unknown")
+            if (_is_blockhash_error(err) or _is_confirmation_timeout(err) or confirm.get("retryable")) and attempt < 3:
+                print(f"    ⚠️  Swap not confirmed (attempt {attempt}/3): {err} — resigning…")
+                time.sleep(0.5 * attempt)
+                continue
+            err_str = json.dumps(err) if not isinstance(err, str) else err
+            if "'Custom':1" in err_str or (isinstance(err, dict) and err.get("InstructionError")):
+                print("    ↳ Custom:1 usually means insufficient SOL for ATA rent (~0.002 SOL per new token account)")
+            return {"status": "failed", "signature": sig, "error": err}
+
+        print("    Status: ✅ Success")
+        explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
+        return {
+            "status":       "success",
+            "signature":    sig,
+            "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
+        }
+
+    return {"error": f"Swap failed after blockhash retries: {last_error}"}
 
 
 def _build_and_execute_swap(
@@ -933,10 +1062,12 @@ def _build_and_execute_swap(
     output_mint: str,
     raw_amount: int,
     wallet_pubkey: str,
-    keypair: "Keypair",
+    keypair: Optional["Keypair"] = None,
     slippage_bps: int = 100,
-    retries: int = 2,
+    retries: int = 3,
     api_key: Optional[str] = None,
+    circle_wallet_id: Optional[str] = None,
+    compute_unit_price_percentile: str = "high",
 ) -> dict:
     """
     Build + sign + send a swap via Jupiter v2.
@@ -948,6 +1079,7 @@ def _build_and_execute_swap(
       • Expired / timed-out → retry up to `retries` times
       • Transaction too large → retry once with higher slippage (200 bps)
     """
+    percentile = (compute_unit_price_percentile or "high").strip() or "high"
     for attempt in range(1, retries + 1):
         params = {
             "inputMint":                  input_mint,
@@ -957,7 +1089,7 @@ def _build_and_execute_swap(
             "payer":                      wallet_pubkey,
             "slippageBps":                str(slippage_bps),
             "wrapAndUnwrapSol":           "true",
-            "computeUnitPricePercentile": "high",
+            "computeUnitPricePercentile": percentile,
             "maxAccounts":                "54",
             "skipUserAccountsRpcCalls":   "true",
         }
@@ -980,6 +1112,8 @@ def _build_and_execute_swap(
                         return _build_and_execute_swap(
                             input_mint, output_mint, raw_amount,
                             wallet_pubkey, keypair, slippage_bps=200, retries=1, api_key=api_key,
+                            circle_wallet_id=circle_wallet_id,
+                            compute_unit_price_percentile=percentile,
                         )
                     print("    ↳ Transaction too large even with higher slippage, skipping")
                     return {"status": "failed", "error": msg}
@@ -990,7 +1124,12 @@ def _build_and_execute_swap(
             if "error" in build_data:
                 raise RuntimeError(f"/build error: {build_data['error']}")
 
-            result = _execute_jupiter_swap_v2(build_data, wallet_pubkey, keypair)
+            result = _execute_jupiter_swap_v2(
+                build_data,
+                wallet_pubkey,
+                keypair,
+                circle_wallet_id=circle_wallet_id,
+            )
 
             if result.get("status") == "success":
                 out_raw = int(build_data.get("outAmount") or 0)
@@ -999,7 +1138,10 @@ def _build_and_execute_swap(
 
             if result.get("status") == "failed":
                 err_str = str(result.get("error", ""))
-                is_expiry = any(k in err_str.lower() for k in ("block height exceeded", "expired", "timed out"))
+                is_expiry = any(
+                    k in err_str.lower()
+                    for k in ("block height exceeded", "expired", "timed out", "confirmation timed out")
+                )
                 is_too_large = "too large" in err_str.lower()
 
                 if is_too_large:
@@ -1008,6 +1150,8 @@ def _build_and_execute_swap(
                         return _build_and_execute_swap(
                             input_mint, output_mint, raw_amount,
                             wallet_pubkey, keypair, slippage_bps=200, retries=1, api_key=api_key,
+                            circle_wallet_id=circle_wallet_id,
+                            compute_unit_price_percentile=percentile,
                         )
                     print("    ↳ Transaction too large even with higher slippage, skipping")
                     return result
@@ -1075,12 +1219,20 @@ def execute_swap_buy(
             return out
 
         keypair = load_keypair()
-        if not keypair:
-            return {"error": "No wallet keypair. Set DCA_WALLET_PRIVATE_KEY."}
+        signing = resolve_dca_signing(user_wallet)
+        if signing.get("mode") == "circle":
+            wallet_pubkey = signing["pubkey"]
+            circle_wallet_id = signing["wallet_id"]
+            keypair = None
+        elif signing.get("mode") == "local":
+            wallet_pubkey = signing["pubkey"]
+            keypair = signing["keypair"]
+            circle_wallet_id = None
+        else:
+            return {"error": "No DCA agent wallet configured. Set Circle API keys or DCA_WALLET_PRIVATE_KEY."}
         if not HAS_SOLDERS:
             return {"error": "Install solders + base58: pip install solders base58"}
 
-        wallet_pubkey = str(keypair.pubkey())
         raw_amount    = _lamports(amount, inp["decimals"])
 
         # Warn about missing ATAs (mirrors checkBalance in Node.js)
@@ -1090,6 +1242,7 @@ def execute_swap_buy(
         result = _build_and_execute_swap(
             inp["mint"], out["mint"], raw_amount,
             wallet_pubkey, keypair, slippage_bps,
+            circle_wallet_id=circle_wallet_id,
         )
 
         if result.get("status") == "success":
@@ -1353,33 +1506,138 @@ def _wallet_token_account_for_mint(
     return None
 
 
-def _send_signed_transaction(keypair: "Keypair", instructions: list) -> dict:
-    """Compile, sign, send, and confirm a versioned transaction."""
+def _is_blockhash_error(err: Any) -> bool:
+    text = str(err).lower()
+    return any(
+        needle in text
+        for needle in (
+            "blockhash not found",
+            "block hash not found",
+            "blockhash expired",
+            "block hash expired",
+            "transaction has expired",
+            "block height exceeded",
+        )
+    )
+
+
+def _is_confirmation_timeout(err: Any) -> bool:
+    text = str(err).lower()
+    return "confirmation timed out" in text or (
+        "timed out" in text and "block" not in text
+    )
+
+
+def _send_signed_transaction(
+    keypair: Optional["Keypair"],
+    instructions: list,
+    *,
+    circle_wallet_id: Optional[str] = None,
+    retries: int = 3,
+) -> dict:
+    """Compile, sign, send, and confirm a versioned transaction.
+
+    Circle signing adds network latency, so confirmed blockhashes often go stale
+    before sendTransaction. We fetch a durable (finalized) blockhash for Circle
+    paths, skip preflight (same as Jupiter swaps), and retry with a fresh
+    blockhash + resign on Blockhash-not-found / expired errors.
+    """
     try:
         from solders.hash import Hash
         from solders.message import MessageV0
     except ImportError as e:
         return {"error": f"solders import failed: {e}"}
 
-    pubkey = keypair.pubkey()
-    blockhash_resp = sol_rpc("getLatestBlockhash", [{"commitment": "confirmed"}])
-    blockhash = Hash.from_string(blockhash_resp["value"]["blockhash"])
-    msg = MessageV0.try_compile(pubkey, instructions, [], blockhash)
-    tx = VersionedTransaction(msg, [keypair])
-    encoded = base64.b64encode(bytes(tx)).decode("utf-8")
-    sig = sol_rpc(
-        "sendTransaction",
-        [encoded, {"encoding": "base64", "skipPreflight": False, "maxRetries": 3}],
-    )
-    confirm = _confirm_transaction(sig)
-    if not confirm["confirmed"]:
-        return {"status": "failed", "signature": sig, "error": confirm.get("error", "unknown")}
-    explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
-    return {
-        "status": "success",
-        "signature": sig,
-        "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
-    }
+    if circle_wallet_id:
+        payer_pubkey = None
+        for ix in instructions:
+            for meta in getattr(ix, "accounts", []) or []:
+                if getattr(meta, "is_signer", False):
+                    payer_pubkey = meta.pubkey
+                    break
+            if payer_pubkey:
+                break
+        if payer_pubkey is None and keypair:
+            payer_pubkey = keypair.pubkey()
+        if payer_pubkey is None:
+            return {"error": "Could not determine payer for Circle-signed transaction."}
+        pubkey = payer_pubkey
+    else:
+        if not keypair:
+            return {"error": "No signing key available."}
+        pubkey = keypair.pubkey()
+
+    last_error: Any = None
+    for attempt in range(1, max(1, int(retries)) + 1):
+        # Finalized lasts longer across Circle round-trips; confirmed is fine for local sign.
+        commitment = "finalized" if circle_wallet_id else "confirmed"
+        try:
+            blockhash_resp = sol_rpc("getLatestBlockhash", [{"commitment": commitment}])
+            value = blockhash_resp["value"]
+            blockhash = Hash.from_string(value["blockhash"])
+            min_context_slot = blockhash_resp.get("context", {}).get("slot")
+        except Exception as e:
+            last_error = e
+            if attempt < retries:
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"Failed to fetch blockhash: {e}"}
+
+        msg = MessageV0.try_compile(pubkey, instructions, [], blockhash)
+        try:
+            if circle_wallet_id:
+                from circle_dca_wallets import circle_sign_versioned_message
+
+                encoded = circle_sign_versioned_message(circle_wallet_id, msg)
+            else:
+                tx = VersionedTransaction(msg, [keypair])
+                encoded = base64.b64encode(bytes(tx)).decode("utf-8")
+        except Exception as e:
+            last_error = e
+            if _is_blockhash_error(e) and attempt < retries:
+                print(f"  ⚠️  Blockhash stale while signing (attempt {attempt}/{retries}), retrying…")
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"Transaction signing failed: {e}"}
+
+        send_opts: dict[str, Any] = {
+            "encoding": "base64",
+            # Preflight simulation often fails with "Blockhash not found" on lagging RPCs
+            # after Circle signing latency; skip and rely on confirmation polling.
+            "skipPreflight": True,
+            "preflightCommitment": "confirmed",
+            "maxRetries": 3,
+        }
+        if min_context_slot is not None:
+            send_opts["minContextSlot"] = int(min_context_slot)
+
+        try:
+            sig = sol_rpc("sendTransaction", [encoded, send_opts])
+        except Exception as e:
+            last_error = e
+            if _is_blockhash_error(e) and attempt < retries:
+                print(f"  ⚠️  Blockhash rejected on send (attempt {attempt}/{retries}), retrying…")
+                time.sleep(0.35 * attempt)
+                continue
+            return {"error": f"sendTransaction failed: {e}"}
+
+        confirm = _confirm_transaction(sig)
+        if not confirm["confirmed"]:
+            err = confirm.get("error", "unknown")
+            if _is_blockhash_error(err) and attempt < retries:
+                print(f"  ⚠️  Tx expired before confirm (attempt {attempt}/{retries}), retrying…")
+                time.sleep(0.35 * attempt)
+                continue
+            return {"status": "failed", "signature": sig, "error": err}
+
+        explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
+        return {
+            "status": "success",
+            "signature": sig,
+            "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
+        }
+
+    return {"error": f"Transaction failed after retries: {last_error}"}
 
 
 def send_tokens_to_user(
@@ -1388,14 +1646,31 @@ def send_tokens_to_user(
     amount: float,
     decimals: int,
     signing_keypair: Optional["Keypair"] = None,
+    signing_user_wallet: Optional[str] = None,
+    agent_type: str = "dca",
 ) -> dict:
     """Transfer SOL or SPL tokens from the agent wallet to a user wallet."""
     user_wallet = user_wallet.strip()
     if not user_wallet:
         return {"error": "User wallet address is required."}
 
-    keypair = signing_keypair or load_keypair()
-    if not keypair:
+    from circle_dca_wallets import resolve_agent_signing_context
+
+    signing = resolve_agent_signing_context(signing_user_wallet, agent_type)
+    circle_wallet_id = signing.get("wallet_id") if signing.get("mode") == "circle" else None
+    keypair = signing_keypair
+    if signing.get("mode") == "circle":
+        agent_owner = signing["pubkey"]
+        keypair = None
+    elif signing.get("mode") == "local":
+        if not keypair:
+            keypair = signing.get("keypair")
+        agent_owner = str(keypair.pubkey()) if keypair else None
+    elif keypair:
+        agent_owner = str(keypair.pubkey())
+    else:
+        agent_owner = None
+    if not agent_owner:
         return {"error": "AI Agent wallet is not configured on the server."}
     if not HAS_SOLDERS:
         return {"error": "Install solders + base58: pip install solders base58"}
@@ -1419,12 +1694,16 @@ def send_tokens_to_user(
             lamports = _lamports(amount, 9)
             ix = transfer(
                 TransferParams(
-                    from_pubkey=keypair.pubkey(),
+                    from_pubkey=Pubkey.from_string(agent_owner),
                     to_pubkey=recipient,
                     lamports=lamports,
                 )
             )
-            return _send_signed_transaction(keypair, [ix])
+            return _send_signed_transaction(
+                keypair,
+                [ix],
+                circle_wallet_id=circle_wallet_id,
+            )
         except Exception as e:
             return {"error": str(e)}
 
@@ -1437,7 +1716,7 @@ def send_tokens_to_user(
     if raw_amount <= 0:
         return {"error": "Amount is too small for this token's decimals."}
 
-    agent_owner = keypair.pubkey()
+    agent_owner = Pubkey.from_string(agent_owner)
     found = _find_wallet_token_account(str(agent_owner), mint_address, raw_amount)
     if not found:
         return {
@@ -1472,7 +1751,11 @@ def send_tokens_to_user(
     )
 
     try:
-        result = _send_signed_transaction(keypair, instructions)
+        result = _send_signed_transaction(
+            keypair,
+            instructions,
+            circle_wallet_id=circle_wallet_id,
+        )
         if result.get("status") == "success":
             result["created_user_ata"] = len(instructions) > 1
         return result
@@ -1743,16 +2026,36 @@ def create_dca_plan(
 
     _insert_plan_db(plan)
 
-    return {
+    first_execution = None
+    if start_immediately:
+        try:
+            first_execution = _run_plan_execution(plan["id"], dry_run=False, force=False)
+        except Exception as exc:
+            first_execution = {"error": str(exc)}
+
+    result = {
         "status": "created",
         "plan": {k: plan[k] for k in (
             "id", "name", "input_token", "output_token", "input_mint", "output_mint",
             "amount_per_buy", "interval", "interval_minutes", "total_budget", "max_executions",
             "status", "next_execution_at", "user_wallet",
         )},
-        "wallet":  get_wallet_pubkey(),
+        "wallet":  get_wallet_pubkey(user_wallet.strip() if user_wallet else None),
         "cluster": SOLANA_CLUSTER,
     }
+    if first_execution is not None:
+        result["first_execution"] = {
+            k: v for k, v in first_execution.items()
+            if k not in ("build_data", "quote")
+        }
+        # Refresh counts if the buy landed.
+        refreshed = _find_plan(plan["id"])
+        if refreshed:
+            result["plan"]["executions_count"] = refreshed.get("executions_count", 0)
+            result["plan"]["spent_so_far"] = refreshed.get("spent_so_far", 0)
+            result["plan"]["status"] = refreshed.get("status", plan["status"])
+            result["plan"]["next_execution_at"] = refreshed.get("next_execution_at")
+    return result
 
 
 def list_dca_plans(
@@ -1930,8 +2233,8 @@ def get_dca_history(plan_id: str, user_wallet: Optional[str] = None) -> dict:
         plan = owned
     else:
         plan = _find_plan(plan_id)
-        if not plan:
-            return {"error": f"Plan '{plan_id}' not found."}
+    if not plan:
+        return {"error": f"Plan '{plan_id}' not found."}
     return {
         "plan_id":          plan_id,
         "name":             plan["name"],
@@ -2883,6 +3186,19 @@ def _format_pending_execution_reply(tool_name: str, result: str) -> str:
         if plan.get("total_budget") is not None:
             parts.append(f"Budget: **{plan.get('total_budget')} {plan.get('input_token')}**.")
         parts.append("Each successful buy includes a **0.5% platform fee** in the input token.")
+        first = data.get("first_execution") or {}
+        if first.get("status") == "success":
+            sig = first.get("signature")
+            parts.append(
+                f"First buy executed from your Circle agent wallet"
+                + (f" (tx `{sig}`)." if sig else ".")
+            )
+        elif first.get("execution_failed") or first.get("error") or first.get("status") == "failed":
+            err = first.get("error") or first.get("message") or "swap failed"
+            parts.append(
+                f"Plan is saved, but the first buy from your Circle agent wallet did not land yet: {err}. "
+                "If this is a new output token, keep a little extra SOL in the agent wallet for ATA rent (~0.002 SOL) plus fees."
+            )
         parts.append("\nNot financial advice. DYOR.")
         return " ".join(parts)
 
@@ -3080,14 +3396,31 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
     if not re.search(r"\b(swap|dca|buy|every|recurring|schedule|trx|transaction)\b", lower):
         return None
 
+    # Prefer an explicit mint; otherwise accept "into BITAGENTS" / "into JUP" symbols.
     mint_match = re.search(r"[1-9A-HJ-NP-Za-km-z]{32,44}", text)
-    if not mint_match:
+    output_token: Optional[str] = None
+    if mint_match:
+        output_token = mint_match.group(0)
+    else:
+        into_match = re.search(
+            r"\b(?:into|to|for)\s+([A-Za-z][A-Za-z0-9]{1,20})\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if into_match:
+            candidate = into_match.group(1).strip()
+            if candidate.upper() not in {"SOL", "TIME", "TIMES", "SECOND", "SECONDS", "MINUTE", "MINUTES"}:
+                resolved = resolve_token(candidate)
+                if "error" not in resolved:
+                    output_token = resolved["mint"]
+                else:
+                    output_token = candidate
+    if not output_token:
         return None
-    output_token = mint_match.group(0)
 
-    amount_match = re.search(r"\b(\d+(?:\.\d+)?)\s*sol\b", lower)
+    amount_match = re.search(r"\$?\s*(\d+(?:\.\d+)?)\s*sol\b", lower)
     if not amount_match:
-        amount_match = re.search(r"\b(?:swap|buy|spend)\s+(\d+(?:\.\d+)?)\b", lower)
+        amount_match = re.search(r"\b(?:swap|buy|spend|dca)\s+\$?\s*(\d+(?:\.\d+)?)\b", lower)
     if not amount_match:
         return None
     amount_per_buy = float(amount_match.group(1))
@@ -3118,7 +3451,17 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
     )
     if not max_match:
         max_match = re.search(r"\b(\d+)\s*(?:trx|transactions?|buys?)\b", lower)
-    max_executions = int(max_match.group(1)) if max_match else None
+    if not max_match and re.search(r"\b(?:once|one[- ]time|1[- ]time)\b", lower):
+        max_executions = 1
+    else:
+        max_executions = int(max_match.group(1)) if max_match else None
+
+    # Short intervals should buy ASAP so the first Circle swap is not delayed a full period.
+    try:
+        interval_minutes = _parse_interval(interval)
+    except ValueError:
+        interval_minutes = 1.0
+    start_immediately = interval_minutes <= 1.0
 
     return {
         "input_token": "SOL",
@@ -3126,6 +3469,7 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
         "amount_per_buy": amount_per_buy,
         "interval": interval,
         "max_executions": max_executions,
+        "start_immediately": start_immediately,
     }
 
 
@@ -3159,16 +3503,28 @@ def _try_stage_dca_plan_confirmation(
 
     args = {**parsed, "user_wallet": user_wallet.strip()}
     key = _confirmation_key(user_wallet, session_id)
+    details = _pending_action_details("create_dca_plan", parsed)
+    summary = _summarize_pending_action("create_dca_plan", parsed)
     with _CONFIRMATION_LOCK:
         _pending_confirmations[key] = {
             "tool": "create_dca_plan",
             "args": args,
-            "summary": _summarize_pending_action("create_dca_plan", parsed),
-            "details": _pending_action_details("create_dca_plan", parsed),
+            "summary": summary,
+            "details": details,
         }
-    return (
-        f"Please confirm before I proceed: {_summarize_pending_action('create_dca_plan', parsed)}. "
+    message = (
+        f"Please confirm before I proceed: {summary}. "
         "Reply **yes** or **confirm** to proceed, or **no** to cancel."
+    )
+    # Return a structured payload so the frontend ConfirmDialog can render details.
+    return _json_compact(
+        {
+            "status": "confirmation_required",
+            "message": message,
+            "pending_action": summary,
+            "confirmation_details": details,
+            "tool": "create_dca_plan",
+        }
     )
 
 
@@ -3236,12 +3592,19 @@ def run_agent_with_actions(
         return reply, conversation_history, actions
 
     if user_wallet and not _user_confirmed(user_input) and not _user_declined(user_input):
-        staged_reply = _try_stage_dca_plan_confirmation(user_wallet, session_id, user_input)
-        if staged_reply:
+        staged_payload = _try_stage_dca_plan_confirmation(user_wallet, session_id, user_input)
+        if staged_payload:
+            try:
+                staged_data = json.loads(staged_payload)
+                staged_reply = str(staged_data.get("message") or staged_payload)
+            except Exception:
+                staged_reply = staged_payload
             actions.append({
                 "tool": "create_dca_plan",
                 "args": _parse_create_dca_request(user_input) or {},
-                "result": json.dumps({"status": "confirmation_required", "message": staged_reply}),
+                "result": staged_payload if staged_payload.startswith("{") else json.dumps(
+                    {"status": "confirmation_required", "message": staged_reply}
+                ),
             })
             conversation_history.append({"role": "user", "content": user_input.strip()})
             conversation_history.append({"role": "assistant", "content": staged_reply})
@@ -3283,10 +3646,22 @@ def run_agent_with_actions(
             "Do not retry tools in a loop if one call succeeds. get_wallet_status is optional.]"
         )
     if _user_confirmed(user_input) and not _user_declined(user_input):
+        # Prefer deterministic confirm execution over LLM hallucination.
+        recovered = _try_execute_pending_confirmation(
+            user_wallet, session_id, user_input, conversation_history
+        )
+        if recovered:
+            tool_name, args, result, reply = recovered
+            actions.append({"tool": tool_name, "args": args, "result": result})
+            conversation_history.append({"role": "user", "content": user_input.strip()})
+            conversation_history.append({"role": "assistant", "content": reply})
+            return reply, conversation_history, actions
         prompt += (
             "\n[Instruction: the user confirmed the pending action. "
             "Do not ask for confirmation again. Execute the confirmed mutating tool "
-            "with the same parameters as before. Do not call list_dca_plans unless they asked.]"
+            "with the same parameters as before. Do not call list_dca_plans unless they asked. "
+            "If no pending tool exists, call create_dca_plan only when the prior user message "
+            "clearly requested a DCA plan.]"
         )
     if user_wallet:
         prompt = f"[Connected user wallet: {user_wallet}]\n{prompt}"
@@ -3311,7 +3686,65 @@ def run_agent_with_actions(
                     actions.append({"tool": tool_name, "args": args, "result": result})
                     conversation_history.append({"role": "assistant", "content": reply})
                     return reply, conversation_history, actions
-            reply = message.get("content", "")
+            reply = (message.get("content") or "").strip()
+            # Models sometimes invent "plan created" / fake tool narration without tool_calls.
+            if user_wallet and re.search(
+                r"\b(plan created|create_dca_plan was called|plan id\s*:)",
+                reply,
+                flags=re.IGNORECASE,
+            ):
+                recovered_args = _recover_create_dca_from_history(conversation_history)
+                if recovered_args and _user_confirmed(user_input):
+                    result = execute_tool(
+                        "create_dca_plan",
+                        {**recovered_args, "user_wallet": user_wallet.strip()},
+                        user_wallet=user_wallet,
+                        user_input=user_input,
+                        session_id=session_id,
+                        skip_confirmation=True,
+                    )
+                    reply = _format_pending_execution_reply("create_dca_plan", result)
+                    actions.append({
+                        "tool": "create_dca_plan",
+                        "args": recovered_args,
+                        "result": result,
+                    })
+                    conversation_history.append({"role": "assistant", "content": reply})
+                    return reply, conversation_history, actions
+                if recovered_args:
+                    staged_payload = _try_stage_dca_plan_confirmation(
+                        user_wallet,
+                        session_id,
+                        (
+                            f"DCA {recovered_args['amount_per_buy']} SOL into "
+                            f"{recovered_args['output_token']} every {recovered_args['interval']}"
+                            + (
+                                f", for {recovered_args['max_executions']} times"
+                                if recovered_args.get("max_executions")
+                                else ""
+                            )
+                        ),
+                    )
+                    if staged_payload:
+                        try:
+                            staged_data = json.loads(staged_payload)
+                            staged = str(staged_data.get("message") or staged_payload)
+                        except Exception:
+                            staged = staged_payload
+                        actions.append({
+                            "tool": "create_dca_plan",
+                            "args": recovered_args,
+                            "result": staged_payload if staged_payload.startswith("{") else json.dumps(
+                                {"status": "confirmation_required", "message": staged}
+                            ),
+                        })
+                        conversation_history.append({"role": "assistant", "content": staged})
+                        return staged, conversation_history, actions
+                reply = (
+                    "I could not verify a real DCA plan create (no tool result). "
+                    "Please restate the plan (e.g. \"DCA 0.001 SOL into BITAGENTS every 5 sec, for 1 time\") "
+                    "and confirm with yes."
+                )
             conversation_history.append({"role": "assistant", "content": reply})
             return reply, conversation_history, actions
 
@@ -3354,8 +3787,8 @@ def run_agent_with_actions(
             actions.append({"tool": name, "args": args, "result": result})
             results_this_round.append((name, args, result))
 
-        # CapIX / hosted Ollama: format tool results locally instead of a second LLM turn.
-        if (use_hosted_ollama() or use_capix()) and results_this_round:
+        # Always format tool results locally so the model cannot invent plan IDs / fake success.
+        if results_this_round:
             reply_parts = [
                 _format_pending_execution_reply(name, result)
                 for name, _, result in results_this_round
@@ -3363,15 +3796,6 @@ def run_agent_with_actions(
             reply = "\n\n".join(part for part in reply_parts if part)
             conversation_history.append({"role": "assistant", "content": reply})
             return reply, conversation_history, actions
-
-        messages.append({
-            "role": "assistant",
-            "content": message.get("content") or "",
-            "tool_calls": sanitized_tool_calls,
-        })
-
-        for (_, _, _), (_, _, result) in zip(parsed_calls, results_this_round):
-            messages.append({"role": "tool", "content": result})
 
     reply = "Agent reached max iterations."
     conversation_history.append({"role": "assistant", "content": reply})

@@ -26,17 +26,22 @@ function appLinkClass(active: boolean) {
 
 export function Nav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isPublicPage = pathname === "/" || pathname === "/coming-soon";
+  const isMaintenance = pathname === "/maintenance";
+  const isPublicPage = pathname === "/" || pathname === "/coming-soon" || isMaintenance;
 
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 border-b border-grid bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
-          <Link href="/" className="min-w-0 shrink">
+          <Link href={isMaintenance ? "/maintenance" : "/"} className="min-w-0 shrink">
             <Wordmark compact />
           </Link>
 
-          {isPublicPage ? (
+          {isMaintenance ? (
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-signal">
+              Under maintenance
+            </span>
+          ) : isPublicPage ? (
             <>
               <nav className="hidden items-center gap-7 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
                 {marketingLinks.map(({ href, label }) => (

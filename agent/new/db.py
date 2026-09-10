@@ -250,6 +250,13 @@ SCHEMA_STATEMENTS = [
 MIGRATION_STATEMENTS = [
     "ALTER TABLE user_ledger ALTER COLUMN reference_id TYPE VARCHAR(128)",
     "ALTER TABLE user_ledger ALTER COLUMN signature TYPE VARCHAR(128)",
+    """
+    CREATE TABLE IF NOT EXISTS schema_repairs (
+        id          VARCHAR(64) PRIMARY KEY,
+        applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        notes       TEXT
+    )
+    """,
     "ALTER TABLE easya_orders ALTER COLUMN order_type TYPE VARCHAR(12)",
     "ALTER TABLE easya_orders ADD COLUMN IF NOT EXISTS recurring BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE easya_orders ADD COLUMN IF NOT EXISTS max_executions INTEGER",
@@ -487,6 +494,43 @@ MIGRATION_STATEMENTS = [
     CREATE UNIQUE INDEX IF NOT EXISTS uq_hf_pos_portfolio_strategy_symbol
         ON hf_paper_positions (portfolio_id, strategy_id, symbol)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS dca_user_agent_wallets (
+        user_wallet             VARCHAR(64) PRIMARY KEY,
+        agent_wallet_address    VARCHAR(64) NOT NULL,
+        circle_wallet_id        VARCHAR(64) NOT NULL,
+        circle_wallet_set_id    VARCHAR(64),
+        blockchain              VARCHAR(32) NOT NULL,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_dca_user_agent_wallets_circle ON dca_user_agent_wallets (circle_wallet_id)",
+    """
+    CREATE TABLE IF NOT EXISTS user_agent_wallets (
+        user_wallet             VARCHAR(64) NOT NULL,
+        agent_type              VARCHAR(32) NOT NULL,
+        agent_wallet_address    VARCHAR(64) NOT NULL,
+        circle_wallet_id        VARCHAR(64) NOT NULL,
+        circle_wallet_set_id    VARCHAR(64),
+        blockchain              VARCHAR(32) NOT NULL,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_wallet, agent_type)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_user_agent_wallets_circle ON user_agent_wallets (circle_wallet_id)",
+    "CREATE INDEX IF NOT EXISTS idx_user_agent_wallets_type ON user_agent_wallets (agent_type)",
+    # Migrate legacy DCA Circle rows into the multi-agent table.
+    """
+    INSERT INTO user_agent_wallets (
+        user_wallet, agent_type, agent_wallet_address, circle_wallet_id,
+        circle_wallet_set_id, blockchain, created_at
+    )
+    SELECT
+        user_wallet, 'dca', agent_wallet_address, circle_wallet_id,
+        circle_wallet_set_id, blockchain, created_at
+    FROM dca_user_agent_wallets
+    ON CONFLICT (user_wallet, agent_type) DO NOTHING
+    """,
 ]
 
 
@@ -585,6 +629,7 @@ def init_db() -> None:
                     cur.execute(stmt)
                 for stmt in MIGRATION_STATEMENTS:
                     cur.execute(stmt)
+            _repair_bitagents_decimal_scale(conn)
         _schema_ready = True
 
     if _import_done:
@@ -594,6 +639,81 @@ def init_db() -> None:
             return
         _import_json_if_empty()
         _import_done = True
+
+
+def _repair_bitagents_decimal_scale(conn) -> None:
+    """BITAGENTS was catalogued as 9 decimals but is 6 on-chain (1000x under-scale)."""
+    repair_id = "bitagents_decimals_9_to_6_v1"
+    mint = "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY"
+    scale = 1000.0  # 10 ** (9 - 6)
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_repairs (
+                id          VARCHAR(64) PRIMARY KEY,
+                applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                notes       TEXT
+            )
+            """
+        )
+        cur.execute("SELECT 1 FROM schema_repairs WHERE id = %s", (repair_id,))
+        if cur.fetchone():
+            return
+
+        cur.execute(
+            """
+            UPDATE user_ledger
+            SET amount = amount * %s
+            WHERE mint = %s AND amount IS NOT NULL AND amount <> 0
+            """,
+            (scale, mint),
+        )
+        ledger_n = cur.rowcount
+
+        cur.execute(
+            """
+            UPDATE easya_orders
+            SET output_amount = output_amount * %s
+            WHERE output_mint = %s
+              AND output_amount IS NOT NULL
+              AND output_amount <> 0
+            """,
+            (scale, mint),
+        )
+        orders_n = cur.rowcount
+
+        cur.execute(
+            """
+            UPDATE easya_order_executions e
+            SET output_amount = e.output_amount * %s
+            FROM easya_orders o
+            WHERE e.order_id = o.id
+              AND o.output_mint = %s
+              AND e.output_amount IS NOT NULL
+              AND e.output_amount <> 0
+            """,
+            (scale, mint),
+        )
+        exec_n = cur.rowcount
+
+        cur.execute(
+            """
+            INSERT INTO schema_repairs (id, notes)
+            VALUES (
+                %s,
+                %s
+            )
+            """,
+            (
+                repair_id,
+                f"Scaled BITAGENTS ledger/order amounts x{scale:g} "
+                f"(user_ledger={ledger_n}, easya_orders={orders_n}, executions={exec_n})",
+            ),
+        )
+        print(
+            f"  Repaired BITAGENTS decimal scale x{scale:g}: "
+            f"ledger={ledger_n}, orders={orders_n}, executions={exec_n}"
+        )
 
 
 def _import_json_if_empty() -> None:
@@ -1242,11 +1362,11 @@ def load_all_volume_campaigns(user_wallet: Optional[str] = None) -> list[dict[st
         with conn.cursor() as cur:
             if user_wallet:
                 cur.execute(
-                    "SELECT * FROM volume_campaigns WHERE user_wallet = %s ORDER BY created_at ASC",
+                    "SELECT * FROM volume_campaigns WHERE user_wallet = %s ORDER BY created_at DESC",
                     (user_wallet.strip(),),
                 )
             else:
-                cur.execute("SELECT * FROM volume_campaigns ORDER BY created_at ASC")
+                cur.execute("SELECT * FROM volume_campaigns ORDER BY created_at DESC")
             rows = cur.fetchall()
     return [_volume_campaign_row_to_dict(row) for row in rows]
 
@@ -1470,3 +1590,107 @@ def update_volume_campaign(campaign_id: str, updates: dict[str, Any]) -> Optiona
                 },
             )
     return find_volume_campaign(campaign_id)
+
+
+def get_user_agent_wallet(user_wallet: str, agent_type: str) -> Optional[dict[str, Any]]:
+    init_db()
+    wallet = (user_wallet or "").strip()
+    agent = (agent_type or "").strip().lower()
+    if not wallet or not agent:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_wallet, agent_type, agent_wallet_address, circle_wallet_id,
+                       circle_wallet_set_id, blockchain, created_at
+                FROM user_agent_wallets
+                WHERE user_wallet = %s AND agent_type = %s
+                """,
+                (wallet, agent),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "user_wallet": row["user_wallet"],
+        "agent_type": row["agent_type"],
+        "agent_wallet_address": row["agent_wallet_address"],
+        "circle_wallet_id": row["circle_wallet_id"],
+        "circle_wallet_set_id": row.get("circle_wallet_set_id"),
+        "blockchain": row["blockchain"],
+        "created_at": _iso(row.get("created_at")),
+    }
+
+
+def save_user_agent_wallet(record: dict[str, Any]) -> dict[str, Any]:
+    init_db()
+    wallet = (record.get("user_wallet") or "").strip()
+    agent_type = (record.get("agent_type") or "dca").strip().lower()
+    if not wallet:
+        raise ValueError("user_wallet is required")
+    if not agent_type:
+        raise ValueError("agent_type is required")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_agent_wallets (
+                    user_wallet, agent_type, agent_wallet_address, circle_wallet_id,
+                    circle_wallet_set_id, blockchain
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (user_wallet, agent_type) DO UPDATE SET
+                    agent_wallet_address = EXCLUDED.agent_wallet_address,
+                    circle_wallet_id = EXCLUDED.circle_wallet_id,
+                    circle_wallet_set_id = COALESCE(
+                        EXCLUDED.circle_wallet_set_id, user_agent_wallets.circle_wallet_set_id
+                    ),
+                    blockchain = EXCLUDED.blockchain
+                """,
+                (
+                    wallet,
+                    agent_type,
+                    record["agent_wallet_address"],
+                    record["circle_wallet_id"],
+                    record.get("circle_wallet_set_id"),
+                    record.get("blockchain") or "SOL-DEVNET",
+                ),
+            )
+            # Keep legacy DCA table in sync for older readers.
+            if agent_type == "dca":
+                cur.execute(
+                    """
+                    INSERT INTO dca_user_agent_wallets (
+                        user_wallet, agent_wallet_address, circle_wallet_id,
+                        circle_wallet_set_id, blockchain
+                    ) VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (user_wallet) DO UPDATE SET
+                        agent_wallet_address = EXCLUDED.agent_wallet_address,
+                        circle_wallet_id = EXCLUDED.circle_wallet_id,
+                        circle_wallet_set_id = COALESCE(
+                            EXCLUDED.circle_wallet_set_id, dca_user_agent_wallets.circle_wallet_set_id
+                        ),
+                        blockchain = EXCLUDED.blockchain
+                    """,
+                    (
+                        wallet,
+                        record["agent_wallet_address"],
+                        record["circle_wallet_id"],
+                        record.get("circle_wallet_set_id"),
+                        record.get("blockchain") or "SOL-DEVNET",
+                    ),
+                )
+    saved = get_user_agent_wallet(wallet, agent_type)
+    if not saved:
+        raise RuntimeError("Failed to persist user agent wallet.")
+    return saved
+
+
+def get_dca_user_agent_wallet(user_wallet: str) -> Optional[dict[str, Any]]:
+    return get_user_agent_wallet(user_wallet, "dca")
+
+
+def save_dca_user_agent_wallet(record: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(record)
+    payload["agent_type"] = "dca"
+    return save_user_agent_wallet(payload)

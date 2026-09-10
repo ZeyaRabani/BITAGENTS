@@ -92,11 +92,15 @@ export function EasyaTradingDeposit({
   }, [publicKey, authToken, onBalancesChange]);
 
   useEffect(() => {
-    void fetchEasyaAgentWallet().then((info) => {
+    if (!authToken) {
+      setAgentWallet(null);
+      return;
+    }
+    void fetchEasyaAgentWallet(authToken).then((info) => {
       setAgentWallet(info?.agent_wallet ?? null);
       setPlatformFeePct(info?.platform_fee_pct ?? "0.1%");
     });
-  }, []);
+  }, [authToken]);
 
   useEffect(() => {
     void refreshBalances();
@@ -338,7 +342,11 @@ export function EasyaTradingDeposit({
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="uppercase tracking-[0.16em] text-signal">Deposit address</span>
             <div className="mt-1 break-all text-foreground">
-              {agentWallet ?? "Not configured on server"}
+              {agentWallet ?? (
+                authToken
+                  ? "Provisioning your personal EasyA agent wallet…"
+                  : "Sign in to provision your personal agent wallet"
+              )}
             </div>
           </div>
 

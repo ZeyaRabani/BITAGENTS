@@ -132,6 +132,12 @@ export type StrategyBlock = {
   symbols: string[];
   horizon_days?: number;
   horizon_label?: string;
+  closed?: boolean;
+  realized_pnl_usd?: number;
+  realized_pnl_pct?: number;
+  liquidation_proceeds_usd?: number | null;
+  capital_usd?: number | null;
+  perf_fee_usd?: number | null;
   liquidation_txs?: {
     signature?: string;
     explorer_url?: string;
@@ -276,7 +282,7 @@ export async function createPaperStrategy(
 ) {
   return authFetch("/api/agents/hedge-fund/paper/strategies", authToken, {
     method: "POST",
-    body: JSON.stringify({ trading_mode: "live", funding_token: "USDC", ...body }),
+    body: JSON.stringify({ trading_mode: "live", funding_token: "SOL", ...body }),
   });
 }
 

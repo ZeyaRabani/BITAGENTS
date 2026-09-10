@@ -45,9 +45,31 @@ def load_easya_keypair():
         return None
 
 
-def get_easya_wallet_pubkey() -> Optional[str]:
+def _shared_easya_pubkey() -> Optional[str]:
     kp = load_easya_keypair()
     return str(kp.pubkey()) if kp else None
+
+
+def get_easya_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
+    user_wallet = (user_wallet or "").strip()
+    if user_wallet:
+        from circle_dca_wallets import get_agent_wallet_address
+
+        address = get_agent_wallet_address(user_wallet, "easya")
+        if address:
+            return address
+    return _shared_easya_pubkey()
+
+
+def _easya_agent_addresses(user_wallet: str) -> set[str]:
+    addresses: set[str] = set()
+    primary = get_easya_wallet_pubkey(user_wallet)
+    if primary:
+        addresses.add(primary)
+    shared = _shared_easya_pubkey()
+    if shared:
+        addresses.add(shared)
+    return addresses
 
 
 def easya_platform_fee(swap_amount: float) -> float:
@@ -63,11 +85,11 @@ def easya_execution_total_cost(swap_amount: float) -> float:
 
 
 def _easya_rows(user_wallet: str) -> list[dict[str, Any]]:
-    agent_wallet = get_easya_wallet_pubkey()
-    if not agent_wallet:
+    addresses = _easya_agent_addresses(user_wallet)
+    if not addresses:
         return []
     rows = load_ledger_for_user(user_wallet.strip())
-    return [r for r in rows if r.get("agent_wallet") == agent_wallet]
+    return [r for r in rows if r.get("agent_wallet") in addresses]
 
 
 def _ledger_totals(user_wallet: str, token_symbol: str, rows: list[dict[str, Any]]) -> dict[str, float]:
@@ -115,22 +137,44 @@ def _reserved_for_orders(user_wallet: str, token_symbol: str) -> float:
     return round(reserved, 9)
 
 
-def get_easya_agent_wallet_info() -> dict[str, Any]:
-    from dca_agent import TOKEN_MINTS
+def get_easya_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
+    from circle_dca_wallets import circle_dca_enabled, get_agent_wallet_address
 
-    wallet = get_easya_wallet_pubkey()
-    return {
+    user_wallet = (user_wallet or "").strip()
+    wallet = get_easya_wallet_pubkey(user_wallet) if user_wallet else _shared_easya_pubkey()
+    provider = "local"
+    circle_error = None
+    per_user = False
+    if user_wallet and circle_dca_enabled():
+        circle_addr = get_agent_wallet_address(user_wallet, "easya")
+        if circle_addr:
+            wallet = circle_addr
+            provider = "circle"
+            per_user = True
+        else:
+            circle_error = (
+                "Circle EasyA wallet provisioning failed. Check CIRCLE_ENTITY_SECRET. "
+                "Falling back to shared EASYA_ANALYSIS_AGENT_WALLET_PRIVATE_KEY if configured."
+            )
+
+    result = {
         "agent_wallet": wallet,
         "configured": bool(wallet),
-        "any_spl_token": True,
+        "wallet_provider": provider,
+        "per_user_wallet": per_user,
+        "any_spl_token": False,
         "token_resolution": "symbol_or_mint",
-        "common_tokens": sorted(k for k in TOKEN_MINTS if k != "WSOL"),
+        "common_tokens": ["SOL"],
+        "allowed_deposit_tokens": ["SOL"],
         "storage": "neon_postgres",
         "cluster": SOLANA_CLUSTER,
         "rpc_url": SOLANA_RPC,
         "platform_fee_rate": EASYA_PLATFORM_FEE_RATE,
         "platform_fee_pct": "0.1%",
     }
+    if circle_error and not per_user:
+        result["circle_error"] = circle_error
+    return result
 
 
 def get_easya_user_balances(user_wallet: str) -> dict[str, Any]:
@@ -173,7 +217,7 @@ def get_easya_user_balances(user_wallet: str) -> dict[str, Any]:
     return {
         "user_wallet": user_wallet,
         "balances": breakdown,
-        "agent_wallet": get_easya_wallet_pubkey(),
+        "agent_wallet": get_easya_wallet_pubkey(user_wallet),
         "platform_fee_rate": EASYA_PLATFORM_FEE_RATE,
     }
 
@@ -221,7 +265,7 @@ def check_easya_can_spend_order(user_wallet: str, input_token: str, swap_amount:
             "swap_amount": swap_amount,
             "platform_fee": fee,
             "total_required": total,
-            "agent_wallet": get_easya_wallet_pubkey(),
+            "agent_wallet": get_easya_wallet_pubkey(user_wallet),
         }
 
     return {
@@ -238,7 +282,7 @@ def check_easya_can_spend_order(user_wallet: str, input_token: str, swap_amount:
 def verify_and_record_easya_deposit(signature: str, user_wallet: str) -> dict[str, Any]:
     signature = signature.strip()
     user_wallet = user_wallet.strip()
-    agent_wallet = get_easya_wallet_pubkey()
+    agent_wallet = get_easya_wallet_pubkey(user_wallet)
 
     if not agent_wallet:
         return {"error": "EasyA Analysis Agent wallet is not configured on the server."}
@@ -297,19 +341,26 @@ def verify_and_record_easya_deposit(signature: str, user_wallet: str) -> dict[st
                 ),
             }
 
+        from deposit_ledger import is_allowed_sol_deposit
+        from dca_agent import SOL_ADDRESS_FULL
+
         now = datetime.now(timezone.utc).isoformat()
         records = []
+        rejected_non_sol: list[str] = []
         for transfer in inbound:
             tok = resolve_token(transfer["mint"])
             if "error" in tok:
+                continue
+            if not is_allowed_sol_deposit(tok.get("symbol", ""), transfer.get("mint")):
+                rejected_non_sol.append(str(tok.get("symbol") or transfer.get("mint")))
                 continue
             record = {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
                 "agent_wallet": agent_wallet,
                 "signature": signature,
-                "token": tok["symbol"],
-                "mint": transfer["mint"],
+                "token": "SOL",
+                "mint": transfer.get("mint") or SOL_ADDRESS_FULL,
                 "amount": float(transfer["amount"]),
                 "direction": "deposit",
                 "reference_type": "easya_deposit",
@@ -322,6 +373,13 @@ def verify_and_record_easya_deposit(signature: str, user_wallet: str) -> dict[st
             records.append(record)
 
         if not records:
+            if rejected_non_sol:
+                return {
+                    "error": (
+                        "Only SOL deposits are accepted for the EasyA Analysis agent. "
+                        f"Rejected: {', '.join(rejected_non_sol)}."
+                    ),
+                }
             return {"error": "Could not resolve deposited token metadata."}
 
         return {
@@ -350,7 +408,7 @@ def record_easya_spend(
     record = {
         "id": str(uuid.uuid4())[:8],
         "user_wallet": user_wallet.strip(),
-        "agent_wallet": get_easya_wallet_pubkey(),
+        "agent_wallet": get_easya_wallet_pubkey(user_wallet),
         "signature": signature,
         "token": tok["symbol"],
         "mint": tok["mint"],
@@ -385,7 +443,7 @@ def record_easya_acquire(
     record = {
         "id": str(uuid.uuid4())[:8],
         "user_wallet": user_wallet.strip(),
-        "agent_wallet": get_easya_wallet_pubkey(),
+        "agent_wallet": get_easya_wallet_pubkey(user_wallet),
         "signature": signature,
         "token": tok["symbol"],
         "mint": tok["mint"],
@@ -460,7 +518,8 @@ def withdraw_easya_tokens(user_wallet: str, token: str, amount: float) -> dict[s
             tok["mint"],
             amount,
             tok["decimals"],
-            signing_keypair=load_easya_keypair(),
+            signing_user_wallet=user_wallet,
+            agent_type="easya",
         )
         if transfer.get("error") or transfer.get("status") != "success":
             return transfer
@@ -469,7 +528,7 @@ def withdraw_easya_tokens(user_wallet: str, token: str, amount: float) -> dict[s
         record = {
             "id": str(uuid.uuid4())[:8],
             "user_wallet": user_wallet,
-            "agent_wallet": get_easya_wallet_pubkey(),
+            "agent_wallet": get_easya_wallet_pubkey(user_wallet),
             "signature": signature,
             "token": tok["symbol"],
             "mint": tok["mint"],

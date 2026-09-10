@@ -96,7 +96,7 @@ function CloseTxLinks({
   if (rows.length === 0 && !swapped) return null;
   return (
     <div className="mt-2 space-y-1">
-      {swapped && <div className="text-signal">Swapped back to USDC</div>}
+      {swapped && <div className="text-signal">Swapped back to SOL</div>}
       {rows.length > 0 && <div className="text-muted-foreground">Close / swap tx</div>}
       {rows.map((r) => (
         <a
@@ -364,15 +364,15 @@ export function HedgeFundConsole() {
   const port = dashboard?.portfolio;
   const positions = port?.positions || [];
   const hours = Math.round((health?.monitor_interval_seconds || dashboard?.monitor_interval_seconds || 14400) / 3600);
-  const freeUsdc =
-    hfBalances?.balances?.find((b) => b.token === "USDC")?.available ?? null;
+  const freeSol =
+    hfBalances?.balances?.find((b) => b.token === "SOL")?.available ?? null;
 
   return (
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">{HEDGE_FUND.description}</p>
         <p className="mt-2 font-mono text-xs text-signal">
-          18-analyst · live trading · max $100 USDC/sleeve · 1% start / 10% profit · monitor every{" "}
+          18-analyst · live trading · max $100 USD/sleeve · min $5/asset (SOL-funded) · 1% start / 10% profit · monitor every{" "}
           {hours}h ·{" "}
           <Link href="/agents/hedge-fund/pricing" className="underline hover:text-foreground">
             Pricing
@@ -391,10 +391,10 @@ export function HedgeFundConsole() {
         <span className="text-signal">
           {health?.trading_wallet_configured ? "live wallet ready" : "wallet not configured"}
         </span>
-        {freeUsdc != null && (
+        {freeSol != null && (
           <>
             <span>·</span>
-            <span>{freeUsdc} USDC free</span>
+            <span>{freeSol} SOL free</span>
           </>
         )}
         {dashBusy && <span className="text-muted-foreground">· refreshing…</span>}
@@ -456,9 +456,9 @@ export function HedgeFundConsole() {
         </Panel>
       </div>
       <p className="font-mono text-[11px] text-muted-foreground">
-        Create strategies in chat after depositing USDC — propose assets, confirm, then live
+        Create strategies in chat after depositing SOL - propose assets, confirm, then live
         Jupiter fills show below. Minimum trading horizon is 3 days (shorter requests are
-        raised to 3d). Expired sleeves auto-swap back to USDC (15m poll, also on server start).
+        raised to 3d). Expired sleeves auto-swap back to SOL (15m poll, also on server start).
       </p>
 
       {(() => {
@@ -515,7 +515,7 @@ export function HedgeFundConsole() {
                         onClick={() => setLiquidateStrategyId(s.id)}
                         className="border border-warn/40 px-2 py-0.5 uppercase text-warn disabled:opacity-40"
                       >
-                        Liquidate USDC
+                        Liquidate to SOL
                       </button>
                     </>
                   )}
@@ -673,11 +673,45 @@ export function HedgeFundConsole() {
               <div key={s.id} className="border border-grid bg-surface/20 p-3 font-mono text-[11px]">
                 <div className="mb-2 flex flex-wrap justify-between gap-2 text-signal">
                   <span>
-                    {s.name} · {mode} · sleeve {money(block.sleeve_value_usd)} · horizon{" "}
-                    {block.horizon_days || s.horizon_days || "open"}d
+                    {s.name} · {mode} · {s.status}
+                    {s.status === "closed"
+                      ? ""
+                      : ` · sleeve ${money(block.sleeve_value_usd)}`}{" "}
+                    · horizon {block.horizon_days || s.horizon_days || "open"}d
                   </span>
                   <span className="text-muted-foreground">{s.id}</span>
                 </div>
+                {(s.status === "closed" || block.closed) && (
+                  <div className="mb-2 border border-grid/60 bg-background/40 px-2 py-1.5">
+                    <span className="text-muted-foreground">Closed PnL · </span>
+                    <span
+                      className={
+                        (block.realized_pnl_usd ?? 0) >= 0 ? "text-signal" : "text-warn"
+                      }
+                    >
+                      {money(block.realized_pnl_usd)}
+                      {block.realized_pnl_pct != null ? ` (${block.realized_pnl_pct}%)` : ""}
+                    </span>
+                    {block.liquidation_proceeds_usd != null && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · proceeds {money(block.liquidation_proceeds_usd)}
+                      </span>
+                    )}
+                    {block.capital_usd != null && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · capital {money(block.capital_usd)}
+                      </span>
+                    )}
+                    {block.perf_fee_usd != null && Number(block.perf_fee_usd) > 0 && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · fee {money(block.perf_fee_usd)}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <p className="mb-2 text-muted-foreground">Assets: {(block.symbols || []).join(", ") || "—"}</p>
                 {(s.rules?.deploy_errors || []).length > 0 && (
                   <div className="mb-2 space-y-1">
@@ -894,7 +928,7 @@ export function HedgeFundConsole() {
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Chat: propose → confirm hs… → live PnL for hs… · liquidate to USDC. Mock BT is historical only.
+                Chat: propose → confirm hs… → live PnL for hs… · liquidate to SOL. Mock BT is historical only.
               </p>
             )}
             {messages.map((msg) => (
@@ -1004,13 +1038,13 @@ export function HedgeFundConsole() {
         onOpenChange={(open) => {
           if (!open && !liquidateBusy) setLiquidateStrategyId(null);
         }}
-        title="Confirm liquidation to USDC"
+        title="Confirm liquidation to SOL"
         description={
           <div className="space-y-2">
             <p>
               This will sell every open position in{" "}
               <strong className="text-foreground">{liquidateStrategyId}</strong> through Jupiter
-              and credit the proceeds to your USDC balance.
+              and credit the proceeds to your SOL balance.
             </p>
             <p>
               A 10% performance fee is charged only if the completed strategy has a profit.
@@ -1018,7 +1052,7 @@ export function HedgeFundConsole() {
             </p>
           </div>
         }
-        confirmLabel="Liquidate to USDC"
+        confirmLabel="Liquidate to SOL"
         cancelLabel="Keep strategy"
         busy={liquidateBusy}
         onConfirm={() => {

@@ -27,6 +27,10 @@ export type HfAgentWalletInfo = {
   usdc_mint?: string;
   sol_mint?: string;
   live_trading?: boolean;
+  configured?: boolean;
+  wallet_provider?: "circle" | "local";
+  per_user_wallet?: boolean;
+  circle_error?: string;
 };
 
 export type HfDepositVerifyResponse = {
@@ -52,9 +56,14 @@ export const HF_DEPOSIT_TOKEN_MINTS: Record<string, string> = {
   USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
 };
 
-export async function fetchHfAgentWallet(): Promise<HfAgentWalletInfo | null> {
+export async function fetchHfAgentWallet(
+  authToken: string
+): Promise<HfAgentWalletInfo | null> {
   try {
-    const res = await fetch("/api/agents/hedge-fund/wallet/agent", { cache: "no-store" });
+    const res = await fetch("/api/agents/hedge-fund/wallet/agent", {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
     if (!res.ok) return null;
     return (await res.json()) as HfAgentWalletInfo;
   } catch {

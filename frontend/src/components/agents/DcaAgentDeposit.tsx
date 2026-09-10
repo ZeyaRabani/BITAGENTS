@@ -1,13 +1,6 @@
 "use client";
 
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import {
-  createAssociatedTokenAccountInstruction,
-  createTransferInstruction,
-  getAssociatedTokenAddress,
-  getAccount,
-} from "@solana/spl-token";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -15,20 +8,15 @@ import { Panel } from "@/components/AppShell";
 import { LegalSignInNotice } from "@/components/legal/LegalSignInNotice";
 import { explorerUrlForSignature } from "@/lib/dcaActionResults";
 import {
-  DEPOSIT_TOKEN_DECIMALS,
-  DEPOSIT_TOKEN_MINTS,
   fetchAgentWallet,
   fetchUserBalances,
-  resolveDepositToken,
   verifyDepositWithRetry,
   withdrawTokens,
-  type ResolvedToken,
   type TokenBalanceRow,
   type UserDepositBalances,
   type DepositVerifyResponse,
 } from "@/lib/dcaWalletClient";
 
-const PRESET_TOKENS = ["SOL", "USDC", "JUP"] as const;
 const PENDING_DEPOSIT_KEY = "dca_pending_deposit_signature";
 
 function savePendingDepositSignature(signature: string) {
@@ -54,7 +42,6 @@ function readPendingDepositSignature(): string | null {
     return null;
   }
 }
-type PresetToken = (typeof PRESET_TOKENS)[number];
 
 export function DcaAgentDeposit({
   cluster,
@@ -70,11 +57,8 @@ export function DcaAgentDeposit({
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
-  const [anySplToken, setAnySplToken] = useState(true);
+  const [circleError, setCircleError] = useState<string | null>(null);
   const [balances, setBalances] = useState<TokenBalanceRow[]>([]);
-  const [token, setToken] = useState<PresetToken | "custom">("SOL");
-  const [customMint, setCustomMint] = useState("");
-  const [resolvedCustom, setResolvedCustom] = useState<ResolvedToken | null>(null);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
@@ -108,11 +92,16 @@ export function DcaAgentDeposit({
   }, [publicKey, authToken, onBalancesChange]);
 
   useEffect(() => {
-    void fetchAgentWallet().then((info) => {
+    if (!authToken) {
+      setAgentWallet(null);
+      setCircleError(null);
+      return;
+    }
+    void fetchAgentWallet(authToken).then((info) => {
       setAgentWallet(info?.agent_wallet ?? null);
-      setAnySplToken(info?.any_spl_token ?? true);
+      setCircleError(info?.circle_error ?? null);
     });
-  }, []);
+  }, [authToken]);
 
   useEffect(() => {
     void refreshBalances();
@@ -162,24 +151,6 @@ export function DcaAgentDeposit({
     const first = balances.find((row) => (row.withdrawable ?? 0) > 0);
     if (first) setWithdrawToken(first.token);
   }, [balances, withdrawToken]);
-
-  useEffect(() => {
-    if (token !== "custom" || customMint.trim().length < 32) {
-      setResolvedCustom(null);
-      return;
-    }
-
-    const handle = window.setTimeout(() => {
-      void resolveDepositToken(customMint.trim())
-        .then(setResolvedCustom)
-        .catch((err) => {
-          setResolvedCustom(null);
-          setError(err instanceof Error ? err.message : "Unknown token");
-        });
-    }, 400);
-
-    return () => window.clearTimeout(handle);
-  }, [token, customMint]);
 
   function applyVerifiedBalances(result: DepositVerifyResponse) {
     if (result.balances?.balances) {
@@ -263,46 +234,13 @@ export function DcaAgentDeposit({
       const tx = new Transaction();
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
 
-      if (token === "SOL") {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: agentPk,
-            lamports: Math.round(parsed * LAMPORTS_PER_SOL),
-          })
-        );
-      } else {
-        let mintAddress: string;
-        let decimals: number;
-
-        if (token === "custom") {
-          if (!resolvedCustom) {
-            setError("Enter a valid SPL token mint address");
-            return;
-          }
-          mintAddress = resolvedCustom.mint;
-          decimals = resolvedCustom.decimals;
-        } else {
-          mintAddress = DEPOSIT_TOKEN_MINTS[token];
-          decimals = DEPOSIT_TOKEN_DECIMALS[token] ?? 6;
-        }
-
-        const mint = new PublicKey(mintAddress);
-        const rawAmount = BigInt(Math.round(parsed * 10 ** decimals));
-
-        const userAta = await getAssociatedTokenAddress(mint, publicKey);
-        const agentAta = await getAssociatedTokenAddress(mint, agentPk);
-
-        try {
-          await getAccount(connection, agentAta);
-        } catch {
-          tx.add(
-            createAssociatedTokenAccountInstruction(publicKey, agentAta, agentPk, mint)
-          );
-        }
-
-        tx.add(createTransferInstruction(userAta, agentAta, publicKey, rawAmount));
-      }
+      tx.add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: agentPk,
+          lamports: Math.round(parsed * LAMPORTS_PER_SOL),
+        })
+      );
 
       tx.recentBlockhash = blockhash;
       tx.feePayer = publicKey;
@@ -395,50 +333,39 @@ export function DcaAgentDeposit({
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Deposit any SPL token to the AI Agent wallet on{" "}
+            Deposit <strong className="text-foreground">SOL only</strong> to the AI Agent wallet on{" "}
             <span className="text-foreground">{cluster ?? "Solana"}</span>. After you send
             funds, your deposit is verified automatically and credited to your balance. You can
-            also paste a transaction signature below if verification was missed.
+            also paste a transaction signature below if verification was missed. Withdrawals still
+            support any credited token balance.
           </p>
 
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
-            <span className="uppercase tracking-[0.16em] text-signal">Agent wallet</span>
+            <span className="uppercase tracking-[0.16em] text-signal">Your DCA agent wallet</span>
             <div className="mt-1 break-all text-foreground">
-              {agentWallet ?? "Not configured on server"}
+              {agentWallet ?? (
+                authToken
+                  ? "Provisioning…"
+                  : "Sign in to provision your personal agent wallet"
+              )}
             </div>
-            {anySplToken && (
-              <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-signal">
-                Any SPL token · symbol or mint address
+            {circleError && (
+              <div className="mt-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] normal-case tracking-normal text-warn">
+                {circleError}
               </div>
             )}
+            <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-signal">
+              Deposits · SOL only
+            </div>
           </div>
-
-        {/* <div className="flex flex-wrap items-center gap-3">
-          <WalletMultiButton className="wallet-adapter-button-trigger" />
-          {connected && publicKey && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              {publicKey.toBase58().slice(0, 4)}…{publicKey.toBase58().slice(-4)}
-            </span>
-          )}
-        </div> */}
 
         <LegalSignInNotice />
 
           <div className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-[140px_1fr_auto]">
-              <select
-                value={token}
-                onChange={(e) => setToken(e.target.value as PresetToken | "custom")}
-                disabled={busy || verifyBusy || !connected}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
-              >
-                {PRESET_TOKENS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-                <option value="custom">Custom mint</option>
-              </select>
+              <div className="border border-grid bg-background px-3 py-2.5 font-mono text-sm text-foreground">
+                SOL
+              </div>
               <input
                 type="number"
                 min="0"
@@ -457,27 +384,9 @@ export function DcaAgentDeposit({
               >
                 {busy || verifyBusy
                   ? depositPhase ?? "Processing…"
-                  : "Deposit"}
+                  : "Deposit SOL"}
               </button>
             </div>
-
-            {token === "custom" && (
-              <div className="space-y-2">
-                <input
-                  type="text"
-                  value={customMint}
-                  onChange={(e) => setCustomMint(e.target.value)}
-                  disabled={busy || verifyBusy || !connected}
-                  placeholder="Token mint address (any SPL token)"
-                  className="w-full border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
-                />
-                {resolvedCustom && (
-                  <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                    Resolved: {resolvedCustom.symbol} · {resolvedCustom.decimals} decimals
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {success && (

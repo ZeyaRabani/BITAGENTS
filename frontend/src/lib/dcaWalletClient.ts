@@ -19,6 +19,9 @@ export type UserDepositBalances = {
 export type AgentWalletInfo = {
   agent_wallet: string | null;
   configured: boolean;
+  wallet_provider?: "circle" | "local";
+  per_user_wallet?: boolean;
+  circle_error?: string;
   any_spl_token?: boolean;
   common_tokens?: string[];
   /** @deprecated use common_tokens */
@@ -57,9 +60,12 @@ export const DEPOSIT_TOKEN_MINTS: Record<string, string> = {
   JUP: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
 };
 
-export async function fetchAgentWallet(): Promise<AgentWalletInfo | null> {
+export async function fetchAgentWallet(authToken: string): Promise<AgentWalletInfo | null> {
   try {
-    const res = await fetch("/api/agents/dca/wallet/agent", { cache: "no-store" });
+    const res = await fetch("/api/agents/dca/wallet/agent", {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${authToken}` },
+    });
     if (!res.ok) return null;
     return (await res.json()) as AgentWalletInfo;
   } catch {

@@ -11,6 +11,9 @@ from typing import Any, Optional
 USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 USDC_SYMBOL = "USDC"
 SOL_MINT = "So11111111111111111111111111111111111111112"
+# Wormhole Portal Wrapped BTC (canonical Solana WBTC for HF live buys)
+WBTC_MINT = "3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh"
+WBTC_DECIMALS = 8
 
 _TOKENS_PATH = Path(__file__).resolve().parent / "hedge-fund-tokens.json"
 
@@ -116,6 +119,66 @@ def _jup_search(query: str) -> Optional[dict[str, Any]]:
     return _fetch_token_from_jupiter(query)
 
 
+def _jupiter_has_route(
+    input_mint: str,
+    output_mint: str,
+    *,
+    amount_raw: int = 100_000,
+    taker: Optional[str] = None,
+) -> bool:
+    """Cheap probe: does Jupiter currently advertise a route for this pair?"""
+    try:
+        from dca_agent import JUPITER_BUILD_API, _jupiter_get
+    except Exception:
+        return False
+    wallet = (taker or "").strip() or "11111111111111111111111111111112"
+    params = {
+        "inputMint": input_mint,
+        "outputMint": output_mint,
+        "amount": str(max(1, int(amount_raw))),
+        "taker": wallet,
+        "payer": wallet,
+        "slippageBps": "100",
+        "wrapAndUnwrapSol": "true",
+        "maxAccounts": "64",
+    }
+    try:
+        resp = _jupiter_get(JUPITER_BUILD_API, params)
+        if not resp.ok:
+            return False
+        data = resp.json()
+        if data.get("error"):
+            return False
+        return bool(data.get("swapInstruction") or data.get("outAmount"))
+    except Exception:
+        return False
+
+
+def _equity_xstock_from_jupiter(base: str) -> Optional[dict[str, Any]]:
+    """Resolve Backed/xStocks mint ({SYM}x) via Jupiter — usually SOL/USDC liquid."""
+    base = (base or "").strip().upper()
+    if not base or len(base) < 1:
+        return None
+    for q in (f"{base}x", f"{base}X", base):
+        item = _jup_search(q)
+        if not item:
+            continue
+        out = _pick_best_jup(item, prefer_xstock=True)
+        mint = out.get("mint")
+        if not mint:
+            continue
+        sym = str(out.get("symbol") or "").upper()
+        # Accept exact xStock ticker or close matches; avoid random meme hits on bare base.
+        if q.lower() == base.lower() and not (sym.endswith("X") or "stock" in str(out.get("name") or "").lower()):
+            continue
+        out["display_symbol"] = base
+        out["yahoo_symbol"] = base
+        out["asset_class"] = "equity_xstock"
+        out["jupiter_query"] = q
+        return out
+    return None
+
+
 def _pick_best_jup(item: dict[str, Any], prefer_xstock: bool) -> dict[str, Any]:
     sym = str(item.get("symbol") or "").upper()
     name = str(item.get("name") or "")
@@ -134,7 +197,8 @@ def _pick_best_jup(item: dict[str, Any], prefer_xstock: bool) -> dict[str, Any]:
 def resolve_hf_solana_asset(symbol: str, mint_override: Optional[str] = None) -> dict[str, Any]:
     """
     Map a Yahoo/display symbol (or mint) to a Solana mint.
-    Order: mint override → hedge-fund-tokens.json → Jupiter (crypto / xStocks).
+    Order: mint override → Jupiter xStock ({SYM}x) → hedge-fund-tokens.json → Jupiter crypto.
+    Ondo (*on) catalog rows often have no Jupiter routes; prefer Backed xStocks when available.
     """
     raw = (symbol or "").strip()
     if not raw and not mint_override:
@@ -184,11 +248,18 @@ def resolve_hf_solana_asset(symbol: str, mint_override: Optional[str] = None) ->
             "asset_class": "crypto",
             "source": "known",
         }
-
-    # Catalog (stocks / tokenized equities)
-    catalog = lookup_hf_catalog(raw)
-    if catalog and catalog.get("mint"):
-        return catalog
+    if sym in ("BTC", "WBTC", "BTC-USD", "BITCOIN"):
+        return {
+            "symbol": "WBTC",
+            "display_symbol": "BTC",
+            "yahoo_symbol": "BTC",
+            "mint": WBTC_MINT,
+            "decimals": WBTC_DECIMALS,
+            "name": "Wrapped BTC (Portal)",
+            "is_xstock": False,
+            "asset_class": "crypto",
+            "source": "known",
+        }
 
     # Already a mint
     if len(sym) >= 32 and not sym.startswith("0X"):
@@ -200,9 +271,8 @@ def resolve_hf_solana_asset(symbol: str, mint_override: Optional[str] = None) ->
             return out
         return {"error": f"Could not resolve mint {raw} on Jupiter", "display_symbol": sym}
 
-    # Crypto via Jupiter
+    # Crypto via Jupiter (before equity path)
     crypto_q = {
-        "BTC": ["BTC", "WBTC"],
         "ETH": ["ETH", "WETH"],
         "SOL": ["SOL"],
         "XRP": ["XRP"],
@@ -219,20 +289,77 @@ def resolve_hf_solana_asset(symbol: str, mint_override: Optional[str] = None) ->
         "JUP": ["JUP"],
     }
     base = sym.replace("-USD", "")
-    queries = crypto_q.get(base) or [f"{base}x", f"{base}on", base]
-    prefer_x = base not in crypto_q
+    if base in crypto_q:
+        errors = []
+        for q in crypto_q[base]:
+            item = _jup_search(q)
+            if not item or not (item.get("id") or item.get("address")):
+                errors.append(f"Jupiter miss for '{q}'")
+                continue
+            out = _pick_best_jup(item, prefer_xstock=False)
+            if not out.get("mint"):
+                continue
+            out["display_symbol"] = base
+            out["yahoo_symbol"] = base
+            out["asset_class"] = "crypto"
+            out["jupiter_query"] = q
+            return out
+        return {
+            "error": f"No mint found for '{symbol}' (catalog + Jupiter)",
+            "display_symbol": base,
+            "errors": errors,
+            "hint": "Use a symbol from hedge-fund-tokens.json, a crypto ticker, or paste a mint.",
+        }
+
+    # Equities: prefer Jupiter xStock (SOL/USDC liquid). Catalog Ondo (*on) often has no routes.
+    xstock = _equity_xstock_from_jupiter(base)
+    catalog = lookup_hf_catalog(raw)
+    if xstock and xstock.get("mint"):
+        cat_sym = str((catalog or {}).get("symbol") or "").upper()
+        # Always prefer xStock over Ondo-only catalog rows.
+        if not catalog or cat_sym.endswith("ON") or cat_sym == base:
+            # Quick route check vs SOL; fall through to catalog only if xStock is also dry.
+            if _jupiter_has_route(SOL_MINT, xstock["mint"], amount_raw=50_000_000):
+                return xstock
+            # Still prefer xStock mint even if probe failed (RPC flake) — better than Ondo.
+            if not catalog or cat_sym.endswith("ON"):
+                return xstock
+
+    if catalog and catalog.get("mint"):
+        # If catalog is Ondo and we have no xStock, warn via source but still return
+        # (caller may surface No routes found). Prefer probing USDC route.
+        mint = catalog["mint"]
+        cat_sym = str(catalog.get("symbol") or "").upper()
+        if cat_sym.endswith("ON") and not _jupiter_has_route(SOL_MINT, mint, amount_raw=50_000_000):
+            if not _jupiter_has_route(USDC_MINT, mint, amount_raw=1_000_000):
+                if xstock and xstock.get("mint"):
+                    return xstock
+                return {
+                    "error": (
+                        f"No Jupiter route for catalog mint {cat_sym} ({mint[:8]}…). "
+                        f"Try {base}x / paste a liquid mint."
+                    ),
+                    "display_symbol": base,
+                    "catalog_mint": mint,
+                }
+        return catalog
+
+    if xstock and xstock.get("mint"):
+        return xstock
+
+    # Last resort: bare Jupiter search
     errors = []
-    for q in queries:
+    for q in (f"{base}x", f"{base}on", base):
         item = _jup_search(q)
         if not item or not (item.get("id") or item.get("address")):
             errors.append(f"Jupiter miss for '{q}'")
             continue
-        out = _pick_best_jup(item, prefer_xstock=prefer_x)
+        out = _pick_best_jup(item, prefer_xstock=True)
         if not out.get("mint"):
             continue
         out["display_symbol"] = base
         out["yahoo_symbol"] = base
-        out["asset_class"] = "crypto" if base in crypto_q else "equity_xstock"
+        out["asset_class"] = "equity_xstock"
         out["jupiter_query"] = q
         return out
 

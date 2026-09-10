@@ -25,11 +25,23 @@ from db import (
 )
 from dca_agent import (
     SOL_ADDRESS_FULL,
+    SOL_ADDRESS_SHORT,
     TOKEN_MINTS,
     get_wallet_pubkey,
     resolve_token,
     sol_rpc,
 )
+
+# DCA / Volume / EasyA accept SOL deposits only. Hedge Fund stays USDC-only in its own ledger.
+ALLOWED_AGENT_DEPOSIT_SYMBOLS = {"SOL", "WSOL"}
+
+
+def is_allowed_sol_deposit(token_symbol: str, mint: Optional[str] = None) -> bool:
+    symbol = str(token_symbol or "").strip().upper()
+    mint_addr = str(mint or "").strip()
+    if symbol in ALLOWED_AGENT_DEPOSIT_SYMBOLS:
+        return True
+    return mint_addr in (SOL_ADDRESS_FULL, SOL_ADDRESS_SHORT)
 
 _ledger_lock = threading.Lock()
 
@@ -245,26 +257,61 @@ def _parse_inbound_transfers(tx: dict, agent_wallet: str) -> list[dict[str, Any]
     return found
 
 
-def get_agent_wallet_info() -> dict[str, Any]:
-    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC
+def get_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
+    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC, load_keypair
+    from circle_dca_wallets import circle_dca_enabled, get_dca_agent_wallet_address
 
-    wallet = get_wallet_pubkey()
-    return {
+    user_wallet = (user_wallet or "").strip()
+    wallet = None
+    provider = "local"
+    circle_error = None
+    per_user = False
+
+    if user_wallet and circle_dca_enabled():
+        try:
+            wallet = get_dca_agent_wallet_address(user_wallet)
+            if wallet:
+                provider = "circle"
+                per_user = True
+            else:
+                circle_error = (
+                    "Circle wallet provisioning failed. Check CIRCLE_ENTITY_SECRET is the "
+                    "registered 64-char hex secret (register at Circle Console). "
+                    "Falling back to shared DCA_WALLET_PRIVATE_KEY if configured."
+                )
+        except Exception as exc:
+            circle_error = str(exc)
+
+    if not wallet:
+        wallet = get_wallet_pubkey()
+        if wallet:
+            provider = "local"
+
+    if not wallet and load_keypair() is None and circle_dca_enabled() and not circle_error:
+        circle_error = "No agent wallet available (Circle failed and no DCA_WALLET_PRIVATE_KEY)."
+
+    result = {
         "agent_wallet": wallet,
         "configured": bool(wallet),
-        "any_spl_token": True,
+        "wallet_provider": provider,
+        "per_user_wallet": per_user,
+        "any_spl_token": False,
         "token_resolution": "symbol_or_mint",
-        "common_tokens": sorted(k for k in TOKEN_MINTS if k != "WSOL"),
+        "common_tokens": ["SOL"],
+        "allowed_deposit_tokens": ["SOL"],
         "storage": "neon_postgres",
         "cluster": SOLANA_CLUSTER,
         "rpc_url": SOLANA_RPC,
     }
+    if circle_error and not per_user:
+        result["circle_error"] = circle_error
+    return result
 
 
 def verify_and_record_deposit(signature: str, user_wallet: str) -> dict[str, Any]:
     signature = signature.strip()
     user_wallet = user_wallet.strip()
-    agent_wallet = get_wallet_pubkey()
+    agent_wallet = get_wallet_pubkey(user_wallet)
 
     if not agent_wallet:
         return {"error": "AI Agent wallet is not configured on the server."}
@@ -334,18 +381,22 @@ def verify_and_record_deposit(signature: str, user_wallet: str) -> dict[str, Any
         now = datetime.now(timezone.utc).isoformat()
         records = []
         skipped: list[str] = []
+        rejected_non_sol: list[str] = []
         for transfer in inbound:
             tok = resolve_token(transfer["mint"])
             if "error" in tok:
                 skipped.append(transfer.get("token") or transfer.get("mint", "unknown"))
+                continue
+            if not is_allowed_sol_deposit(tok.get("symbol", ""), transfer.get("mint")):
+                rejected_non_sol.append(str(tok.get("symbol") or transfer.get("mint")))
                 continue
             record = {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
                 "agent_wallet": agent_wallet,
                 "signature": signature,
-                "token": tok["symbol"],
-                "mint": transfer["mint"],
+                "token": "SOL",
+                "mint": transfer["mint"] if transfer.get("mint") else SOL_ADDRESS_FULL,
                 "amount": float(transfer["amount"]),
                 "direction": "deposit",
                 "status": "confirmed",
@@ -356,6 +407,13 @@ def verify_and_record_deposit(signature: str, user_wallet: str) -> dict[str, Any
                 records.append(record)
 
         if not records:
+            if rejected_non_sol and not skipped:
+                return {
+                    "error": (
+                        "Only SOL deposits are accepted for the DCA agent. "
+                        f"Rejected: {', '.join(rejected_non_sol)}."
+                    ),
+                }
             if skipped:
                 return {
                     "error": (
@@ -363,6 +421,7 @@ def verify_and_record_deposit(signature: str, user_wallet: str) -> dict[str, Any
                         + ", ".join(skipped)
                     ),
                 }
+            return {"error": "Could not save deposit to database. Please retry verification."}
             return {"error": "Could not save deposit to database. Please retry verification."}
 
         return {
@@ -565,7 +624,7 @@ def get_user_balances(user_wallet: str) -> dict[str, Any]:
     return {
         "user_wallet": user_wallet,
         "balances": breakdown,
-        "agent_wallet": get_wallet_pubkey(),
+        "agent_wallet": get_wallet_pubkey(user_wallet),
     }
 
 
@@ -618,7 +677,7 @@ def record_user_spend(
     record = {
         "id": str(uuid.uuid4())[:8],
         "user_wallet": user_wallet,
-        "agent_wallet": get_wallet_pubkey(),
+        "agent_wallet": get_wallet_pubkey(user_wallet),
         "signature": signature,
         "token": tok["symbol"],
         "mint": tok["mint"],
@@ -660,7 +719,7 @@ def record_user_acquire(
     record = {
         "id": str(uuid.uuid4())[:8],
         "user_wallet": user_wallet,
-        "agent_wallet": get_wallet_pubkey(),
+        "agent_wallet": get_wallet_pubkey(user_wallet),
         "signature": signature,
         "token": tok["symbol"],
         "mint": tok["mint"],
@@ -765,7 +824,13 @@ def withdraw_user_tokens(user_wallet: str, token: str, amount: float) -> dict[st
                 "token": tok["symbol"],
             }
 
-        transfer = send_tokens_to_user(user_wallet, tok["mint"], amount, tok["decimals"])
+        transfer = send_tokens_to_user(
+            user_wallet,
+            tok["mint"],
+            amount,
+            tok["decimals"],
+            signing_user_wallet=user_wallet,
+        )
         if transfer.get("error"):
             return transfer
         if transfer.get("status") != "success":
@@ -776,7 +841,7 @@ def withdraw_user_tokens(user_wallet: str, token: str, amount: float) -> dict[st
         record = {
             "id": str(uuid.uuid4())[:8],
             "user_wallet": user_wallet,
-            "agent_wallet": get_wallet_pubkey(),
+            "agent_wallet": get_wallet_pubkey(user_wallet),
             "signature": signature,
             "token": tok["symbol"],
             "mint": tok["mint"],

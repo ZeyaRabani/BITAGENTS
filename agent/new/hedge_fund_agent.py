@@ -133,7 +133,7 @@ TOOLS = [
                 "If the user does not name tickers (e.g. 'only stocks', 'pick assets', 'max profit'), "
                 "OMIT tokens and set mode='agent' so the agent selects the book. "
                 "Do NOT pass tokens like STOCKS/CRYPTO — those are not tickers. "
-                f"Capital max ${HF_MAX_STRATEGY_USDC:.0f} USDC from deposited USDC. "
+                f"Capital max ${HF_MAX_STRATEGY_USDC:.0f} USD notional from deposited SOL. "
                 f"Each asset needs at least ${HF_MIN_PER_ASSET_USDC:.0f} capital — e.g. 2 assets need "
                 f"${HF_MIN_PER_ASSET_USDC * 2:.0f}+ total, so pick a book size the stated capital "
                 "actually supports (fewer assets if capital is small). "
@@ -160,7 +160,7 @@ TOOLS = [
                     "capital_usd": {
                         "type": "number",
                         "description": (
-                            f"USDC sleeve, max {HF_MAX_STRATEGY_USDC}. "
+                            f"SOL-funded sleeve (USD notional), max {HF_MAX_STRATEGY_USDC}. "
                             "Always copy the user's stated amount into notes too; omit here if unsure."
                         ),
                     },
@@ -170,7 +170,7 @@ TOOLS = [
                     },
                     "notes": {"type": "string", "description": "Include 'only stocks' / 'only crypto' when said"},
                     "trading_mode": {"type": "string", "description": "live (default) | paper"},
-                    "funding_token": {"type": "string", "description": "USDC only"},
+                    "funding_token": {"type": "string", "description": "SOL only"},
                     "mint_overrides": {
                         "type": "object",
                         "description": "Optional symbol→mint corrections",
@@ -235,7 +235,7 @@ TOOLS = [
         "function": {
             "name": "liquidate_paper_strategy",
             "description": (
-                "Liquidate strategy: Jupiter swap holdings to USDC, charge 10% of profit only, "
+                "Liquidate strategy: Jupiter swap holdings to SOL, charge 10% of profit only, "
                 "credit ledger so user can withdraw."
             ),
             "parameters": {
@@ -487,7 +487,7 @@ def _paper_tools(user_wallet: Optional[str] = None, last_user_input: Optional[st
             require_confirm=True,
             deploy=False,
             trading_mode=(kwargs.get("trading_mode") or "live"),
-            funding_token=(kwargs.get("funding_token") or "USDC"),
+            funding_token=(kwargs.get("funding_token") or "SOL"),
             mint_overrides=kwargs.get("mint_overrides"),
             max_names=int(max_names) if max_names else None,
         )
@@ -517,7 +517,7 @@ def _paper_tools(user_wallet: Optional[str] = None, last_user_input: Optional[st
         return liquidate_strategy(
             kwargs.get("strategy_id", ""),
             wallet,
-            reason=kwargs.get("reason") or "User requested liquidation to USDC",
+            reason=kwargs.get("reason") or "User requested liquidation to SOL",
         )
 
     def retry_paper_strategy(**kwargs):
@@ -606,14 +606,14 @@ SYSTEM_PROMPT = f"""You are **Hedge Fund Agent** — LIVE trading by default (re
 Fees: **1% at strategy start** + **10% of profit only on liquidate** (1/10).
 
 Flow:
-1. User must deposit **USDC** (not SOL) to the Hedge Fund wallet first.
+1. User must deposit **SOL** (not USDC) to the Hedge Fund wallet first.
 2. Create strategy in **chat** → `create_paper_strategy` (pending, trading_mode=live).
    - If user says "only stocks" / "pick assets" / "max profit" without tickers:
      omit `tokens`, set mode=agent, put wording in `notes` — agent selects the book.
    - Never pass STOCKS/CRYPTO as tokens.
    - Stocks resolve from hedge-fund-tokens.json; crypto via Jupiter.
    - Show mint addresses; user may correct via mint_overrides.
-   - Capital sleeve max **${HF_MAX_STRATEGY_USDC:.0f} USDC**, min **${HF_MIN_PER_ASSET_USDC:.0f}/asset**
+   - Capital sleeve max **${HF_MAX_STRATEGY_USDC:.0f} USD notional (funded in SOL)**, min **${HF_MIN_PER_ASSET_USDC:.0f}/asset**
      (2 assets needs ${HF_MIN_PER_ASSET_USDC * 2:.0f}+, 3 needs ${HF_MIN_PER_ASSET_USDC * 3:.0f}+, etc.).
    - Trading horizon minimum **{HF_MIN_HORIZON_DAYS} days** (1–2 day requests are raised to {HF_MIN_HORIZON_DAYS}d; omit/0 stays open-ended).
 3. Confirm → `confirm_paper_strategy` spends deposit, takes 1% fee, then buys the book
@@ -633,8 +633,8 @@ Flow:
    background — its response confirms the retry started, not that it finished.
 4. While active, funds are reserved — withdraw only after liquidate/complete.
 5. Live PnL → `get_strategy_live_pnl` (never mock backtest for that).
-6. Liquidate → swap to USDC, 10% of profit fee, unlock withdraw.
-7. Horizon end auto-liquidates to USDC.
+6. Liquidate → swap to SOL, 10% of profit fee, unlock withdraw.
+7. Horizon end auto-liquidates to SOL.
 8. Paper mode only if user explicitly asks (`trading_mode=paper`).
 
 Monitor every {HF_MONITOR_INTERVAL_SECONDS // 3600}h. Not financial advice.
@@ -708,7 +708,7 @@ def _format_live_pnl(pnl: dict[str, Any]) -> str:
     if pnl.get("hint"):
         lines.append(f"\n⚠️ {pnl['hint']}")
     elif pnl.get("expired") and pnl.get("status") == "active":
-        lines.append("\n⚠️ Horizon expired — say **liquidate " + str(pnl.get("strategy_id")) + "** to close to USDC.")
+        lines.append("\n⚠️ Horizon expired — say **liquidate " + str(pnl.get("strategy_id")) + "** to close to SOL.")
     return "\n".join(lines)
 
 
@@ -721,18 +721,18 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
 
     if is_paper:
         banner = (
-            "**PAPER strategy** (simulated fills — no real USDC is spent)\n\n"
-            "This proposal runs in paper mode only. To trade with **real deposited USDC**, "
+            "**PAPER strategy** (simulated fills — no real SOL is spent)\n\n"
+            "This proposal runs in paper mode only. To trade with **real deposited SOL**, "
             "say **create a live strategy** with the same assets — do not say “propose” or "
             "“confirm” on this paper sleeve.\n"
         )
         confirm_line = f"**Reply `confirm {sid}` to activate this paper strategy** (virtual fills)."
     else:
         banner = (
-            "**LIVE strategy** (real USDC — deposit to the Hedge Fund wallet before confirm)\n\n"
-            "After you confirm, the agent debits your USDC deposit and executes Jupiter swaps.\n"
+            "**LIVE strategy** (real SOL - deposit to the Hedge Fund wallet before confirm)\n\n"
+            "After you confirm, the agent debits your SOL deposit and executes Jupiter swaps.\n"
         )
-        confirm_line = f"**Reply `confirm {sid}` to deploy live Jupiter buys** (after depositing USDC)."
+        confirm_line = f"**Reply `confirm {sid}` to deploy live Jupiter buys** (after depositing SOL)."
 
     lines = [
         banner,
@@ -744,15 +744,15 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
             if result.get("open_ended") or not result.get("horizon_days")
             else f"{result.get('horizon_days')}d ({result.get('horizon_label')})"
         ),
-        f"- Capital sleeve: ${_fmt(result.get('capital_usd'))} USDC "
+        f"- Capital sleeve: ${_fmt(result.get('capital_usd'))} USD "
         f"(max ${_fmt(result.get('max_capital_usd') or HF_MAX_STRATEGY_USDC)})",
         f"- Symbols: {', '.join(result.get('symbols') or [])}",
-        f"- Trading: **{trading_mode or 'live'}** · funding: {result.get('funding_token') or 'USDC'}",
+        f"- Trading: **{trading_mode or 'live'}** · funding: {result.get('funding_token') or 'SOL'}",
     ]
     if is_paper:
         lines.append("- Paper mode: virtual portfolio only (not on-chain)")
     else:
-        lines.append("- Deposit USDC to the Hedge Fund wallet before confirm (1% fee on start)")
+        lines.append("- Deposit SOL to the Hedge Fund wallet before confirm (1% fee on start)")
     lines.extend(
         [
             "",
@@ -774,7 +774,7 @@ def _format_strategy_proposal(result: dict[str, Any]) -> str:
             lines.append("- (mint lookup pending — confirm still allowed; mints resolve on deploy)")
     lines.extend(
         [
-            f"- Liquidation: USDC `{result.get('usdc_mint')}` when horizon ends or you close (10% of profit)",
+            f"- Liquidation: SOL `{result.get('sol_mint') or result.get('usdc_mint')}` when horizon ends or you close (10% of profit)",
             "",
             confirm_line,
             "Or edit TP/SL / symbols / mint_overrides before confirming.",
@@ -1456,7 +1456,7 @@ def _try_paper_shortcut(
             require_confirm=True,
             deploy=False,
             trading_mode="live",
-            funding_token="USDC",
+            funding_token="SOL",
         )
         if result.get("error"):
             return f"**Could not propose strategy:** {result['error']}", [
