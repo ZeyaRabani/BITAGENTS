@@ -630,7 +630,7 @@ def init_db() -> None:
                 for stmt in MIGRATION_STATEMENTS:
                     cur.execute(stmt)
             _repair_bitagents_decimal_scale(conn)
-            _repair_dca_circle_ledger_migration(conn)
+            # _repair_dca_circle_ledger_migration(conn)  # Migration completed 2026-09-10
         _schema_ready = True
 
     if _import_done:
@@ -755,6 +755,12 @@ def _repair_bitagents_decimal_scale(conn) -> None:
 
 def _repair_dca_circle_ledger_migration(conn) -> None:
     """
+    [COMPLETED 2026-09-10] Circle DCA wallet ledger migration.
+    
+    This migration has been successfully completed and should NOT be run again.
+    Moved 30 transfers (60 ledger rows) from shared -> Circle wallets.
+    
+    Original purpose:
     Move ledger credits from shared DCA wallet -> Circle wallets for completed
     on-chain migration transfers (idempotent by signature).
 

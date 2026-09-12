@@ -499,6 +499,26 @@ def _user_plan_usage_from_plans(
     user_wallet: str,
     plans: list[dict[str, Any]],
 ) -> dict[str, dict[str, float]]:
+    # Filter plans when Circle is enabled: Since dca_plans doesn't have agent_wallet_address,
+    # we filter by creation time - only count plans created AFTER Circle wallet provisioning.
+    # Old shared-wallet plans shouldn't affect Circle balance.
+    allowed_wallets = _dca_balance_agent_wallets(user_wallet)
+    if allowed_wallets:
+        try:
+            from db import get_user_agent_wallet
+            circle_row = get_user_agent_wallet(user_wallet, "dca")
+            if circle_row and circle_row.get("created_at"):
+                circle_created = circle_row["created_at"]
+                # Only count plans created after Circle wallet was provisioned
+                plans = [
+                    p for p in plans
+                    if p.get("created_at") and p["created_at"] >= circle_created
+                ]
+        except Exception:
+            # If we can't determine Circle creation time, exclude all plans to be safe
+            # (prevents old shared wallet spend from affecting Circle balance)
+            plans = []
+    
     usage: dict[str, dict[str, float]] = {}
     for plan in plans:
         if plan.get("status") in ("cancelled",):
@@ -688,8 +708,24 @@ def get_user_token_spend_totals(user_wallet: str, token_symbol: str) -> dict[str
     deposited = ledger["deposited"]
     spent_ledger = ledger["spent_ledger"]
 
+    # Filter plans when Circle is enabled (same logic as _user_plan_usage_from_plans)
+    allowed_wallets = _dca_balance_agent_wallets(user_wallet)
+    all_plans = _load_plans(user_wallet)
+    if allowed_wallets:
+        try:
+            from db import get_user_agent_wallet
+            circle_row = get_user_agent_wallet(user_wallet, "dca")
+            if circle_row and circle_row.get("created_at"):
+                circle_created = circle_row["created_at"]
+                all_plans = [
+                    p for p in all_plans
+                    if p.get("created_at") and p["created_at"] >= circle_created
+                ]
+        except Exception:
+            all_plans = []
+    
     spent_plans = 0.0
-    for plan in _load_plans(user_wallet):
+    for plan in all_plans:
         if plan.get("status") == "cancelled":
             continue
         if str(plan.get("input_token", "")).upper() != token_symbol:
