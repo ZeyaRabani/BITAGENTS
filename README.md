@@ -1,6 +1,6 @@
 # BITAGENTS — DCA Agent
 
-**Create DCA bots with AI.**
+***Create DCA bots with AI.***
 
 Tell BITAGENTS what token to buy, how much to spend, and how often. The DCA
 Agent turns your message into a structured, recurring on-chain buy plan that you
