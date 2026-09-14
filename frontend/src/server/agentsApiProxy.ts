@@ -231,6 +231,24 @@ export async function proxyDcaChat(
   });
 }
 
+export async function proxyQuickSwapPreview(
+  body: { message: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/quick-swap/preview`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyQuickSwapExecute(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/quick-swap/execute`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+  });
+}
+
 export async function proxyDcaWalletAgent(authToken?: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/wallet/agent`, {
     cache: "no-store",

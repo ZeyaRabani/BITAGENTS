@@ -60,6 +60,7 @@ from hosted_llm import (
     CAPIX_READ_TIMEOUT_SECONDS,
     HOSTED_OLLAMA_BASE_URL,
     HOSTED_OLLAMA_MODEL,
+    call_llm,
     llm_configured,
     llm_provider,
     ping_llm as _ping_llm,
@@ -72,6 +73,7 @@ from dca_agent import (
     SCHEDULER_POLL_SECONDS,
     SOLANA_CLUSTER,
     SOLANA_RPC,
+    execute_swap_buy,
     get_dca_history,
     get_dca_plan,
     get_wallet_pubkey,
@@ -248,6 +250,25 @@ class ChatResponse(BaseModel):
     reply: str
     session_id: str
     actions: list[dict[str, Any]]
+
+
+class QuickSwapPreviewRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+class QuickSwapPreviewResponse(BaseModel):
+    confirm_text: str
+    input_token: str
+    output_token: str
+    amount: float
+
+
+class QuickSwapExecuteResponse(BaseModel):
+    status: str
+    signature: Optional[str] = None
+    explorer_url: Optional[str] = None
+    output_amount: Optional[float] = None
+    error: Optional[str] = None
 
 
 class DepositVerifyRequest(BaseModel):
@@ -751,6 +772,76 @@ def dca_chat(
 
     append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
     return ChatResponse(reply=reply, session_id=session_id, actions=actions)
+
+
+# ── Quick Swap MVP: one sentence -> one confirmed on-chain swap ─────────────
+# Fixed pair + fixed small size on purpose (demo scope): the AI's job here is
+# only to read intent and produce a plain-language confirmation, not to parse
+# the token or amount. Reuses dca_agent.execute_swap_buy, the same function
+# that already executes real DCA buys in production -- nothing new on the
+# on-chain side, only a one-shot (non-scheduled) entry point into it.
+QUICK_SWAP_INPUT_TOKEN = "SOL"
+QUICK_SWAP_OUTPUT_TOKEN = "BITAGENTS"
+QUICK_SWAP_SOL_AMOUNT = 0.005  # ~$1 at typical SOL prices; fixed for demo safety
+
+
+@app.post("/quick-swap/preview", response_model=QuickSwapPreviewResponse)
+def quick_swap_preview(
+    body: QuickSwapPreviewRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> QuickSwapPreviewResponse:
+    system_prompt = (
+        "You confirm a single fixed action for a crypto app: swapping "
+        f"{QUICK_SWAP_SOL_AMOUNT} {QUICK_SWAP_INPUT_TOKEN} for "
+        f"{QUICK_SWAP_OUTPUT_TOKEN} (about $1). The user will describe wanting "
+        "this swap in their own words. Reply with ONE short, friendly sentence "
+        "confirming exactly this action before it executes. Do not invent a "
+        "different token or amount -- the swap is fixed regardless of what the "
+        "user's wording implies."
+    )
+    response = call_llm(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": body.message.strip()},
+        ],
+        model=CAPIX_MODEL,
+        temperature=0.3,
+        app_suffix="quick_swap_preview",
+    )
+    confirm_text = ((response.get("message") or {}).get("content") or "").strip()
+    if not confirm_text:
+        confirm_text = (
+            f"I'll swap {QUICK_SWAP_SOL_AMOUNT} {QUICK_SWAP_INPUT_TOKEN} for "
+            f"{QUICK_SWAP_OUTPUT_TOKEN} (~$1). Confirm?"
+        )
+    return QuickSwapPreviewResponse(
+        confirm_text=confirm_text,
+        input_token=QUICK_SWAP_INPUT_TOKEN,
+        output_token=QUICK_SWAP_OUTPUT_TOKEN,
+        amount=QUICK_SWAP_SOL_AMOUNT,
+    )
+
+
+@app.post("/quick-swap/execute", response_model=QuickSwapExecuteResponse)
+def quick_swap_execute(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> QuickSwapExecuteResponse:
+    result = execute_swap_buy(
+        QUICK_SWAP_INPUT_TOKEN,
+        QUICK_SWAP_OUTPUT_TOKEN,
+        QUICK_SWAP_SOL_AMOUNT,
+        dry_run=False,
+        user_wallet=auth_wallet,
+    )
+    if result.get("error"):
+        return QuickSwapExecuteResponse(status="error", error=str(result["error"]))
+    signature = result.get("signature")
+    return QuickSwapExecuteResponse(
+        status=result.get("status", "success"),
+        signature=signature,
+        explorer_url=f"https://explorer.solana.com/tx/{signature}" if signature else None,
+        output_amount=result.get("output_amount"),
+    )
 
 
 @app.delete("/chat/{session_id}")
