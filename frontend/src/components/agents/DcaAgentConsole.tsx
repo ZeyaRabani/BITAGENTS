@@ -6,6 +6,7 @@ import { Panel } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DcaAgentDeposit } from "@/components/agents/DcaAgentDeposit";
 import { DcaPlanPanel } from "@/components/agents/DcaPlanPanel";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import { explorerUrlForSignature, findLatestConfirmationRequired, mergeTransactions, type ConfirmationDetails } from "@/lib/dcaActionResults";
 import { DCA_AGENT, DCA_EXAMPLE_PROMPTS } from "@/lib/dcaAgentSimulation";
 import {
@@ -252,6 +253,8 @@ export function DcaAgentConsole() {
   const [agentConfirmMessage, setAgentConfirmMessage] = useState<string | null>(null);
   const [agentConfirmDetails, setAgentConfirmDetails] = useState<ConfirmationDetails | undefined>();
   const [dataRefreshTick, setDataRefreshTick] = useState(0);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const actionsEndRef = useRef<HTMLDivElement>(null);
 
@@ -273,6 +276,9 @@ export function DcaAgentConsole() {
         },
       ]);
     });
+    // Load custom instructions from localStorage
+    const saved = localStorage.getItem("dca_custom_instructions");
+    if (saved) setCustomInstructions(saved);
   }, []);
 
   useEffect(() => {
@@ -283,6 +289,12 @@ export function DcaAgentConsole() {
     actionsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [actions]);
 
+  function onSaveInstructions(instructions: string) {
+    setCustomInstructions(instructions);
+    localStorage.setItem("dca_custom_instructions", instructions);
+    setInstructionsOpen(false);
+  }
+
   async function runCommand(command: string) {
     const trimmed = command.trim();
     if (!trimmed || busy) return;
@@ -291,13 +303,18 @@ export function DcaAgentConsole() {
       return;
     }
 
+    // Prepend custom instructions to user message if they exist
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${trimmed}`
+      : trimmed;
+
     setInput("");
     setBusy(true);
     setError(null);
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: trimmed }]);
 
     try {
-      const data = await sendDcaAgentMessage(trimmed, token, sessionId);
+      const data = await sendDcaAgentMessage(messageWithInstructions, token, sessionId);
       const mapped = mapApiActions(data.actions);
       const turnErrors = mapped.filter((a) => a.error).map((a) => a.error as string);
       const turnTxs = mapped.flatMap((a) => a.transactions);
@@ -432,7 +449,19 @@ export function DcaAgentConsole() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="Command · DCA Agent" className="lg:col-span-2">
+        <Panel 
+          title="Command · DCA Agent" 
+          className="lg:col-span-2"
+          action={
+            <button
+              type="button"
+              onClick={() => setInstructionsOpen(true)}
+              className="border border-grid bg-surface/40 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:border-signal/40 hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.map((msg) => (
               <div
@@ -577,6 +606,13 @@ export function DcaAgentConsole() {
           setAgentConfirmDetails(undefined);
           void runCommand("yes, confirm");
         }}
+      />
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
       />
     </div>
   );

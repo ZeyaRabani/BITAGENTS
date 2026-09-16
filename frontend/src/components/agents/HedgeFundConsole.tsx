@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
 import { HedgeFundDeposit } from "@/components/agents/HedgeFundDeposit";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import {
   addPaperStrategyCapital,
   analyzePaperAsset,
@@ -139,6 +140,8 @@ export function HedgeFundConsole() {
   const [lastRetryMsg, setLastRetryMsg] = useState<string | null>(null);
   const [liquidateStrategyId, setLiquidateStrategyId] = useState<string | null>(null);
   const [liquidateBusy, setLiquidateBusy] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const refreshDashboard = useCallback(async () => {
@@ -160,6 +163,9 @@ export function HedgeFundConsole() {
       setHealth(h);
       setAgentOnline(h?.status === "ok");
     });
+    // Load custom instructions from localStorage
+    const saved = localStorage.getItem("hedgefund_custom_instructions");
+    if (saved) setCustomInstructions(saved);
   }, []);
 
   useEffect(() => {
@@ -182,10 +188,16 @@ export function HedgeFundConsole() {
     if (!token || !text.trim()) return;
     setBusy(true);
     setError(null);
+    
+    // Prepend custom instructions to user message if they exist
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${text.trim()}`
+      : text.trim();
+    
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text.trim() }]);
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res = await sendHedgeFundMessage(text.trim(), token, sessionId, history);
+      const res = await sendHedgeFundMessage(messageWithInstructions, token, sessionId, history);
       setSessionId(res.session_id);
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: res.reply }]);
       setActions(mapHedgeFundActions(res.actions));
@@ -197,6 +209,12 @@ export function HedgeFundConsole() {
     } finally {
       setBusy(false);
     }
+  }
+
+  function onSaveInstructions(instructions: string) {
+    setCustomInstructions(instructions);
+    localStorage.setItem("hedgefund_custom_instructions", instructions);
+    setInstructionsOpen(false);
   }
 
   function onSubmit(e: FormEvent) {
@@ -924,7 +942,19 @@ export function HedgeFundConsole() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title={HEDGE_FUND.name} className="lg:col-span-2">
+        <Panel 
+          title={HEDGE_FUND.name} 
+          className="lg:col-span-2"
+          action={
+            <button
+              type="button"
+              onClick={() => setInstructionsOpen(true)}
+              className="border border-grid bg-surface/40 px-3 py-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground hover:border-signal/40 hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
@@ -1058,6 +1088,13 @@ export function HedgeFundConsole() {
         onConfirm={() => {
           if (liquidateStrategyId) return onLiquidate(liquidateStrategyId);
         }}
+      />
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
       />
     </div>
   );
