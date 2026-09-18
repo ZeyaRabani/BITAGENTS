@@ -761,4 +761,28 @@ export async function proxyVolumeResolveToken(query: string): Promise<Response> 
   return proxyDcaResolveToken(query);
 }
 
+export async function proxyGetCustomInstructions(
+  agentType: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/v1/custom-instructions/${encodeURIComponent(agentType)}`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxySaveCustomInstructions(
+  body: { agent_type: string; instructions: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/v1/custom-instructions`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export { getAuthToken, getAgentsBaseUrl, buildHeaders };
