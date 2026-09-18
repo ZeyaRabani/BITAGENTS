@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import { VolumeAgentDeposit } from "@/components/agents/VolumeAgentDeposit";
 import { VolumeCampaignPanel } from "@/components/agents/VolumeCampaignPanel";
 import { VOLUME_AGENT, VOLUME_EXAMPLE_PROMPTS } from "@/lib/volumeAgentSimulation";
@@ -19,6 +20,7 @@ import { useVolumeWalletAuth } from "@/hooks/useVolumeWalletAuth";
 import { explorerUrlForSignature } from "@/lib/dcaActionResults";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { UserDepositBalances } from "@/lib/volumeWalletClient";
+import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
 
 const BITAGENTS_MINT = "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY";
 
@@ -162,11 +164,21 @@ export function VolumeAgentConsole() {
   const [campaignBusy, setCampaignBusy] = useState(false);
   const [campaignError, setCampaignError] = useState<string | null>(null);
   const [campaignSuccess, setCampaignSuccess] = useState<string | null>(null);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const actionsEndRef = useRef<HTMLDivElement>(null);
 
   const cluster = health?.cluster;
+
+  useEffect(() => {
+    if (token) {
+      void getCustomInstructions("volume", token)
+        .then((instr) => setCustomInstructions(instr))
+        .catch((err) => console.error("Failed to load custom instructions:", err));
+    }
+  }, [token]);
 
   useEffect(() => {
     void fetchVolumeAgentHealth().then((h) => {
@@ -203,10 +215,13 @@ export function VolumeAgentConsole() {
     setInput("");
     setBusy(true);
     setError(null);
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${trimmed}`
+      : trimmed;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: trimmed }]);
 
     try {
-      const res = await sendVolumeAgentMessage(trimmed, token, sessionId);
+      const res = await sendVolumeAgentMessage(messageWithInstructions, token, sessionId);
       const mapped = mapVolumeApiActions(res.actions ?? []);
       const turnErrors = mapped.filter((a) => a.error).map((a) => a.error as string);
       const turnTxs = mapped.flatMap((a) => a.transactions);
@@ -251,6 +266,18 @@ export function VolumeAgentConsole() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     void runCommand(input);
+  }
+
+  async function onSaveInstructions(instructions: string) {
+    if (!token) return;
+    try {
+      await saveCustomInstructions("volume", instructions, token);
+      setCustomInstructions(instructions);
+      setInstructionsOpen(false);
+    } catch (err) {
+      console.error("Failed to save custom instructions:", err);
+      alert("Failed to save custom instructions. Please try again.");
+    }
   }
 
   async function handleCreateCampaign(e: FormEvent) {
@@ -353,7 +380,18 @@ export function VolumeAgentConsole() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="Command · Volume Agent" className="lg:col-span-2">
+        <Panel 
+          title="Command · Volume Agent" 
+          className="lg:col-span-2"
+          action={
+            <button
+              onClick={() => setInstructionsOpen(true)}
+              className="rounded border border-grid bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wider transition hover:border-signal hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-105 flex-col gap-4 overflow-y-auto pr-1">
             {messages.map((msg) => (
               <div
@@ -540,6 +578,13 @@ export function VolumeAgentConsole() {
           onCampaignChange={() => setRefreshTick((t) => t + 1)}
         />
       )}
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
+      />
     </div>
   );
 }

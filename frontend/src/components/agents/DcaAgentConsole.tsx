@@ -6,6 +6,7 @@ import { Panel } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { DcaAgentDeposit } from "@/components/agents/DcaAgentDeposit";
 import { DcaPlanPanel } from "@/components/agents/DcaPlanPanel";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import { explorerUrlForSignature, findLatestConfirmationRequired, mergeTransactions, type ConfirmationDetails } from "@/lib/dcaActionResults";
 import { DCA_AGENT, DCA_EXAMPLE_PROMPTS } from "@/lib/dcaAgentSimulation";
 import {
@@ -19,6 +20,7 @@ import {
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { UserDepositBalances } from "@/lib/dcaWalletClient";
+import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
 
 type ChatMessage = {
   id: string;
@@ -252,6 +254,8 @@ export function DcaAgentConsole() {
   const [agentConfirmMessage, setAgentConfirmMessage] = useState<string | null>(null);
   const [agentConfirmDetails, setAgentConfirmDetails] = useState<ConfirmationDetails | undefined>();
   const [dataRefreshTick, setDataRefreshTick] = useState(0);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const actionsEndRef = useRef<HTMLDivElement>(null);
 
@@ -276,6 +280,14 @@ export function DcaAgentConsole() {
   }, []);
 
   useEffect(() => {
+    if (token) {
+      void getCustomInstructions("dca", token)
+        .then((instr) => setCustomInstructions(instr))
+        .catch((err) => console.error("Failed to load custom instructions:", err));
+    }
+  }, [token]);
+
+  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
 
@@ -294,10 +306,14 @@ export function DcaAgentConsole() {
     setInput("");
     setBusy(true);
     setError(null);
+
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${trimmed}`
+      : trimmed;
     setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: trimmed }]);
 
     try {
-      const data = await sendDcaAgentMessage(trimmed, token, sessionId);
+      const data = await sendDcaAgentMessage(messageWithInstructions, token, sessionId);
       const mapped = mapApiActions(data.actions);
       const turnErrors = mapped.filter((a) => a.error).map((a) => a.error as string);
       const turnTxs = mapped.flatMap((a) => a.transactions);
@@ -348,6 +364,18 @@ export function DcaAgentConsole() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     void runCommand(input);
+  }
+
+  async function onSaveInstructions(instructions: string) {
+    if (!token) return;
+    try {
+      await saveCustomInstructions("dca", instructions, token);
+      setCustomInstructions(instructions);
+      setInstructionsOpen(false);
+    } catch (err) {
+      console.error("Failed to save custom instructions:", err);
+      alert("Failed to save custom instructions. Please try again.");
+    }
   }
 
   return (
@@ -432,7 +460,18 @@ export function DcaAgentConsole() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="Command · DCA Agent" className="lg:col-span-2">
+        <Panel 
+          title="Command · DCA Agent" 
+          className="lg:col-span-2"
+          action={
+            <button
+              onClick={() => setInstructionsOpen(true)}
+              className="rounded border border-grid bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wider transition hover:border-signal hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.map((msg) => (
               <div
@@ -577,6 +616,13 @@ export function DcaAgentConsole() {
           setAgentConfirmDetails(undefined);
           void runCommand("yes, confirm");
         }}
+      />
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
       />
     </div>
   );

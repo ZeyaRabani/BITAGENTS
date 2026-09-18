@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import {
   fetchKickstartHealth,
   mapKickstartActions,
@@ -16,6 +17,7 @@ import { EasyaOrderPanel } from "@/components/agents/EasyaOrderPanel";
 import type { AgentAction } from "@/lib/dcaAgentClient";
 import { findLatestConfirmationRequired, type ConfirmationDetails } from "@/lib/dcaActionResults";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
 
 type ChatMessage = {
   id: string;
@@ -252,6 +254,8 @@ export function KickstartCopilotConsole() {
   const [agentConfirmOpen, setAgentConfirmOpen] = useState(false);
   const [agentConfirmMessage, setAgentConfirmMessage] = useState<string | null>(null);
   const [agentConfirmDetails, setAgentConfirmDetails] = useState<ConfirmationDetails | undefined>();
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const actionsEndRef = useRef<HTMLDivElement>(null);
 
@@ -261,6 +265,14 @@ export function KickstartCopilotConsole() {
       setAgentOnline(h?.status === "ok");
     });
   }, []);
+
+  useEffect(() => {
+    if (token) {
+      void getCustomInstructions("easya", token)
+        .then((instr) => setCustomInstructions(instr))
+        .catch((err) => console.error("Failed to load custom instructions:", err));
+    }
+  }, [token]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -274,11 +286,15 @@ export function KickstartCopilotConsole() {
     if (!token || !text.trim()) return;
     setBusy(true);
     setError(null);
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text.trim() }]);
+    const trimmed = text.trim();
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${trimmed}`
+      : trimmed;
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: trimmed }]);
 
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res = await sendKickstartMessage(text.trim(), token, sessionId, history);
+      const res = await sendKickstartMessage(messageWithInstructions, token, sessionId, history);
       setSessionId(res.session_id);
       setMessages((prev) => [
         ...prev,
@@ -312,6 +328,18 @@ export function KickstartCopilotConsole() {
     if (!text) return;
     setInput("");
     void runCommand(text);
+  }
+
+  async function onSaveInstructions(instructions: string) {
+    if (!token) return;
+    try {
+      await saveCustomInstructions("easya", instructions, token);
+      setCustomInstructions(instructions);
+      setInstructionsOpen(false);
+    } catch (err) {
+      console.error("Failed to save custom instructions:", err);
+      alert("Failed to save custom instructions. Please try again.");
+    }
   }
 
   return (
@@ -367,7 +395,18 @@ export function KickstartCopilotConsole() {
       )}
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title="EasyA Analysis Agent" className="lg:col-span-2">
+        <Panel 
+          title="EasyA Analysis Agent" 
+          className="lg:col-span-2"
+          action={
+            <button
+              onClick={() => setInstructionsOpen(true)}
+              className="rounded border border-grid bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wider transition hover:border-signal hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
@@ -495,6 +534,13 @@ export function KickstartCopilotConsole() {
           setAgentConfirmDetails(undefined);
           void runCommand("yes, confirm");
         }}
+      />
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
       />
     </div>
   );

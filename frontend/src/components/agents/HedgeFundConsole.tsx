@@ -5,6 +5,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
 import { HedgeFundDeposit } from "@/components/agents/HedgeFundDeposit";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import {
   addPaperStrategyCapital,
   analyzePaperAsset,
@@ -28,6 +29,7 @@ import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import type { AgentAction } from "@/lib/dcaAgentClient";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { HfUserDepositBalances } from "@/lib/hedgeFundWalletClient";
+import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string };
 
@@ -139,6 +141,8 @@ export function HedgeFundConsole() {
   const [lastRetryMsg, setLastRetryMsg] = useState<string | null>(null);
   const [liquidateStrategyId, setLiquidateStrategyId] = useState<string | null>(null);
   const [liquidateBusy, setLiquidateBusy] = useState(false);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const refreshDashboard = useCallback(async () => {
@@ -163,6 +167,14 @@ export function HedgeFundConsole() {
   }, []);
 
   useEffect(() => {
+    if (token) {
+      void getCustomInstructions("hedge_fund", token)
+        .then((instr) => setCustomInstructions(instr))
+        .catch((err) => console.error("Failed to load custom instructions:", err));
+    }
+  }, [token]);
+
+  useEffect(() => {
     if (token) void refreshDashboard();
   }, [token, refreshDashboard]);
 
@@ -182,10 +194,14 @@ export function HedgeFundConsole() {
     if (!token || !text.trim()) return;
     setBusy(true);
     setError(null);
-    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text.trim() }]);
+    const trimmed = text.trim();
+    const messageWithInstructions = customInstructions.trim()
+      ? `[Custom Instructions: ${customInstructions.trim()}]\n\n${trimmed}`
+      : trimmed;
+    setMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: trimmed }]);
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const res = await sendHedgeFundMessage(text.trim(), token, sessionId, history);
+      const res = await sendHedgeFundMessage(messageWithInstructions, token, sessionId, history);
       setSessionId(res.session_id);
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: res.reply }]);
       setActions(mapHedgeFundActions(res.actions));
@@ -196,6 +212,18 @@ export function HedgeFundConsole() {
       setMessages((prev) => [...prev, { id: `e-${Date.now()}`, role: "assistant", content: msg }]);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onSaveInstructions(instructions: string) {
+    if (!token) return;
+    try {
+      await saveCustomInstructions("hedge_fund", instructions, token);
+      setCustomInstructions(instructions);
+      setInstructionsOpen(false);
+    } catch (err) {
+      console.error("Failed to save custom instructions:", err);
+      alert("Failed to save custom instructions. Please try again.");
     }
   }
 
@@ -924,7 +952,18 @@ export function HedgeFundConsole() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Panel title={HEDGE_FUND.name} className="lg:col-span-2">
+        <Panel 
+          title={HEDGE_FUND.name} 
+          className="lg:col-span-2"
+          action={
+            <button
+              onClick={() => setInstructionsOpen(true)}
+              className="rounded border border-grid bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wider transition hover:border-signal hover:text-signal"
+            >
+              Instructions
+            </button>
+          }
+        >
           <div className="flex max-h-[420px] flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
@@ -1058,6 +1097,13 @@ export function HedgeFundConsole() {
         onConfirm={() => {
           if (liquidateStrategyId) return onLiquidate(liquidateStrategyId);
         }}
+      />
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
       />
     </div>
   );

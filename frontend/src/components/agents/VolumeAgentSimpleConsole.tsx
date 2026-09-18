@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Panel } from "@/components/AppShell";
+import { InstructionsDialog } from "@/components/agents/InstructionsDialog";
 import { VolumeAgentDeposit } from "@/components/agents/VolumeAgentDeposit";
 import { VolumeCampaignPanel } from "@/components/agents/VolumeCampaignPanel";
 import { VOLUME_AGENT } from "@/lib/volumeAgentSimulation";
 import { fetchVolumeAgentHealth, type VolumeAgentHealth } from "@/lib/volumeAgentClient";
 import { createVolumeCampaign } from "@/lib/volumePlanClient";
 import { useVolumeWalletAuth } from "@/hooks/useVolumeWalletAuth";
+import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
 
 const BITAGENTS_MINT = "iu3A7azWTm3zQSk81SUC1JctB4zPYnxLmcmqq71EASY";
 
@@ -60,12 +62,22 @@ export function VolumeAgentSimpleConsole() {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [instructionsOpen, setInstructionsOpen] = useState(false);
+  const [customInstructions, setCustomInstructions] = useState("");
 
   const cluster = health?.cluster;
 
   useEffect(() => {
     void fetchVolumeAgentHealth().then(setHealth);
   }, []);
+
+  useEffect(() => {
+    if (token) {
+      void getCustomInstructions("bitagents_volume", token)
+        .then((instr) => setCustomInstructions(instr))
+        .catch((err) => console.error("Failed to load custom instructions:", err));
+    }
+  }, [token]);
 
   async function startCampaign(preset: Preset) {
     if (!token) return;
@@ -90,6 +102,18 @@ export function VolumeAgentSimpleConsole() {
       setError(err instanceof Error ? err.message : "Could not start campaign");
     } finally {
       setBusyKey(null);
+    }
+  }
+
+  async function onSaveInstructions(instructions: string) {
+    if (!token) return;
+    try {
+      await saveCustomInstructions("bitagents_volume", instructions, token);
+      setCustomInstructions(instructions);
+      setInstructionsOpen(false);
+    } catch (err) {
+      console.error("Failed to save custom instructions:", err);
+      alert("Failed to save custom instructions. Please try again.");
     }
   }
 
@@ -139,7 +163,17 @@ export function VolumeAgentSimpleConsole() {
         </div>
       )}
 
-      <Panel title="Start a BITAGENTS volume campaign">
+      <Panel 
+        title="Start a BITAGENTS volume campaign"
+        action={
+          <button
+            onClick={() => setInstructionsOpen(true)}
+            className="rounded border border-grid bg-surface px-3 py-1.5 text-xs font-medium uppercase tracking-wider transition hover:border-signal hover:text-signal"
+          >
+            Instructions
+          </button>
+        }
+      >
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Pick a size. Each option buys and sells BITAGENTS with your deposited SOL on a timer — no
@@ -180,6 +214,13 @@ export function VolumeAgentSimpleConsole() {
           onCampaignChange={() => setRefreshTick((t) => t + 1)}
         />
       )}
+
+      <InstructionsDialog
+        open={instructionsOpen}
+        onOpenChange={setInstructionsOpen}
+        instructions={customInstructions}
+        onSave={onSaveInstructions}
+      />
     </div>
   );
 }

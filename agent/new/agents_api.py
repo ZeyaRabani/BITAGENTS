@@ -43,10 +43,12 @@ from db import (
     assert_chat_session_access,
     db_configured,
     delete_chat_session,
+    get_custom_instructions,
     get_platform_metrics,
     init_db,
     list_watchlist,
     load_chat_history,
+    save_custom_instructions,
 )
 from hosted_llm import (
     CAPIX_API_URL,
@@ -788,6 +790,38 @@ def kickstart_watchlist(
     auth_wallet: str = Depends(require_wallet_session),
 ) -> dict[str, Any]:
     return list_watchlist(auth_wallet)
+
+
+class CustomInstructionsRequest(BaseModel):
+    agent_type: str = Field(min_length=1, max_length=32)
+    instructions: str = Field(max_length=10000)
+
+
+@app.get("/v1/custom-instructions/{agent_type}")
+def get_user_custom_instructions(
+    agent_type: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Get custom instructions for a specific agent."""
+    instructions = get_custom_instructions(auth_wallet, agent_type)
+    return {
+        "agent_type": agent_type,
+        "instructions": instructions or "",
+    }
+
+
+@app.post("/v1/custom-instructions")
+def save_user_custom_instructions(
+    req: CustomInstructionsRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Save custom instructions for a specific agent."""
+    result = save_custom_instructions(auth_wallet, req.agent_type, req.instructions)
+    return {
+        "success": True,
+        "agent_type": req.agent_type,
+        "instructions": result.get("instructions", ""),
+    }
 
 
 @app.get("/kickstart/tokens")

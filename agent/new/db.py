@@ -186,6 +186,18 @@ SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_user_watchlists_wallet ON user_watchlists (user_wallet)",
     """
+    CREATE TABLE IF NOT EXISTS user_custom_instructions (
+        id              SERIAL PRIMARY KEY,
+        user_wallet     VARCHAR(64) NOT NULL,
+        agent_type      VARCHAR(32) NOT NULL,
+        instructions    TEXT NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (user_wallet, agent_type)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_user_custom_instructions_user ON user_custom_instructions (user_wallet)",
+    """
     CREATE TABLE IF NOT EXISTS easya_orders (
         id              VARCHAR(16) PRIMARY KEY,
         user_wallet     VARCHAR(64) NOT NULL,
@@ -1925,3 +1937,50 @@ def save_dca_user_agent_wallet(record: dict[str, Any]) -> dict[str, Any]:
     payload = dict(record)
     payload["agent_type"] = "dca"
     return save_user_agent_wallet(payload)
+
+
+def get_custom_instructions(user_wallet: str, agent_type: str) -> Optional[str]:
+    """Get custom instructions for a specific agent type and user."""
+    init_db()
+    wallet = (user_wallet or "").strip()
+    agent = (agent_type or "").strip().lower()
+    if not wallet or not agent:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT instructions
+                FROM user_custom_instructions
+                WHERE user_wallet = %s AND agent_type = %s
+                """,
+                (wallet, agent),
+            )
+            row = cur.fetchone()
+    return row["instructions"] if row else None
+
+
+def save_custom_instructions(user_wallet: str, agent_type: str, instructions: str) -> dict[str, Any]:
+    """Save custom instructions for a specific agent type and user."""
+    init_db()
+    wallet = (user_wallet or "").strip()
+    agent = (agent_type or "").strip().lower()
+    instr = (instructions or "").strip()
+    if not wallet or not agent:
+        raise ValueError("user_wallet and agent_type are required")
+    
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO user_custom_instructions (user_wallet, agent_type, instructions, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (user_wallet, agent_type) DO UPDATE SET
+                    instructions = EXCLUDED.instructions,
+                    updated_at = NOW()
+                RETURNING id, user_wallet, agent_type, instructions, created_at, updated_at
+                """,
+                (wallet, agent, instr),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else {}
