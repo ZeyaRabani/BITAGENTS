@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Callable, Optional
 
-from hosted_llm import call_llm
+from hosted_llm import call_llm as _default_call_llm
 
 ToolFn = Callable[..., Any]
 
@@ -52,7 +52,13 @@ def run_tool_agent(
     user_wallet: Optional[str] = None,
     session_id: Optional[str] = None,
     max_rounds: int = 10,
+    llm_call: Optional[Callable[..., dict[str, Any]]] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
+    """`llm_call` overrides the default CapIX-first `call_llm` router for
+    this run only -- e.g. agent_builder.py passes `call_openrouter` directly
+    to bypass the platform-wide CapIX model lock for just that one agent.
+    Every other caller is unaffected."""
+    call = llm_call or _default_call_llm
     actions: list[dict[str, Any]] = []
     prompt = user_input.strip()
     if user_wallet:
@@ -65,7 +71,7 @@ def run_tool_agent(
     run_started = time.time()
     for round_num in range(1, max_rounds + 1):
         round_started = time.time()
-        response = call_llm(
+        response = call(
             messages,
             model=model,
             tools=tools,

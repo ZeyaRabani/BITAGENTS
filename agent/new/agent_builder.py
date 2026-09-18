@@ -19,7 +19,13 @@ from typing import Any, Optional
 import db
 from agent_tool_runner import run_tool_agent
 from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
+from hosted_llm import call_openrouter
 
+# Routed directly through OpenRouter (bypassing the shared CapIX-first
+# call_llm router) because the platform-locked CapIX model doesn't reliably
+# call the tools that actually persist a launched agent -- see
+# MARKETPLACE_TESTING_STATUS.md. Scoped to this one agent only; every other
+# agent still uses CapIX exactly as before.
 BUILDER_MODEL = "openai/gpt-4o-mini"
 
 CATEGORIES = ("Trading", "Research", "Monitoring", "Utility")
@@ -30,6 +36,14 @@ def _build_system_prompt() -> str:
 on the marketplace by having a natural, open-ended conversation. You are not a form; do not \
 demand fields in a fixed order. Ask whatever follow-up questions make sense given what they've \
 told you so far.
+
+CRITICAL, before anything else: talking about a field is not the same as setting it. If the \
+user's message gives you ANY new concrete detail (a name, an amount, a rule, a confirmation), \
+you MUST call the matching tool in that SAME reply, not just acknowledge it in prose and move on. \
+Never end a turn having only described what you would do — actually do it via a tool call. \
+Specifically: if the user's message is a confirmation (e.g. "yes", "confirm", "launch it") and \
+you have already shown them a draft via show_draft, you MUST call finalize_and_launch in that \
+exact turn — do not ask another clarifying question instead of finalizing.
 
 Your job across the conversation:
 1. Understand what the agent should actually do — its purpose, what it watches/researches/trades, \
@@ -240,4 +254,5 @@ def run_builder_agent(
         model=BUILDER_MODEL,
         app_suffix="agent-builder",
         session_id=session_id,
+        llm_call=call_openrouter,
     )
