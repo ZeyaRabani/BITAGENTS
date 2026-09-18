@@ -263,6 +263,30 @@ SCHEMA_STATEMENTS = [
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # MVP for the marketplace background-execution experiment: proves an
+    # agent can keep watching something after its chat session ends, using
+    # the same stateless-cron pattern as api/cron/tick.py (claim, act, exit
+    # -- nothing held in memory between invocations).
+    """
+    CREATE TABLE IF NOT EXISTS btc_price_alerts (
+        id                  VARCHAR(32) PRIMARY KEY,
+        threshold_pct       DOUBLE PRECISION NOT NULL,
+        baseline_price_usd  DOUBLE PRECISION,
+        last_checked_at     TIMESTAMPTZ,
+        last_alert_price    DOUBLE PRECISION,
+        last_alert_at       TIMESTAMPTZ,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS btc_price_alert_log (
+        id          BIGSERIAL PRIMARY KEY,
+        alert_id    VARCHAR(32) NOT NULL REFERENCES btc_price_alerts (id) ON DELETE CASCADE,
+        price_usd   DOUBLE PRECISION NOT NULL,
+        change_pct  DOUBLE PRECISION NOT NULL,
+        fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 MIGRATION_STATEMENTS = [
@@ -628,6 +652,93 @@ def claim_due_dca_plans(limit: int = 25, lease_seconds: int = 180) -> list[dict[
             )
             rows = cur.fetchall()
     return [_plan_row_to_dict(row) for row in rows]
+
+
+def create_btc_price_alert(threshold_pct: float) -> dict[str, Any]:
+    init_db()
+    alert_id = str(uuid.uuid4())[:8]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO btc_price_alerts (id, threshold_pct)
+                VALUES (%s, %s)
+                RETURNING *
+                """,
+                (alert_id, threshold_pct),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_btc_price_alert(alert_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM btc_price_alerts WHERE id = %s", (alert_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def update_btc_price_alert_check(
+    alert_id: str,
+    *,
+    price_usd: float,
+    baseline_price_usd: Optional[float] = None,
+    fired: bool = False,
+) -> None:
+    """Record a check; if `fired`, also stamp the alert-fired fields and log a row."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if baseline_price_usd is not None:
+                cur.execute(
+                    """
+                    UPDATE btc_price_alerts
+                    SET last_checked_at = NOW(), baseline_price_usd = %s
+                    WHERE id = %s
+                    """,
+                    (baseline_price_usd, alert_id),
+                )
+            else:
+                cur.execute(
+                    "UPDATE btc_price_alerts SET last_checked_at = NOW() WHERE id = %s",
+                    (alert_id,),
+                )
+            if fired:
+                cur.execute(
+                    """
+                    UPDATE btc_price_alerts
+                    SET last_alert_price = %s, last_alert_at = NOW(), baseline_price_usd = %s
+                    WHERE id = %s
+                    """,
+                    (price_usd, price_usd, alert_id),
+                )
+
+
+def log_btc_price_alert_fire(alert_id: str, price_usd: float, change_pct: float) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO btc_price_alert_log (alert_id, price_usd, change_pct)
+                VALUES (%s, %s, %s)
+                """,
+                (alert_id, price_usd, change_pct),
+            )
+
+
+def list_btc_price_alert_log(alert_id: str) -> list[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM btc_price_alert_log WHERE alert_id = %s ORDER BY fired_at ASC",
+                (alert_id,),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 def find_plan(plan_id: str) -> Optional[dict[str, Any]]:
