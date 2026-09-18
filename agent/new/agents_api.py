@@ -40,17 +40,21 @@ from deposit_ledger import (
 from db import (
     append_chat_messages,
     assert_chat_session_access,
+    create_btc_price_alert,
     create_draft_agent,
     db_configured,
     delete_chat_session,
+    get_btc_price_alert,
     get_custom_agent,
     get_draft_agent_by_session,
     get_platform_metrics,
     init_db,
+    list_btc_price_alert_log,
     list_custom_agents,
     list_watchlist,
     load_chat_history,
 )
+from btc_price_alert import check_btc_price_alert
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -430,6 +434,32 @@ def health_llm() -> dict[str, Any]:
         }
     result = _ping_llm()
     return {"provider": llm_provider(), **result}
+
+
+# ── BTC Price Alert MVP: local-test-only endpoints, no auth ────────────────
+# Proof-of-concept for the marketplace background-execution experiment. Not
+# wired to any cron trigger yet -- call /check yourself to simulate one tick.
+@app.post("/btc-alert/create")
+def btc_alert_create(threshold_pct: float = Query(1.0)) -> dict[str, Any]:
+    return create_btc_price_alert(threshold_pct)
+
+
+@app.get("/btc-alert/{alert_id}")
+def btc_alert_get(alert_id: str) -> dict[str, Any]:
+    alert = get_btc_price_alert(alert_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="No such alert")
+    return alert
+
+
+@app.post("/btc-alert/{alert_id}/check")
+def btc_alert_check(alert_id: str) -> dict[str, Any]:
+    return check_btc_price_alert(alert_id)
+
+
+@app.get("/btc-alert/{alert_id}/log")
+def btc_alert_log(alert_id: str) -> dict[str, Any]:
+    return {"log": list_btc_price_alert_log(alert_id)}
 
 
 @app.get("/kickstart/health")
