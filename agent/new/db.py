@@ -198,6 +198,47 @@ SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_user_custom_instructions_user ON user_custom_instructions (user_wallet)",
     """
+    CREATE TABLE IF NOT EXISTS launched_agents (
+        id              VARCHAR(16) PRIMARY KEY,
+        user_wallet     VARCHAR(64) NOT NULL,
+        name            TEXT NOT NULL,
+        description     TEXT NOT NULL DEFAULT '',
+        task            TEXT NOT NULL,
+        modules         JSONB NOT NULL DEFAULT '[]'::jsonb,
+        visibility      VARCHAR(16) NOT NULL DEFAULT 'private',
+        price_per_month_sol DOUBLE PRECISION,
+        fee_sol         DOUBLE PRECISION NOT NULL DEFAULT 1,
+        fee_signature   VARCHAR(128) NOT NULL UNIQUE,
+        fee_wallet      VARCHAR(64) NOT NULL,
+        status          VARCHAR(20) NOT NULL DEFAULT 'active',
+        explorer_url    TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_launched_agents_user ON launched_agents (user_wallet)",
+    "CREATE INDEX IF NOT EXISTS idx_launched_agents_signature ON launched_agents (fee_signature)",
+    "CREATE INDEX IF NOT EXISTS idx_launched_agents_visibility ON launched_agents (visibility)",
+    "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'private'",
+    "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS price_per_month_sol DOUBLE PRECISION",
+    """
+    CREATE TABLE IF NOT EXISTS agent_subscriptions (
+        id                VARCHAR(16) PRIMARY KEY,
+        agent_id          VARCHAR(16) NOT NULL,
+        buyer_wallet      VARCHAR(64) NOT NULL,
+        seller_wallet     VARCHAR(64) NOT NULL,
+        price_sol         DOUBLE PRECISION NOT NULL,
+        payment_signature VARCHAR(128) NOT NULL UNIQUE,
+        status            VARCHAR(20) NOT NULL DEFAULT 'active',
+        starts_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at        TIMESTAMPTZ NOT NULL,
+        explorer_url      TEXT,
+        created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_buyer ON agent_subscriptions (buyer_wallet)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_seller ON agent_subscriptions (seller_wallet)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_agent ON agent_subscriptions (agent_id)",
+    """
     CREATE TABLE IF NOT EXISTS easya_orders (
         id              VARCHAR(16) PRIMARY KEY,
         user_wallet     VARCHAR(64) NOT NULL,
@@ -1984,3 +2025,319 @@ def save_custom_instructions(user_wallet: str, agent_type: str, instructions: st
             )
             row = cur.fetchone()
     return dict(row) if row else {}
+
+
+def _launched_agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    modules = row.get("modules") or []
+    if isinstance(modules, str):
+        modules = json.loads(modules)
+    price = row.get("price_per_month_sol")
+    return {
+        "id": row["id"],
+        "user_wallet": row["user_wallet"],
+        "name": row["name"],
+        "description": row.get("description") or "",
+        "task": row["task"],
+        "modules": list(modules) if isinstance(modules, (list, tuple)) else [],
+        "visibility": (row.get("visibility") or "private").lower(),
+        "price_per_month_sol": float(price) if price is not None else None,
+        "fee_sol": float(row.get("fee_sol") or 0),
+        "fee_signature": row["fee_signature"],
+        "fee_wallet": row["fee_wallet"],
+        "status": row.get("status") or "active",
+        "explorer_url": row.get("explorer_url"),
+        "created_at": _iso(row.get("created_at")),
+    }
+
+
+def get_launched_agent_by_signature(signature: str) -> Optional[dict[str, Any]]:
+    init_db()
+    sig = (signature or "").strip()
+    if not sig:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM launched_agents WHERE fee_signature = %s",
+                (sig,),
+            )
+            row = cur.fetchone()
+    return _launched_agent_row_to_dict(row) if row else None
+
+
+def list_launched_agents(user_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+    wallet = (user_wallet or "").strip()
+    if not wallet:
+        return []
+    lim = max(1, min(int(limit or 50), 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM launched_agents
+                WHERE user_wallet = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (wallet, lim),
+            )
+            rows = cur.fetchall()
+    return [_launched_agent_row_to_dict(row) for row in rows]
+
+
+def list_public_launched_agents(limit: int = 100) -> list[dict[str, Any]]:
+    init_db()
+    lim = max(1, min(int(limit or 100), 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM launched_agents
+                WHERE visibility = 'public' AND status = 'active'
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (lim,),
+            )
+            rows = cur.fetchall()
+    return [_launched_agent_row_to_dict(row) for row in rows]
+
+
+def get_launched_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    aid = (agent_id or "").strip()
+    if not aid:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM launched_agents WHERE id = %s", (aid,))
+            row = cur.fetchone()
+    return _launched_agent_row_to_dict(row) if row else None
+
+
+def create_launched_agent(record: dict[str, Any]) -> dict[str, Any]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO launched_agents (
+                    id, user_wallet, name, description, task, modules,
+                    visibility, price_per_month_sol,
+                    fee_sol, fee_signature, fee_wallet, status, explorer_url
+                ) VALUES (
+                    %(id)s, %(user_wallet)s, %(name)s, %(description)s, %(task)s, %(modules)s,
+                    %(visibility)s, %(price_per_month_sol)s,
+                    %(fee_sol)s, %(fee_signature)s, %(fee_wallet)s, %(status)s, %(explorer_url)s
+                )
+                RETURNING *
+                """,
+                {
+                    "id": record["id"],
+                    "user_wallet": record["user_wallet"],
+                    "name": record["name"],
+                    "description": record.get("description") or "",
+                    "task": record["task"],
+                    "modules": Json(record.get("modules") or []),
+                    "visibility": (record.get("visibility") or "private").lower(),
+                    "price_per_month_sol": record.get("price_per_month_sol"),
+                    "fee_sol": float(record.get("fee_sol") or 1),
+                    "fee_signature": record["fee_signature"],
+                    "fee_wallet": record["fee_wallet"],
+                    "status": record.get("status") or "active",
+                    "explorer_url": record.get("explorer_url"),
+                },
+            )
+            row = cur.fetchone()
+    if not row:
+        raise RuntimeError("Failed to persist launched agent.")
+    return _launched_agent_row_to_dict(row)
+
+
+def _subscription_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
+    modules = row.get("agent_modules")
+    if isinstance(modules, str):
+        try:
+            modules = json.loads(modules)
+        except Exception:
+            modules = []
+    if modules is not None and not isinstance(modules, list):
+        modules = list(modules) if isinstance(modules, (tuple, set)) else []
+
+    price = row.get("agent_price_per_month_sol")
+    return {
+        "id": row["id"],
+        "agent_id": row["agent_id"],
+        "buyer_wallet": row["buyer_wallet"],
+        "seller_wallet": row["seller_wallet"],
+        "price_sol": float(row.get("price_sol") or 0),
+        "payment_signature": row["payment_signature"],
+        "status": row.get("status") or "active",
+        "starts_at": _iso(row.get("starts_at")),
+        "expires_at": _iso(row.get("expires_at")),
+        "explorer_url": row.get("explorer_url"),
+        "created_at": _iso(row.get("created_at")),
+        "agent_name": row.get("agent_name"),
+        "agent_description": row.get("agent_description"),
+        "agent_visibility": row.get("agent_visibility"),
+        "agent_price_per_month_sol": float(price) if price is not None else None,
+        "agent_status": row.get("agent_status"),
+        "agent_modules": modules,
+    }
+
+
+def get_subscription_by_signature(signature: str) -> Optional[dict[str, Any]]:
+    init_db()
+    sig = (signature or "").strip()
+    if not sig:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM agent_subscriptions WHERE payment_signature = %s",
+                (sig,),
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row) if row else None
+
+
+def get_active_subscription(agent_id: str, buyer_wallet: str) -> Optional[dict[str, Any]]:
+    init_db()
+    aid = (agent_id or "").strip()
+    buyer = (buyer_wallet or "").strip()
+    if not aid or not buyer:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM agent_subscriptions
+                WHERE agent_id = %s
+                  AND buyer_wallet = %s
+                  AND status = 'active'
+                  AND expires_at > NOW()
+                ORDER BY expires_at DESC
+                LIMIT 1
+                """,
+                (aid, buyer),
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row) if row else None
+
+
+def create_agent_subscription(record: dict[str, Any]) -> dict[str, Any]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO agent_subscriptions (
+                    id, agent_id, buyer_wallet, seller_wallet, price_sol,
+                    payment_signature, status, starts_at, expires_at, explorer_url
+                ) VALUES (
+                    %(id)s, %(agent_id)s, %(buyer_wallet)s, %(seller_wallet)s, %(price_sol)s,
+                    %(payment_signature)s, %(status)s, %(starts_at)s, %(expires_at)s, %(explorer_url)s
+                )
+                RETURNING *
+                """,
+                {
+                    "id": record["id"],
+                    "agent_id": record["agent_id"],
+                    "buyer_wallet": record["buyer_wallet"],
+                    "seller_wallet": record["seller_wallet"],
+                    "price_sol": float(record["price_sol"]),
+                    "payment_signature": record["payment_signature"],
+                    "status": record.get("status") or "active",
+                    "starts_at": record["starts_at"],
+                    "expires_at": record["expires_at"],
+                    "explorer_url": record.get("explorer_url"),
+                },
+            )
+            row = cur.fetchone()
+    if not row:
+        raise RuntimeError("Failed to persist agent subscription.")
+    return _subscription_row_to_dict(row)
+
+
+def list_buyer_subscriptions(buyer_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+    buyer = (buyer_wallet or "").strip()
+    if not buyer:
+        return []
+    lim = max(1, min(int(limit or 50), 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    s.*,
+                    a.name AS agent_name,
+                    a.description AS agent_description,
+                    a.visibility AS agent_visibility,
+                    a.price_per_month_sol AS agent_price_per_month_sol,
+                    a.status AS agent_status,
+                    a.modules AS agent_modules
+                FROM agent_subscriptions s
+                LEFT JOIN launched_agents a ON a.id = s.agent_id
+                WHERE s.buyer_wallet = %s
+                ORDER BY s.created_at DESC
+                LIMIT %s
+                """,
+                (buyer, lim),
+            )
+            rows = cur.fetchall()
+    return [_subscription_row_to_dict(row) for row in rows]
+
+
+def list_seller_subscriptions(seller_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
+    init_db()
+    seller = (seller_wallet or "").strip()
+    if not seller:
+        return []
+    lim = max(1, min(int(limit or 50), 200))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    s.*,
+                    a.name AS agent_name,
+                    a.description AS agent_description,
+                    a.visibility AS agent_visibility,
+                    a.price_per_month_sol AS agent_price_per_month_sol,
+                    a.status AS agent_status,
+                    a.modules AS agent_modules
+                FROM agent_subscriptions s
+                LEFT JOIN launched_agents a ON a.id = s.agent_id
+                WHERE s.seller_wallet = %s
+                ORDER BY s.created_at DESC
+                LIMIT %s
+                """,
+                (seller, lim),
+            )
+            rows = cur.fetchall()
+    return [_subscription_row_to_dict(row) for row in rows]
+
+
+def count_agent_subscribers(agent_id: str) -> int:
+    init_db()
+    aid = (agent_id or "").strip()
+    if not aid:
+        return 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS c
+                FROM agent_subscriptions
+                WHERE agent_id = %s
+                  AND status = 'active'
+                  AND expires_at > NOW()
+                """,
+                (aid,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return 0
+    return int(row.get("c") if isinstance(row, dict) else row[0] or 0)

@@ -761,4 +761,95 @@ export async function proxyVolumeResolveToken(query: string): Promise<Response> 
   return proxyDcaResolveToken(query);
 }
 
+export async function proxyGetCustomInstructions(
+  agentType: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/v1/custom-instructions/${encodeURIComponent(agentType)}`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxySaveCustomInstructions(
+  body: { agent_type: string; instructions: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/v1/custom-instructions`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyLaunchConfig(): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/config`, {
+    cache: "no-store",
+    headers: buildHeaders(),
+  });
+}
+
+export async function proxyLaunchPublicAgents(limit = 100): Promise<Response> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return fetch(`${getAgentsBaseUrl()}/launch/public?${params}`, {
+    cache: "no-store",
+    headers: buildHeaders(),
+  });
+}
+
+export async function proxyLaunchPublicAgent(agentId: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/public/${encodeURIComponent(agentId)}`, {
+    cache: "no-store",
+    headers: buildHeaders(),
+  });
+}
+
+export async function proxyLaunchAgentsList(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyLaunchDashboard(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/dashboard`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyLaunchAgent(
+  body: {
+    name: string;
+    description?: string;
+    task: string;
+    modules: string[];
+    signature: string;
+    visibility?: "public" | "private";
+    price_per_month_sol?: number | null;
+  },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxySubscribeAgent(
+  agentId: string,
+  body: { signature: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/subscribe`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export { getAuthToken, getAgentsBaseUrl, buildHeaders };

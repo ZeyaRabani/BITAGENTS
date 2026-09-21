@@ -50,6 +50,15 @@ from db import (
     load_chat_history,
     save_custom_instructions,
 )
+from launch_agent import (
+    get_launch_config,
+    get_marketplace_launched_agent,
+    get_user_launch_dashboard,
+    launch_agent,
+    list_marketplace_launched_agents,
+    list_user_launched_agents,
+    subscribe_to_agent,
+)
 from hosted_llm import (
     CAPIX_API_URL,
     CAPIX_MAX_RETRIES,
@@ -1740,6 +1749,96 @@ def hedge_fund_paper_backtest(
 @app.get("/hedge-fund/paper/scheduler")
 def hedge_fund_paper_scheduler() -> dict[str, Any]:
     return hf_scheduler_status()
+
+
+class LaunchAgentRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=2000)
+    task: str = Field(min_length=1, max_length=20000)
+    modules: list[str] = Field(min_length=1)
+    signature: str = Field(min_length=32, max_length=128)
+    visibility: str = Field(default="private", pattern="^(public|private)$")
+    price_per_month_sol: Optional[float] = Field(default=None, ge=0, le=1000)
+
+
+@app.get("/launch/config")
+def launch_config(_: None = Depends(require_internal_key)) -> dict[str, Any]:
+    return get_launch_config()
+
+
+@app.get("/launch/public")
+def launch_public_list(
+    _: None = Depends(require_internal_key),
+    limit: int = Query(100, ge=1, le=200),
+) -> dict[str, Any]:
+    return list_marketplace_launched_agents(limit=limit)
+
+
+@app.get("/launch/public/{agent_id}")
+def launch_public_get(
+    agent_id: str,
+    _: None = Depends(require_internal_key),
+) -> dict[str, Any]:
+    result = get_marketplace_launched_agent(agent_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.get("/launch")
+def launch_list(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return list_user_launched_agents(auth_wallet)
+
+
+@app.get("/launch/dashboard")
+def launch_dashboard(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return get_user_launch_dashboard(auth_wallet)
+
+
+class SubscribeAgentRequest(BaseModel):
+    signature: str = Field(min_length=32, max_length=128)
+
+
+@app.post("/launch/{agent_id}/subscribe")
+def launch_subscribe(
+    agent_id: str,
+    body: SubscribeAgentRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = subscribe_to_agent(
+        buyer_wallet=auth_wallet,
+        agent_id=agent_id,
+        signature=body.signature,
+    )
+    if result.get("error"):
+        status = 403 if result.get("status") == "rejected" else 400
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
+
+
+@app.post("/launch")
+def launch_create(
+    body: LaunchAgentRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = launch_agent(
+        user_wallet=auth_wallet,
+        name=body.name,
+        description=body.description or "",
+        task=body.task,
+        modules=body.modules,
+        signature=body.signature,
+        visibility=body.visibility,
+        price_per_month_sol=body.price_per_month_sol,
+    )
+    if result.get("error"):
+        status = 403 if result.get("status") == "rejected" else 400
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
 
 
 if __name__ == "__main__":

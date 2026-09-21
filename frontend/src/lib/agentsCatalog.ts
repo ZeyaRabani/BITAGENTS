@@ -42,6 +42,11 @@ export type MarketplaceAgent = {
   available: boolean;
   model?: string;
   cluster?: string;
+  /** Official BIT Agents catalog entries show a Verified badge. */
+  verified?: boolean;
+  /** Override card link (e.g. community-launched agents). */
+  href?: string;
+  source?: "catalog" | "launched";
 };
 
 export const MARKETPLACE_STATS = {

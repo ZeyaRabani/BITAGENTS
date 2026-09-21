@@ -2,16 +2,23 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AgentCard } from "@/components/agents/AgentCard";
-import { FEATURED_AGENTS } from "@/lib/agentsCatalog";
+import { FEATURED_AGENTS, type MarketplaceAgent } from "@/lib/agentsCatalog";
 import {
   fetchPlatformMetrics,
   formatMetricNumber,
   formatVolumeSol,
 } from "@/lib/dcaPlanClient";
+import { fetchPublicLaunchedAgents } from "@/lib/launchAgentClient";
+import { mapLaunchedToMarketplaceAgent } from "@/lib/launchMarketplace";
 
-export function MarketplaceFeaturedAgents() {
+export function MarketplaceFeaturedAgents({
+  onCountChange,
+}: {
+  onCountChange?: (count: number) => void;
+}) {
   const [totalRuns, setTotalRuns] = useState<string | null>(null);
   const [volumeSol, setVolumeSol] = useState<string | null>(null);
+  const [launched, setLaunched] = useState<MarketplaceAgent[]>([]);
 
   useEffect(() => {
     void fetchPlatformMetrics().then((metrics) => {
@@ -23,18 +30,32 @@ export function MarketplaceFeaturedAgents() {
     });
   }, []);
 
-  const agents = useMemo(
-    () =>
-      FEATURED_AGENTS.map((agent) => {
-        if (agent.slug !== "dca") return agent;
-        return {
-          ...agent,
-          runs: totalRuns ?? agent.runs,
-          volumeSol: volumeSol ?? agent.volumeSol,
-        };
-      }),
-    [totalRuns, volumeSol]
-  );
+  useEffect(() => {
+    void fetchPublicLaunchedAgents().then((agents) => {
+      setLaunched(agents.map(mapLaunchedToMarketplaceAgent));
+    });
+  }, []);
+
+  const agents = useMemo(() => {
+    const catalog = FEATURED_AGENTS.map((agent) => {
+      const base: MarketplaceAgent = {
+        ...agent,
+        verified: true,
+        source: "catalog",
+      };
+      if (agent.slug !== "dca") return base;
+      return {
+        ...base,
+        runs: totalRuns ?? agent.runs,
+        volumeSol: volumeSol ?? agent.volumeSol,
+      };
+    });
+    return [...catalog, ...launched];
+  }, [totalRuns, volumeSol, launched]);
+
+  useEffect(() => {
+    onCountChange?.(agents.length);
+  }, [agents.length, onCountChange]);
 
   return (
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
