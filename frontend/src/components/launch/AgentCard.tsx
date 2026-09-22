@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AgentAvatar } from "./AgentAvatar";
-import { formatUsd, type LaunchedAgent } from "@/lib/launchpadMock";
+import type { LaunchedAgent } from "@/lib/launchpadMock";
 
 const STATUS_STYLE: Record<LaunchedAgent["status"], string> = {
   LIVE: "border-signal text-signal",
@@ -30,22 +30,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
         </span>
       </div>
 
-      <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">{agent.description}</p>
-
-      <div className="mt-auto grid grid-cols-3 gap-2 border-t border-grid pt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-        <div>
-          <div className="text-muted-foreground/70">Age</div>
-          <div className="mt-0.5 tabular-nums text-foreground">{agent.ageDays}d</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground/70">Runs</div>
-          <div className="mt-0.5 tabular-nums text-foreground">{agent.runs.toLocaleString()}</div>
-        </div>
-        <div>
-          <div className="text-muted-foreground/70">Volume</div>
-          <div className="mt-0.5 tabular-nums text-signal">{formatUsd(agent.volumeUsd)}</div>
-        </div>
-      </div>
+      <p className="mt-auto line-clamp-2 text-xs leading-relaxed text-muted-foreground">{agent.description}</p>
     </Link>
   );
 }
