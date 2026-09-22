@@ -82,9 +82,14 @@ need two more things before it can go live, and you must get them in this order:
 8. Ask where they want to be alerted: email or Telegram, and the destination (their email address, \
    or their Telegram chat). Call set_notification_channel as soon as they answer.
 9. Immediately call send_test_notification — never skip this and never claim you sent something \
-   without actually calling the tool. Tell the user a test was sent and ask them to confirm they \
-   received it. Only after they confirm (e.g. "I got it", "received") do you call \
-   confirm_notification_received — never mark it confirmed on your own judgment.
+   without actually calling the tool. If it returns ok=false, tell the user plainly that the test \
+   failed and why (e.g. a sandbox/domain restriction) — do not ask them to confirm receipt of \
+   something that was never delivered; offer to try a different destination instead. If it returns \
+   ok=true, tell the user a test was sent and ask them to confirm they received it. Only call \
+   confirm_notification_received after BOTH send_test_notification succeeded AND the user has \
+   explicitly confirmed receipt (e.g. "I got it", "received") — a reply like "yes launch it" after \
+   a failed test is not confirmation of receipt, it's the user trying to move past your last message; \
+   address the failure first.
 If the agent is specifically a price-move watcher (e.g. "alert me when BTC moves X% in an hour"), \
 call create_price_watch with the threshold percentage once the notification channel is verified — \
 this is what actually makes the alert run in the background after this chat ends.
@@ -299,10 +304,18 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             return {"error": f"channel must be one of {VALID_CHANNELS}"}
         if not destination:
             return {"error": "destination cannot be empty"}
-        # Changing the destination invalidates any prior test-send confirmation.
-        updated = db.update_custom_agent_fields(
-            agent_id, notify_channel=channel, notify_destination=destination
+        current = db.get_custom_agent(agent_id) or {}
+        changed = (
+            current.get("notify_channel") != channel
+            or current.get("notify_destination") != destination
         )
+        fields: dict[str, Any] = {"notify_channel": channel, "notify_destination": destination}
+        if changed:
+            # Only a REAL change invalidates the prior test-send -- calling this
+            # again with the same values (e.g. the model re-confirming) must not
+            # wipe out a test that already succeeded.
+            fields["notify_test_sent_ok"] = False
+        updated = db.update_custom_agent_fields(agent_id, **fields)
         return {"ok": True, "draft": updated}
 
     def send_test_notification(**_kwargs):
@@ -316,12 +329,15 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             body="This is a test alert from the agent you're building on BITAGENTS. "
                  "If you got this, notifications are working.",
         )
+        db.update_custom_agent_fields(agent_id, notify_test_sent_ok=bool(result.get("ok")))
         return result
 
     def confirm_notification_received(**_kwargs):
         updated = db.mark_notification_verified(agent_id)
         if not updated:
             return {"error": "draft not found"}
+        if "error" in updated:
+            return updated
         return {"ok": True, "draft": updated}
 
     def create_price_watch(**kwargs):
@@ -372,6 +388,61 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
     }
 
 
+def _launch_ready(draft: dict[str, Any]) -> bool:
+    required_ready = all(
+        (draft.get(f) or "").strip()
+        for f in ("name", "handle", "category", "description", "system_prompt")
+    )
+    if not required_ready:
+        return False
+    if draft.get("notify_channel") and not draft.get("notify_verified_at"):
+        return False
+    return True
+
+
+def _ensure_finalized_if_ready(
+    agent_id: str, reply: str, history: list, actions: list[dict[str, Any]]
+) -> tuple[str, list, list[dict[str, Any]]]:
+    """Code-level safety net for the exact failure this builder exists to
+    prevent: the model narrating a finished launch without ever calling
+    finalize_and_launch. If the draft is genuinely launch-ready but this
+    turn didn't finalize it, force one more silent check rather than trust
+    the reply text. Runs on a scratch copy of history so a failed/no-op
+    check never pollutes the real, persisted conversation the user sees."""
+    if any(a["tool"] == "finalize_and_launch" for a in actions):
+        return reply, history, actions
+    draft = db.get_custom_agent(agent_id)
+    if not draft or draft.get("status") != "draft" or not _launch_ready(draft):
+        return reply, history, actions
+
+    nudge = (
+        "SYSTEM CHECK (internal -- not a real user message): every required "
+        "field and notification verification is already complete, but "
+        "finalize_and_launch was not called this turn. If the user already "
+        "confirmed they want to launch earlier in this conversation, call "
+        "finalize_and_launch right now. If they have not yet clearly "
+        "confirmed, call show_draft and note that confirmation is still "
+        "needed -- never assume."
+    )
+    _, _, extra_actions = run_tool_agent(
+        nudge,
+        list(history),
+        system_prompt=_build_system_prompt(),
+        tools=TOOLS,
+        tool_registry=_builder_tools(agent_id),
+        model=BUILDER_MODEL,
+        app_suffix="agent-builder-selfcheck",
+        llm_call=call_openrouter,
+    )
+    refreshed = db.get_custom_agent(agent_id)
+    if refreshed and refreshed.get("status") != "draft":
+        reply = (
+            f"{reply}\n\n(Double-checked: {refreshed.get('name') or 'the agent'} "
+            f"is now actually live.)"
+        )
+    return reply, history, actions + extra_actions
+
+
 def run_builder_agent(
     user_input: str,
     conversation_history: list,
@@ -379,7 +450,7 @@ def run_builder_agent(
     agent_id: str,
     session_id: Optional[str] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
-    return run_tool_agent(
+    reply, history, actions = run_tool_agent(
         user_input,
         conversation_history,
         system_prompt=_build_system_prompt(),
@@ -390,3 +461,4 @@ def run_builder_agent(
         session_id=session_id,
         llm_call=call_openrouter,
     )
+    return _ensure_finalized_if_ready(agent_id, reply, history, actions)

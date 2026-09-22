@@ -393,6 +393,10 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_channel VARCHAR(20)",
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_destination TEXT",
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_verified_at TIMESTAMPTZ",
+    # Tracks whether the MOST RECENT send_test_notification call actually
+    # succeeded -- confirm_notification_received refuses to fire otherwise,
+    # so the model can't mark "confirmed" a test that was never delivered.
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_test_sent_ok BOOLEAN NOT NULL DEFAULT FALSE",
     "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES custom_agents (id) ON DELETE CASCADE",
     # "moves 1% in one hour" is a rolling window, not "since the last check" --
     # window_started_at resets the baseline once window_hours has elapsed,
@@ -1136,7 +1140,7 @@ def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[st
         "name", "handle", "category", "description", "system_prompt",
         "model_tier", "tool_scope", "creator_fee_share_pct", "status",
         "testing_started_at", "enabled_tools",
-        "notify_channel", "notify_destination",
+        "notify_channel", "notify_destination", "notify_test_sent_ok",
     }
     sets = []
     values: list[Any] = []
@@ -1169,9 +1173,20 @@ def get_custom_agent(agent_id: str) -> Optional[dict[str, Any]]:
 
 
 def mark_notification_verified(agent_id: str) -> Optional[dict[str, Any]]:
-    """Stamp notify_verified_at -- only ever called after a real test-send the
-    user confirmed receiving, never on the agent's own say-so."""
+    """Stamp notify_verified_at -- but only if the most recent test-send call
+    actually succeeded (notify_test_sent_ok). This stops the model from
+    accepting a user's "confirmed"/"yes" for a test that was never delivered
+    -- e.g. the user replying to an unrelated question right after a failed
+    send. Returns {"error": ...} instead of touching the row if it can't."""
     init_db()
+    current = get_custom_agent(agent_id)
+    if not current:
+        return None
+    if not current.get("notify_test_sent_ok"):
+        return {
+            "error": "No successful test send on record for this agent -- "
+                     "cannot confirm receipt of something that was never actually delivered.",
+        }
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
