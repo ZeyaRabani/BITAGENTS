@@ -458,20 +458,32 @@ def subscribe_to_agent(
 
 
 def get_user_launch_dashboard(user_wallet: str) -> dict[str, Any]:
+    from db import ensure_launch_schema
+
+    ensure_launch_schema()
     wallet = (user_wallet or "").strip()
     owned = list_launched_agents(wallet, limit=100)
     listed = []
     private = []
     for agent in owned:
-        sub_count = count_agent_subscribers(agent["id"])
+        try:
+            sub_count = count_agent_subscribers(agent["id"])
+        except Exception:
+            sub_count = 0
         row = {**agent, "active_subscribers": sub_count}
         if agent.get("visibility") == "public":
             listed.append(row)
         else:
             private.append(row)
 
-    bought = list_buyer_subscriptions(wallet, limit=100)
-    sales = list_seller_subscriptions(wallet, limit=100)
+    try:
+        bought = list_buyer_subscriptions(wallet, limit=100)
+    except Exception:
+        bought = []
+    try:
+        sales = list_seller_subscriptions(wallet, limit=100)
+    except Exception:
+        sales = []
 
     return {
         "listed_for_sale": listed,

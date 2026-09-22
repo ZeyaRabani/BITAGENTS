@@ -2050,8 +2050,65 @@ def _launched_agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def get_launched_agent_by_signature(signature: str) -> Optional[dict[str, Any]]:
+def ensure_launch_schema() -> None:
+    """
+    Idempotent create/alter for launch + subscription tables.
+
+    Safe to call even when init_db() already marked the schema ready
+    (e.g. API process started before these tables were added).
+    """
     init_db()
+    stmts = [
+        """
+        CREATE TABLE IF NOT EXISTS launched_agents (
+            id              VARCHAR(16) PRIMARY KEY,
+            user_wallet     VARCHAR(64) NOT NULL,
+            name            TEXT NOT NULL,
+            description     TEXT NOT NULL DEFAULT '',
+            task            TEXT NOT NULL,
+            modules         JSONB NOT NULL DEFAULT '[]'::jsonb,
+            visibility      VARCHAR(16) NOT NULL DEFAULT 'private',
+            price_per_month_sol DOUBLE PRECISION,
+            fee_sol         DOUBLE PRECISION NOT NULL DEFAULT 1,
+            fee_signature   VARCHAR(128) NOT NULL UNIQUE,
+            fee_wallet      VARCHAR(64) NOT NULL,
+            status          VARCHAR(20) NOT NULL DEFAULT 'active',
+            explorer_url    TEXT,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_launched_agents_user ON launched_agents (user_wallet)",
+        "CREATE INDEX IF NOT EXISTS idx_launched_agents_signature ON launched_agents (fee_signature)",
+        "CREATE INDEX IF NOT EXISTS idx_launched_agents_visibility ON launched_agents (visibility)",
+        "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'private'",
+        "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS price_per_month_sol DOUBLE PRECISION",
+        """
+        CREATE TABLE IF NOT EXISTS agent_subscriptions (
+            id                VARCHAR(16) PRIMARY KEY,
+            agent_id          VARCHAR(16) NOT NULL,
+            buyer_wallet      VARCHAR(64) NOT NULL,
+            seller_wallet     VARCHAR(64) NOT NULL,
+            price_sol         DOUBLE PRECISION NOT NULL,
+            payment_signature VARCHAR(128) NOT NULL UNIQUE,
+            status            VARCHAR(20) NOT NULL DEFAULT 'active',
+            starts_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            expires_at        TIMESTAMPTZ NOT NULL,
+            explorer_url      TEXT,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_buyer ON agent_subscriptions (buyer_wallet)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_seller ON agent_subscriptions (seller_wallet)",
+        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_agent ON agent_subscriptions (agent_id)",
+    ]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for stmt in stmts:
+                cur.execute(stmt)
+
+
+def get_launched_agent_by_signature(signature: str) -> Optional[dict[str, Any]]:
+    ensure_launch_schema()
     sig = (signature or "").strip()
     if not sig:
         return None
@@ -2066,7 +2123,7 @@ def get_launched_agent_by_signature(signature: str) -> Optional[dict[str, Any]]:
 
 
 def list_launched_agents(user_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     wallet = (user_wallet or "").strip()
     if not wallet:
         return []
@@ -2087,7 +2144,7 @@ def list_launched_agents(user_wallet: str, limit: int = 50) -> list[dict[str, An
 
 
 def list_public_launched_agents(limit: int = 100) -> list[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     lim = max(1, min(int(limit or 100), 200))
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -2105,7 +2162,7 @@ def list_public_launched_agents(limit: int = 100) -> list[dict[str, Any]]:
 
 
 def get_launched_agent(agent_id: str) -> Optional[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     aid = (agent_id or "").strip()
     if not aid:
         return None
@@ -2117,7 +2174,7 @@ def get_launched_agent(agent_id: str) -> Optional[dict[str, Any]]:
 
 
 def create_launched_agent(record: dict[str, Any]) -> dict[str, Any]:
-    init_db()
+    ensure_launch_schema()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2188,7 +2245,7 @@ def _subscription_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_subscription_by_signature(signature: str) -> Optional[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     sig = (signature or "").strip()
     if not sig:
         return None
@@ -2203,7 +2260,7 @@ def get_subscription_by_signature(signature: str) -> Optional[dict[str, Any]]:
 
 
 def get_active_subscription(agent_id: str, buyer_wallet: str) -> Optional[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     aid = (agent_id or "").strip()
     buyer = (buyer_wallet or "").strip()
     if not aid or not buyer:
@@ -2227,7 +2284,7 @@ def get_active_subscription(agent_id: str, buyer_wallet: str) -> Optional[dict[s
 
 
 def create_agent_subscription(record: dict[str, Any]) -> dict[str, Any]:
-    init_db()
+    ensure_launch_schema()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -2261,7 +2318,7 @@ def create_agent_subscription(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def list_buyer_subscriptions(buyer_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     buyer = (buyer_wallet or "").strip()
     if not buyer:
         return []
@@ -2291,7 +2348,7 @@ def list_buyer_subscriptions(buyer_wallet: str, limit: int = 50) -> list[dict[st
 
 
 def list_seller_subscriptions(seller_wallet: str, limit: int = 50) -> list[dict[str, Any]]:
-    init_db()
+    ensure_launch_schema()
     seller = (seller_wallet or "").strip()
     if not seller:
         return []
@@ -2321,7 +2378,7 @@ def list_seller_subscriptions(seller_wallet: str, limit: int = 50) -> list[dict[
 
 
 def count_agent_subscribers(agent_id: str) -> int:
-    init_db()
+    ensure_launch_schema()
     aid = (agent_id or "").strip()
     if not aid:
         return 0

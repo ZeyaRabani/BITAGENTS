@@ -9,14 +9,19 @@ export async function GET(request: Request) {
 
   try {
     const res = await proxyLaunchDashboard(authToken);
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const detail =
-        typeof data.detail === "string" ? data.detail : data.error ?? "Failed to load dashboard";
+        typeof (data as { detail?: unknown }).detail === "string"
+          ? (data as { detail: string }).detail
+          : typeof (data as { error?: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : "Failed to load dashboard";
       return NextResponse.json({ error: detail }, { status: res.status });
     }
     return NextResponse.json(data);
-  } catch {
-    return NextResponse.json({ error: "Agents API offline" }, { status: 503 });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Agents API offline";
+    return NextResponse.json({ error: message }, { status: 503 });
   }
 }

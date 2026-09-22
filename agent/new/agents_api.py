@@ -1766,6 +1766,16 @@ def launch_config(_: None = Depends(require_internal_key)) -> dict[str, Any]:
     return get_launch_config()
 
 
+@app.get("/launch/dashboard")
+def launch_dashboard(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    try:
+        return get_user_launch_dashboard(auth_wallet)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Dashboard failed: {exc}") from exc
+
+
 @app.get("/launch/public")
 def launch_public_list(
     _: None = Depends(require_internal_key),
@@ -1790,13 +1800,6 @@ def launch_list(
     auth_wallet: str = Depends(require_wallet_session),
 ) -> dict[str, Any]:
     return list_user_launched_agents(auth_wallet)
-
-
-@app.get("/launch/dashboard")
-def launch_dashboard(
-    auth_wallet: str = Depends(require_wallet_session),
-) -> dict[str, Any]:
-    return get_user_launch_dashboard(auth_wallet)
 
 
 class SubscribeAgentRequest(BaseModel):

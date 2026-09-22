@@ -261,12 +261,6 @@ export function LaunchAgentConsole() {
         </div>
       )}
 
-      {isAuthenticated && (
-        <div className="border border-signal/30 bg-signal/5 px-4 py-3 font-mono text-[11px] text-signal">
-          Signed in as {publicKey?.toBase58().slice(0, 4)}…{publicKey?.toBase58().slice(-4)}
-        </div>
-      )}
-
       <form onSubmit={onLaunch} className="space-y-6">
         <Panel title="Agent identity">
           <div className="space-y-4">

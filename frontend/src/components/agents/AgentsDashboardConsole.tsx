@@ -7,10 +7,26 @@ import { Panel, Stat } from "@/components/AppShell";
 import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import {
   fetchLaunchDashboard,
+  listLaunchedAgents,
   type AgentSubscription,
   type LaunchDashboard,
   type LaunchedAgent,
 } from "@/lib/launchAgentClient";
+
+function emptyDashboard(): LaunchDashboard {
+  return {
+    listed_for_sale: [],
+    private_agents: [],
+    bought: [],
+    sales: [],
+    counts: {
+      listed_for_sale: 0,
+      private_agents: 0,
+      bought: 0,
+      sales: 0,
+    },
+  };
+}
 
 function formatExpiry(value?: string) {
   if (!value) return "-";
@@ -23,9 +39,7 @@ function formatExpiry(value?: string) {
 
 function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
   const href =
-    agent.visibility === "public"
-      ? `/agents/launched/${agent.id}`
-      : "/agents/launch";
+    agent.visibility === "public" ? `/agents/launched/${agent.id}` : "/agents/launch";
 
   return (
     <div className="border border-grid bg-surface/30 px-3 py-3">
@@ -95,7 +109,7 @@ function SubscriptionRow({
 }
 
 export function AgentsDashboardConsole() {
-  const { publicKey, connected } = useWallet();
+  const { connected } = useWallet();
   const { token, busy: authBusy, error: authError, isAuthenticated } = useKickstartWalletAuth();
   const [data, setData] = useState<LaunchDashboard | null>(null);
   const [loading, setLoading] = useState(false);
@@ -109,10 +123,52 @@ export function AgentsDashboardConsole() {
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchLaunchDashboard(token));
+      const dash = await fetchLaunchDashboard(token);
+      setData({
+        listed_for_sale: dash.listed_for_sale ?? [],
+        private_agents: dash.private_agents ?? [],
+        bought: dash.bought ?? [],
+        sales: dash.sales ?? [],
+        counts: {
+          listed_for_sale: dash.counts?.listed_for_sale ?? dash.listed_for_sale?.length ?? 0,
+          private_agents: dash.counts?.private_agents ?? dash.private_agents?.length ?? 0,
+          bought: dash.counts?.bought ?? dash.bought?.length ?? 0,
+          sales: dash.counts?.sales ?? dash.sales?.length ?? 0,
+        },
+      });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load dashboard");
-      setData(null);
+      // Fallback: still show owned agents if dashboard endpoint fails.
+      try {
+        const owned = await listLaunchedAgents(token);
+        const listed = owned.filter((a) => a.visibility === "public");
+        const privateAgents = owned.filter((a) => a.visibility !== "public");
+        setData({
+          listed_for_sale: listed,
+          private_agents: privateAgents,
+          bought: [],
+          sales: [],
+          counts: {
+            listed_for_sale: listed.length,
+            private_agents: privateAgents.length,
+            bought: 0,
+            sales: 0,
+          },
+        });
+        setError(
+          err instanceof Error
+            ? `${err.message} (showing owned agents only)`
+            : "Dashboard partially unavailable"
+        );
+      } catch (fallbackErr) {
+        setData(emptyDashboard());
+        setError(
+          fallbackErr instanceof Error
+            ? fallbackErr.message
+            : err instanceof Error
+              ? err.message
+              : "Failed to load dashboard"
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -149,16 +205,9 @@ export function AgentsDashboardConsole() {
         </div>
       )}
 
-      {isAuthenticated && (
-        <div className="border border-signal/30 bg-signal/5 px-4 py-3 font-mono text-[11px] text-signal">
-          Signed in as {publicKey?.toBase58().slice(0, 4)}…{publicKey?.toBase58().slice(-4)}
-          <button
-            type="button"
-            onClick={() => void reload()}
-            className="ml-3 underline hover:text-foreground"
-          >
-            Refresh
-          </button>
+      {connected && !isAuthenticated && !authBusy && (
+        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
+          Wallet connected - approve the sign-in prompt, or reconnect if it was dismissed.
         </div>
       )}
 
@@ -168,10 +217,31 @@ export function AgentsDashboardConsole() {
         </div>
       )}
 
+      {isAuthenticated && loading && !data && (
+        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+          Loading dashboard…
+        </div>
+      )}
+
       {isAuthenticated && data && (
         <>
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => void reload()}
+              disabled={loading}
+              className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal hover:underline disabled:opacity-40"
+            >
+              {loading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Stat label="Listed for sale" value={String(data.counts.listed_for_sale)} accent="signal" />
+            <Stat
+              label="Listed for sale"
+              value={String(data.counts.listed_for_sale)}
+              accent="signal"
+            />
             <Stat label="Private agents" value={String(data.counts.private_agents)} />
             <Stat label="Bought" value={String(data.counts.bought)} accent="signal" />
             <Stat label="Sales" value={String(data.counts.sales)} />
@@ -188,9 +258,7 @@ export function AgentsDashboardConsole() {
               </Link>
             }
           >
-            {loading && !data.listed_for_sale.length ? (
-              <p className="text-sm text-muted-foreground">Loading…</p>
-            ) : data.listed_for_sale.length === 0 ? (
+            {data.listed_for_sale.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No public listings yet. Launch an agent as public with a monthly price to sell
                 access.
