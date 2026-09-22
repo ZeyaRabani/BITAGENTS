@@ -19,7 +19,9 @@ from typing import Any, Optional
 import db
 from agent_tool_runner import run_tool_agent
 from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
+from btc_price_alert import fetch_btc_price_usd
 from hosted_llm import call_openrouter
+from notifications import VALID_CHANNELS, send_notification
 
 # Routed directly through OpenRouter (bypassing the shared CapIX-first
 # call_llm router) because the platform-locked CapIX model doesn't reliably
@@ -75,11 +77,24 @@ Call set_agent_field / set_agent_personality / set_tool_scope / select_agent_cap
 learn each piece — don't wait until the end to set everything at once. Use show_draft whenever you \
 want to check what's already been captured before asking your next question.
 
+If the agent needs to alert the user about something (a price move, a condition being met), you \
+need two more things before it can go live, and you must get them in this order:
+8. Ask where they want to be alerted: email or Telegram, and the destination (their email address, \
+   or their Telegram chat). Call set_notification_channel as soon as they answer.
+9. Immediately call send_test_notification — never skip this and never claim you sent something \
+   without actually calling the tool. Tell the user a test was sent and ask them to confirm they \
+   received it. Only after they confirm (e.g. "I got it", "received") do you call \
+   confirm_notification_received — never mark it confirmed on your own judgment.
+If the agent is specifically a price-move watcher (e.g. "alert me when BTC moves X% in an hour"), \
+call create_price_watch with the threshold percentage once the notification channel is verified — \
+this is what actually makes the alert run in the background after this chat ends.
+
 When you believe the draft is complete, call show_draft, present the full configuration clearly to \
 the user (name, handle, category, description, the system prompt you wrote, which capabilities it \
-has, and whether it's read_only or trading), and explicitly ask them to confirm before launching. \
-Only call finalize_and_launch after they clearly confirm (e.g. "yes", "launch it", "confirm") — \
-never call it speculatively or before showing the draft."""
+has, whether it's read_only or trading, and its verified notification channel if any), and explicitly \
+ask them to confirm before launching. Only call finalize_and_launch after they clearly confirm \
+(e.g. "yes", "launch it", "confirm") — never call it speculatively or before showing the draft. If \
+the agent needs a notification channel, do not call finalize_and_launch until it's verified."""
 
 TOOLS = [
     {
@@ -162,6 +177,70 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "set_notification_channel",
+            "description": "Set where the launched agent should send alerts: email or telegram, plus the destination.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string", "enum": list(VALID_CHANNELS)},
+                    "destination": {
+                        "type": "string",
+                        "description": "Email address for channel=email, or Telegram chat id/username for channel=telegram.",
+                    },
+                },
+                "required": ["channel", "destination"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_test_notification",
+            "description": (
+                "Send a real test alert to the notification channel set via set_notification_channel. "
+                "Call this immediately after set_notification_channel, before asking the user to confirm."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_notification_received",
+            "description": (
+                "Mark the notification channel as verified. Only call this after the user explicitly "
+                "confirms they received the test alert -- never on your own judgment."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_price_watch",
+            "description": (
+                "Create the background BTC price-watch that will actually run after this chat ends. "
+                "Only call this once the notification channel is verified via confirm_notification_received."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "threshold_pct": {
+                        "type": "number",
+                        "description": "Percent move (up or down) within the rolling window that should trigger an alert.",
+                    },
+                    "window_hours": {
+                        "type": "number",
+                        "description": "Rolling window length in hours. Defaults to 1 (e.g. 'moves 1% in one hour').",
+                    },
+                },
+                "required": ["threshold_pct"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finalize_and_launch",
             "description": (
                 "Finalize the draft and move it into the 24h testing window. Only call this after "
@@ -213,6 +292,55 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
     def show_draft(**_kwargs):
         return db.get_custom_agent(agent_id) or {"error": "draft not found"}
 
+    def set_notification_channel(**kwargs):
+        channel = (kwargs.get("channel") or "").strip()
+        destination = (kwargs.get("destination") or "").strip()
+        if channel not in VALID_CHANNELS:
+            return {"error": f"channel must be one of {VALID_CHANNELS}"}
+        if not destination:
+            return {"error": "destination cannot be empty"}
+        # Changing the destination invalidates any prior test-send confirmation.
+        updated = db.update_custom_agent_fields(
+            agent_id, notify_channel=channel, notify_destination=destination
+        )
+        return {"ok": True, "draft": updated}
+
+    def send_test_notification(**_kwargs):
+        draft = db.get_custom_agent(agent_id)
+        if not draft or not draft.get("notify_channel") or not draft.get("notify_destination"):
+            return {"error": "Call set_notification_channel first."}
+        result = send_notification(
+            draft["notify_channel"],
+            draft["notify_destination"],
+            subject="Your BITAGENTS test alert",
+            body="This is a test alert from the agent you're building on BITAGENTS. "
+                 "If you got this, notifications are working.",
+        )
+        return result
+
+    def confirm_notification_received(**_kwargs):
+        updated = db.mark_notification_verified(agent_id)
+        if not updated:
+            return {"error": "draft not found"}
+        return {"ok": True, "draft": updated}
+
+    def create_price_watch(**kwargs):
+        threshold_pct = kwargs.get("threshold_pct")
+        window_hours = kwargs.get("window_hours") or 1.0
+        if threshold_pct is None:
+            return {"error": "threshold_pct is required"}
+        draft = db.get_custom_agent(agent_id)
+        if not draft or not draft.get("notify_verified_at"):
+            return {"error": "Notification channel must be verified before creating a price watch."}
+        try:
+            current_price = fetch_btc_price_usd()
+        except Exception as exc:
+            return {"error": f"Could not reach the price feed: {exc}"}
+        alert = db.create_btc_price_alert(
+            float(threshold_pct), agent_id=agent_id, window_hours=float(window_hours)
+        )
+        return {"ok": True, "alert": alert, "current_btc_price_usd": current_price}
+
     def finalize_and_launch(**_kwargs):
         draft = db.get_custom_agent(agent_id)
         if not draft:
@@ -223,6 +351,8 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         ]
         if missing:
             return {"error": f"Cannot launch yet, missing: {', '.join(missing)}"}
+        if draft.get("notify_channel") and not draft.get("notify_verified_at"):
+            return {"error": "Notification channel is set but not yet verified. Confirm the test alert first."}
         finalized = db.finalize_custom_agent(agent_id)
         if not finalized:
             return {"error": "Could not finalize — draft may already be launched."}
@@ -234,6 +364,10 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         "set_tool_scope": set_tool_scope,
         "select_agent_capabilities": select_agent_capabilities,
         "show_draft": show_draft,
+        "set_notification_channel": set_notification_channel,
+        "send_test_notification": send_test_notification,
+        "confirm_notification_received": confirm_notification_received,
+        "create_price_watch": create_price_watch,
         "finalize_and_launch": finalize_and_launch,
     }
 

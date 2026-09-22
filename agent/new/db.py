@@ -387,6 +387,18 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS enabled_tools JSONB NOT NULL DEFAULT '[]'::jsonb",
     "CREATE INDEX IF NOT EXISTS idx_custom_agents_status ON custom_agents (status)",
     "CREATE INDEX IF NOT EXISTS idx_custom_agents_creator ON custom_agents (creator_wallet)",
+    # Zero-setup notification channels: the agent never sees a credential --
+    # only a destination (email/chat id) its own creator confirmed they own,
+    # via a real test-send during the launch conversation. See notifications.py.
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_channel VARCHAR(20)",
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_destination TEXT",
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_verified_at TIMESTAMPTZ",
+    "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES custom_agents (id) ON DELETE CASCADE",
+    # "moves 1% in one hour" is a rolling window, not "since the last check" --
+    # window_started_at resets the baseline once window_hours has elapsed,
+    # regardless of whether the alert fired, so the comparison stays hourly.
+    "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS window_hours DOUBLE PRECISION NOT NULL DEFAULT 1.0",
+    "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMPTZ",
 ]
 
 
@@ -654,18 +666,23 @@ def claim_due_dca_plans(limit: int = 25, lease_seconds: int = 180) -> list[dict[
     return [_plan_row_to_dict(row) for row in rows]
 
 
-def create_btc_price_alert(threshold_pct: float) -> dict[str, Any]:
+def create_btc_price_alert(
+    threshold_pct: float,
+    *,
+    agent_id: Optional[str] = None,
+    window_hours: float = 1.0,
+) -> dict[str, Any]:
     init_db()
     alert_id = str(uuid.uuid4())[:8]
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO btc_price_alerts (id, threshold_pct)
-                VALUES (%s, %s)
+                INSERT INTO btc_price_alerts (id, threshold_pct, agent_id, window_hours, window_started_at)
+                VALUES (%s, %s, %s, %s, NOW())
                 RETURNING *
                 """,
-                (alert_id, threshold_pct),
+                (alert_id, threshold_pct, agent_id, window_hours),
             )
             row = cur.fetchone()
     return dict(row)
@@ -685,6 +702,7 @@ def update_btc_price_alert_check(
     *,
     price_usd: float,
     baseline_price_usd: Optional[float] = None,
+    reset_window: bool = False,
     fired: bool = False,
 ) -> None:
     """Record a check; if `fired`, also stamp the alert-fired fields and log a row."""
@@ -692,14 +710,24 @@ def update_btc_price_alert_check(
     with get_conn() as conn:
         with conn.cursor() as cur:
             if baseline_price_usd is not None:
-                cur.execute(
-                    """
-                    UPDATE btc_price_alerts
-                    SET last_checked_at = NOW(), baseline_price_usd = %s
-                    WHERE id = %s
-                    """,
-                    (baseline_price_usd, alert_id),
-                )
+                if reset_window:
+                    cur.execute(
+                        """
+                        UPDATE btc_price_alerts
+                        SET last_checked_at = NOW(), baseline_price_usd = %s, window_started_at = NOW()
+                        WHERE id = %s
+                        """,
+                        (baseline_price_usd, alert_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE btc_price_alerts
+                        SET last_checked_at = NOW(), baseline_price_usd = %s
+                        WHERE id = %s
+                        """,
+                        (baseline_price_usd, alert_id),
+                    )
             else:
                 cur.execute(
                     "UPDATE btc_price_alerts SET last_checked_at = NOW() WHERE id = %s",
@@ -709,7 +737,8 @@ def update_btc_price_alert_check(
                 cur.execute(
                     """
                     UPDATE btc_price_alerts
-                    SET last_alert_price = %s, last_alert_at = NOW(), baseline_price_usd = %s
+                    SET last_alert_price = %s, last_alert_at = NOW(),
+                        baseline_price_usd = %s, window_started_at = NOW()
                     WHERE id = %s
                     """,
                     (price_usd, price_usd, alert_id),
@@ -1065,6 +1094,7 @@ def _custom_agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
     d["created_at"] = _iso(d.get("created_at"))
     d["updated_at"] = _iso(d.get("updated_at"))
     d["testing_started_at"] = _iso(d.get("testing_started_at"))
+    d["notify_verified_at"] = _iso(d.get("notify_verified_at"))
     return d
 
 
@@ -1106,6 +1136,7 @@ def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[st
         "name", "handle", "category", "description", "system_prompt",
         "model_tier", "tool_scope", "creator_fee_share_pct", "status",
         "testing_started_at", "enabled_tools",
+        "notify_channel", "notify_destination",
     }
     sets = []
     values: list[Any] = []
@@ -1133,6 +1164,24 @@ def get_custom_agent(agent_id: str) -> Optional[dict[str, Any]]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM custom_agents WHERE id = %s", (agent_id,))
+            row = cur.fetchone()
+    return _custom_agent_row_to_dict(row) if row else None
+
+
+def mark_notification_verified(agent_id: str) -> Optional[dict[str, Any]]:
+    """Stamp notify_verified_at -- only ever called after a real test-send the
+    user confirmed receiving, never on the agent's own say-so."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE custom_agents SET notify_verified_at = NOW(), updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (agent_id,),
+            )
             row = cur.fetchone()
     return _custom_agent_row_to_dict(row) if row else None
 
