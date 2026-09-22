@@ -41,10 +41,23 @@ export type LaunchedAgentRecord = {
   runs: number;
   volume_usd: number;
   created_at: string;
+  notify_channel: "email" | "telegram" | null;
+  notify_destination: string | null;
+  notify_verified_at: string | null;
 };
 
 export async function fetchLaunchedAgents(status: "live" | "testing" = "live"): Promise<LaunchedAgentRecord[]> {
   const res = await fetch(`/api/agents/launchpad/agents?status=${status}`, { cache: "no-store" });
   const data = await res.json().catch(() => ({ agents: [] }));
+  return (data.agents ?? []) as LaunchedAgentRecord[];
+}
+
+export async function fetchMyLaunchedAgents(authToken: string): Promise<LaunchedAgentRecord[]> {
+  const res = await fetch("/api/agents/launchpad/agents/mine", {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  const data = await res.json().catch(() => ({ agents: [] }));
+  if (!res.ok) return [];
   return (data.agents ?? []) as LaunchedAgentRecord[];
 }

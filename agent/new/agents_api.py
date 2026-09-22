@@ -55,6 +55,8 @@ from db import (
     load_chat_history,
 )
 from btc_price_alert import check_btc_price_alert
+from btc_price_alert import start_scheduler as start_btc_alert_scheduler
+from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -369,6 +371,8 @@ def _startup() -> None:
         print(f"  📈 EasyA limit-order scheduler started (every {EASYA_ORDER_POLL_SECONDS}s)")
     if start_volume_scheduler():
         print(f"  📊 Volume Agent scheduler started (every {VOLUME_SCHEDULER_POLL_SECONDS}s)")
+    if start_btc_alert_scheduler():
+        print(f"  🟠 BTC price-alert scheduler started (every {BTC_ALERT_POLL_SECONDS}s)")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent")
 

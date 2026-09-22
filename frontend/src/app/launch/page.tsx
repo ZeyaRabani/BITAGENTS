@@ -63,6 +63,12 @@ export default function LaunchPage() {
             >
               Browse Agents
             </a>
+            <Link
+              href="/launch/mine"
+              className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal"
+            >
+              My Agents
+            </Link>
           </div>
         </div>
       </section>

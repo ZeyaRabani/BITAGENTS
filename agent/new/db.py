@@ -774,6 +774,24 @@ def list_btc_price_alert_log(alert_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
+def list_active_btc_price_alerts() -> list[str]:
+    """Alert ids linked to a launched (testing/live) agent -- what the
+    background scheduler actually polls. Orphaned/manual-test alerts
+    (agent_id IS NULL) are excluded so they never silently keep running."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT a.id FROM btc_price_alerts a
+                JOIN custom_agents c ON c.id = a.agent_id
+                WHERE c.status IN ('testing', 'live')
+                """
+            )
+            rows = cur.fetchall()
+    return [r["id"] for r in rows]
+
+
 def find_plan(plan_id: str) -> Optional[dict[str, Any]]:
     init_db()
     with get_conn() as conn:

@@ -15,6 +15,9 @@ since-the-dawn-of-time one.
 
 from __future__ import annotations
 
+import os
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -22,12 +25,20 @@ import requests
 from db import (
     get_btc_price_alert,
     get_custom_agent,
+    list_active_btc_price_alerts,
     log_btc_price_alert_fire,
     update_btc_price_alert_check,
 )
 from notifications import send_notification
 
 COINGECKO_URL = "https://api.coingecko.com/api/v3/simple/price"
+
+# One shared poll serves every user's alert -- this is the cost lever, not
+# the notifications themselves (see the setup-cost discussion). A single
+# CoinGecko call + DB pass covers however many agents are watching BTC.
+SCHEDULER_POLL_SECONDS = int(os.environ.get("BTC_ALERT_SCHEDULER_POLL_SECONDS", "60"))
+_scheduler_running = False
+_scheduler_lock = threading.Lock()
 
 
 def fetch_btc_price_usd() -> float:
@@ -108,3 +119,53 @@ def check_btc_price_alert(alert_id: str) -> dict:
         "baseline": baseline,
         "change_pct": round(change_pct, 3),
     }
+
+
+# ─── Scheduler ────────────────────────────────────────────────────────────────
+# Same shape as dca_agent.py's _scheduler_loop: a daemon thread, one shared
+# poll per tick covering every active alert, nothing held between ticks.
+
+def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
+    global _scheduler_running
+    while _scheduler_running:
+        try:
+            alert_ids = list_active_btc_price_alerts()
+            if alert_ids:
+                price = None
+                try:
+                    price = fetch_btc_price_usd()
+                except Exception as exc:
+                    print(f"  ⚠️  BTC alert scheduler: price fetch failed: {exc}")
+                if price is not None:
+                    print(f"  🟠 BTC alert tick: ${price:,.2f} · {len(alert_ids)} active watch(es)")
+                    for alert_id in alert_ids:
+                        try:
+                            result = check_btc_price_alert(alert_id)
+                            if result.get("status") == "fired":
+                                notif = result.get("notification") or {}
+                                mark = "✅" if notif.get("ok") else "⚠️"
+                                print(
+                                    f"    {mark} {alert_id}: {result['change_pct']:+.2f}% "
+                                    f"→ ${result['price_usd']:,.2f} (notify: {notif})"
+                                )
+                        except Exception as exc:
+                            print(f"  ⚠️  BTC alert {alert_id} check failed: {exc}")
+        except Exception as exc:
+            print(f"  ⚠️  BTC alert scheduler error: {exc}")
+        time.sleep(poll_seconds)
+
+
+def start_scheduler() -> bool:
+    global _scheduler_running
+    with _scheduler_lock:
+        if _scheduler_running:
+            return False
+        _scheduler_running = True
+        t = threading.Thread(target=_scheduler_loop, daemon=True, name="btc-alert-scheduler")
+        t.start()
+        return True
+
+
+def stop_scheduler() -> None:
+    global _scheduler_running
+    _scheduler_running = False
