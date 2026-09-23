@@ -459,41 +459,59 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
     }
 
 
-def _launch_ready(draft: dict[str, Any]) -> bool:
-    required_ready = all(
-        (draft.get(f) or "").strip()
-        for f in ("name", "handle", "category", "description", "system_prompt")
-    )
-    if not required_ready:
-        return False
-    if draft.get("notify_channel") and not draft.get("notify_verified_at"):
-        return False
-    return True
+def _launch_blockers(draft: dict[str, Any]) -> list[str]:
+    """What's GENUINELY stopping this draft from launching -- not what tool
+    was or wasn't called, actual DB state. notify_verified_at is deliberately
+    NOT required here: a verified-but-not-yet-confirmed channel is something
+    the self-check below can still resolve (the test already succeeded, the
+    only gap is one tool call); a channel whose test never succeeded cannot,
+    and is a real blocker."""
+    missing = [
+        f for f in ("name", "handle", "category", "description", "system_prompt")
+        if not (draft.get(f) or "").strip()
+    ]
+    if draft.get("notify_channel") and not draft.get("notify_test_sent_ok"):
+        missing.append("a successful notification test-send")
+    return missing
 
 
 def _ensure_finalized_if_ready(
     agent_id: str, reply: str, history: list, actions: list[dict[str, Any]]
 ) -> tuple[str, list, list[dict[str, Any]]]:
     """Code-level safety net for the exact failure this builder exists to
-    prevent: the model narrating a finished launch without ever calling
-    finalize_and_launch. If the draft is genuinely launch-ready but this
-    turn didn't finalize it, force one more silent check rather than trust
-    the reply text. Runs on a scratch copy of history so a failed/no-op
-    check never pollutes the real, persisted conversation the user sees."""
-    if any(a["tool"] == "finalize_and_launch" for a in actions):
-        return reply, history, actions
+    prevent: the model narrating success without the underlying tool call
+    actually having succeeded. Checks real DB state, not whether a tool was
+    merely *attempted* this turn -- a failed finalize_and_launch call still
+    leaves status='draft', and the old version of this check treated any
+    attempt (success or failure) as "done", which is exactly how an agent
+    could get stuck confirming forever without ever launching. Runs on a
+    scratch copy of history so a failed/no-op check never pollutes the
+    real, persisted conversation the user sees."""
     draft = db.get_custom_agent(agent_id)
-    if not draft or draft.get("status") != "draft" or not _launch_ready(draft):
+    if not draft or draft.get("status") != "draft":
+        return reply, history, actions
+    blockers = _launch_blockers(draft)
+    if blockers:
         return reply, history, actions
 
+    needs_confirm_call = bool(draft.get("notify_channel")) and not draft.get("notify_verified_at")
     nudge = (
         "SYSTEM CHECK (internal -- not a real user message): every required "
-        "field and notification verification is already complete, but "
-        "finalize_and_launch was not called this turn. If the user already "
-        "confirmed they want to launch earlier in this conversation, call "
-        "finalize_and_launch right now. If they have not yet clearly "
-        "confirmed, call show_draft and note that confirmation is still "
-        "needed -- never assume."
+        "field is set and the notification test-send already succeeded. "
+        + (
+            "It has NOT been marked verified yet -- if the user has already "
+            "confirmed receiving the test alert anywhere earlier in this real "
+            "conversation (read the actual history, don't assume), call "
+            "confirm_notification_received now, then finalize_and_launch. "
+            if needs_confirm_call
+            else ""
+        )
+        + "finalize_and_launch was not confirmed as successful this turn. If "
+        "the user already confirmed they want to launch earlier in this "
+        "conversation, call finalize_and_launch right now and check its real "
+        "return value -- do not just say it worked. If they have not yet "
+        "clearly confirmed, call show_draft and note that confirmation is "
+        "still needed -- never assume."
     )
     _, _, extra_actions = run_tool_agent(
         nudge,

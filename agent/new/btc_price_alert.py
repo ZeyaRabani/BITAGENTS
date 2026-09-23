@@ -19,6 +19,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import requests
 
@@ -77,16 +78,22 @@ def _notify_agent_creator(alert: dict, price: float, change_pct: float) -> dict:
     return send_notification(agent["notify_channel"], agent["notify_destination"], subject, body)
 
 
-def check_btc_price_alert(alert_id: str) -> dict:
+def check_btc_price_alert(alert_id: str, price: Optional[float] = None) -> dict:
     """One tick: fetch price, compare to the rolling-window baseline, alert +
     reset the window if the threshold's crossed or the window's expired.
     Call this repeatedly (a cron job, a manual invocation, whatever) -- it
-    needs nothing carried over between calls."""
+    needs nothing carried over between calls.
+
+    Pass `price` when the caller already fetched it this tick (the
+    scheduler checking N alerts) -- otherwise every alert re-fetches
+    independently, which is what was actually rate-limiting us against
+    CoinGecko's free tier, not real usage volume."""
     alert = get_btc_price_alert(alert_id)
     if not alert:
         return {"error": f"No alert with id {alert_id}"}
 
-    price = fetch_btc_price_usd()
+    if price is None:
+        price = fetch_btc_price_usd()
     baseline = alert.get("baseline_price_usd")
 
     if baseline is None or _window_expired(alert):
@@ -140,7 +147,7 @@ def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
                     print(f"  🟠 BTC alert tick: ${price:,.2f} · {len(alert_ids)} active watch(es)")
                     for alert_id in alert_ids:
                         try:
-                            result = check_btc_price_alert(alert_id)
+                            result = check_btc_price_alert(alert_id, price=price)
                             if result.get("status") == "fired":
                                 notif = result.get("notification") or {}
                                 mark = "✅" if notif.get("ok") else "⚠️"
