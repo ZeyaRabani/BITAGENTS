@@ -397,6 +397,12 @@ MIGRATION_STATEMENTS = [
     # succeeded -- confirm_notification_received refuses to fire otherwise,
     # so the model can't mark "confirmed" a test that was never delivered.
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS notify_test_sent_ok BOOLEAN NOT NULL DEFAULT FALSE",
+    # Tracks a just-issued Telegram link code so the backend can auto-resolve
+    # it (poll-and-claim) at the start of the NEXT turn regardless of
+    # whether the model remembers to call check_telegram_connect itself --
+    # this stopped being optional after real testing showed the model
+    # narrating "still not connected" without ever re-checking.
+    "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS pending_telegram_code VARCHAR(24)",
     "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES custom_agents (id) ON DELETE CASCADE",
     # "moves 1% in one hour" is a rolling window, not "since the last check" --
     # window_started_at resets the baseline once window_hours has elapsed,
@@ -1383,7 +1389,7 @@ def update_custom_agent_fields(agent_id: str, **fields: Any) -> Optional[dict[st
         "name", "handle", "category", "description", "system_prompt",
         "model_tier", "tool_scope", "creator_fee_share_pct", "status",
         "testing_started_at", "enabled_tools",
-        "notify_channel", "notify_destination", "notify_test_sent_ok",
+        "notify_channel", "notify_destination", "notify_test_sent_ok", "pending_telegram_code",
     }
     sets = []
     values: list[Any] = []

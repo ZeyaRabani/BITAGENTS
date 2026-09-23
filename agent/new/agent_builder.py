@@ -405,6 +405,9 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
                 "error": "Telegram isn't configured on the backend yet "
                          "(TELEGRAM_BOT_TOKEN missing) -- offer email instead for now.",
             }
+        # Stashed so the NEXT turn auto-resolves this even if you forget to
+        # call check_telegram_connect -- see _auto_resolve_telegram_link.
+        db.update_custom_agent_fields(agent_id, pending_telegram_code=code)
         return {"ok": True, "code": code, "deep_link": link}
 
     def check_telegram_connect(**kwargs):
@@ -418,6 +421,7 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             return {"linked": False}
         result = _set_notification_channel("telegram", record["chat_id"])
         result["linked"] = True
+        db.update_custom_agent_fields(agent_id, pending_telegram_code=None)
         return result
 
     def send_test_notification(**_kwargs):
@@ -605,6 +609,32 @@ def _ensure_finalized_if_ready(
     return reply, history, actions + extra_actions
 
 
+def _auto_resolve_telegram_link(agent_id: str) -> None:
+    """Deterministic, model-independent resolution of a pending Telegram
+    connect code -- runs before every turn so a user pressing Start in
+    Telegram is picked up on their very next message, even if the model
+    never actually calls check_telegram_connect itself. Real testing
+    showed the model narrating "still not connected" without re-checking,
+    across multiple retries, while the link had genuinely already
+    succeeded server-side -- this removes that dependency entirely."""
+    draft = db.get_custom_agent(agent_id)
+    if not draft:
+        return
+    code = draft.get("pending_telegram_code")
+    if not code:
+        return
+    record = db.get_telegram_link_code(code)
+    if not record or not record.get("chat_id"):
+        return
+    db.update_custom_agent_fields(
+        agent_id,
+        notify_channel="telegram",
+        notify_destination=record["chat_id"],
+        notify_test_sent_ok=False,
+        pending_telegram_code=None,
+    )
+
+
 def run_builder_agent(
     user_input: str,
     conversation_history: list,
@@ -612,6 +642,7 @@ def run_builder_agent(
     agent_id: str,
     session_id: Optional[str] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
+    _auto_resolve_telegram_link(agent_id)
     reply, history, actions = run_tool_agent(
         user_input,
         conversation_history,
