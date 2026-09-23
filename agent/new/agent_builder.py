@@ -21,6 +21,7 @@ from agent_tool_runner import run_tool_agent
 from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
 from btc_price_alert import fetch_btc_price_usd
 from product_price_watch import fetch_product_price
+from digest_watch import fetch_topic_headlines
 from hosted_llm import call_openrouter
 from notifications import VALID_CHANNELS, send_notification
 from telegram_linking import build_deep_link
@@ -107,6 +108,10 @@ with a URL), call create_product_price_watch with the URL and drop threshold onc
 channel is verified. It tries to fetch the page and read a real price immediately — if it can't \
 find one, tell the user honestly which page failed and why, don't guess a price or pretend it \
 worked.
+If the agent is a recurring daily digest instead (e.g. "summarize news about X every morning"), \
+ask what time of day (as an hour, e.g. 8am) they want it, then call create_digest_watch with the \
+topic and hour once the notification channel is verified. This is genuinely different from the \
+other two: it's not triggered by any condition, it just fires once a day at that hour.
 
 When you believe the draft is complete, call show_draft, present the full configuration clearly to \
 the user (name, handle, category, description, the system prompt you wrote, which capabilities it \
@@ -317,6 +322,28 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_digest_watch",
+            "description": (
+                "Create a recurring daily digest that fires once a day at the given hour, regardless "
+                "of any condition -- not a threshold alert. Only call once the notification channel "
+                "is verified via confirm_notification_received."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "What to summarize news about each day."},
+                    "schedule_hour": {
+                        "type": "integer",
+                        "description": "Hour of day (0-23, UTC) to send the digest. Defaults to 8.",
+                    },
+                },
+                "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finalize_and_launch",
             "description": (
                 "Finalize the draft and move it into the 24h testing window. Only call this after "
@@ -502,6 +529,28 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         )
         return {"ok": True, "watch": watch, "current_price": price, "currency": currency}
 
+    def create_digest_watch(**kwargs):
+        topic = (kwargs.get("topic") or "").strip()
+        schedule_hour = kwargs.get("schedule_hour")
+        schedule_hour = int(schedule_hour) if schedule_hour is not None else 8
+        if not topic:
+            return {"error": "topic is required"}
+        if not 0 <= schedule_hour <= 23:
+            return {"error": "schedule_hour must be 0-23"}
+        draft = db.get_custom_agent(agent_id)
+        if not draft or not draft.get("notify_verified_at"):
+            return {"error": "Notification channel must be verified before creating a digest watch."}
+        existing = db.get_digest_watch_by_agent(agent_id)
+        if existing:
+            updated = db.update_digest_watch_params(existing["id"], topic=topic, schedule_hour=schedule_hour)
+            return {"ok": True, "watch": updated}
+        try:
+            sample_headlines = fetch_topic_headlines(topic, limit=3)
+        except Exception as exc:
+            return {"error": f"Could not fetch news for that topic: {exc}"}
+        watch = db.create_digest_watch(topic, schedule_hour, agent_id=agent_id)
+        return {"ok": True, "watch": watch, "sample_headlines": sample_headlines}
+
     def finalize_and_launch(**_kwargs):
         draft = db.get_custom_agent(agent_id)
         if not draft:
@@ -532,6 +581,7 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         "confirm_notification_received": confirm_notification_received,
         "create_price_watch": create_price_watch,
         "create_product_price_watch": create_product_price_watch,
+        "create_digest_watch": create_digest_watch,
         "finalize_and_launch": finalize_and_launch,
     }
 

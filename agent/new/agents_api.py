@@ -67,6 +67,10 @@ from product_price_watch import start_scheduler as start_product_price_scheduler
 from product_price_watch import SCHEDULER_POLL_SECONDS as PRODUCT_PRICE_POLL_SECONDS
 from product_price_watch import check_product_price_watch, fetch_product_price
 from db import create_product_price_watch, get_product_price_watch_by_agent, update_product_price_watch_params
+from digest_watch import start_scheduler as start_digest_scheduler
+from digest_watch import SCHEDULER_POLL_SECONDS as DIGEST_POLL_SECONDS
+from digest_watch import check_digest_watch
+from db import create_digest_watch
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -397,6 +401,8 @@ def _startup() -> None:
         print("  ⚠️  TELEGRAM_BOT_TOKEN not set -- Telegram connect unavailable")
     if start_product_price_scheduler():
         print(f"  🛒 Product price-watch scheduler started (every {PRODUCT_PRICE_POLL_SECONDS}s)")
+    if start_digest_scheduler():
+        print(f"  📰 Digest scheduler started (every {DIGEST_POLL_SECONDS}s)")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent")
 
@@ -503,6 +509,17 @@ def product_watch_create(url: str = Query(...), threshold_pct: float = Query(5.0
 @app.post("/product-watch/{watch_id}/check")
 def product_watch_check(watch_id: str) -> dict[str, Any]:
     return check_product_price_watch(watch_id)
+
+
+# ── Digest Watch MVP: local-test-only endpoints, no auth ───────────────────
+@app.post("/digest-watch/create")
+def digest_watch_create(topic: str = Query(...), schedule_hour: int = Query(8)) -> dict[str, Any]:
+    return create_digest_watch(topic, schedule_hour)
+
+
+@app.post("/digest-watch/{watch_id}/check")
+def digest_watch_check(watch_id: str, force: bool = Query(True)) -> dict[str, Any]:
+    return check_digest_watch(watch_id, force=force)
 
 
 @app.get("/kickstart/health")

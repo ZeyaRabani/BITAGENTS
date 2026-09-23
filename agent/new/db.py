@@ -449,6 +449,21 @@ MIGRATION_STATEMENTS = [
         fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # Experiment 3: true recurring execution, independent of any trigger
+    # condition -- this is the genuinely new infrastructure piece (#1 and #2
+    # both reuse the same "check on a tick, compare, maybe fire" shape as the
+    # BTC alert; this one fires once per day regardless of any condition).
+    """
+    CREATE TABLE IF NOT EXISTS digest_watches (
+        id              VARCHAR(32) PRIMARY KEY,
+        agent_id        UUID REFERENCES custom_agents (id) ON DELETE CASCADE,
+        topic           TEXT NOT NULL,
+        schedule_hour   INTEGER NOT NULL DEFAULT 8,
+        last_sent_at    TIMESTAMPTZ,
+        last_error      TEXT,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 
@@ -982,6 +997,96 @@ def update_product_price_watch_params(
             cur.execute(
                 f"UPDATE product_price_watches SET {', '.join(sets)} WHERE id = %s RETURNING *",
                 values,
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def create_digest_watch(topic: str, schedule_hour: int, *, agent_id: Optional[str] = None) -> dict[str, Any]:
+    init_db()
+    watch_id = uuid.uuid4().hex[:8]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO digest_watches (id, agent_id, topic, schedule_hour)
+                VALUES (%s, %s, %s, %s)
+                RETURNING *
+                """,
+                (watch_id, agent_id, topic, schedule_hour),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_digest_watch(watch_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM digest_watches WHERE id = %s", (watch_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_digest_watch_by_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM digest_watches WHERE agent_id = %s", (agent_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def list_active_digest_watches() -> list[str]:
+    """Ids linked to a launched agent -- what the scheduler ticks. Unlike
+    the price watches, due-ness (has today's hour arrived, was it already
+    sent today) is decided in digest_watch.py, not in SQL here."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT w.id FROM digest_watches w
+                JOIN custom_agents c ON c.id = w.agent_id
+                WHERE c.status IN ('testing', 'live')
+                """
+            )
+            rows = cur.fetchall()
+    return [r["id"] for r in rows]
+
+
+def update_digest_watch_sent(watch_id: str, *, error: Optional[str] = None, sent: bool = False) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if sent:
+                cur.execute(
+                    "UPDATE digest_watches SET last_sent_at = NOW(), last_error = %s WHERE id = %s",
+                    (error, watch_id),
+                )
+            else:
+                cur.execute("UPDATE digest_watches SET last_error = %s WHERE id = %s", (error, watch_id))
+
+
+def update_digest_watch_params(
+    watch_id: str, *, topic: Optional[str] = None, schedule_hour: Optional[int] = None
+) -> Optional[dict[str, Any]]:
+    if topic is None and schedule_hour is None:
+        return get_digest_watch(watch_id)
+    init_db()
+    sets = []
+    values: list[Any] = []
+    if topic is not None:
+        sets.append("topic = %s")
+        values.append(topic)
+    if schedule_hour is not None:
+        sets.append("schedule_hour = %s")
+        values.append(schedule_hour)
+    values.append(watch_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE digest_watches SET {', '.join(sets)} WHERE id = %s RETURNING *", values
             )
             row = cur.fetchone()
     return dict(row) if row else None
