@@ -613,28 +613,28 @@ def get_token_price(symbol: str) -> dict:
         return tok
     fetched_at = _fmt_ts(datetime.now(timezone.utc))
     if tok.get("coingecko_id"):
-    try:
-        r = requests.get(
-            f"{COINGECKO_API}/simple/price",
-            params={
-                "ids": tok["coingecko_id"],
-                "vs_currencies": "usd",
-                "include_24hr_change": "true",
-            },
-            headers=HEADERS,
-            timeout=15,
-        )
-        data = r.json().get(tok["coingecko_id"], {})
-        return {
-            "symbol": tok["symbol"],
+        try:
+            r = requests.get(
+                f"{COINGECKO_API}/simple/price",
+                params={
+                    "ids": tok["coingecko_id"],
+                    "vs_currencies": "usd",
+                    "include_24hr_change": "true",
+                },
+                headers=HEADERS,
+                timeout=15,
+            )
+            data = r.json().get(tok["coingecko_id"], {})
+            return {
+                "symbol": tok["symbol"],
                 "mint": tok["mint"],
-            "price_usd": data.get("usd"),
-            "change_24h_pct": data.get("usd_24h_change"),
+                "price_usd": data.get("usd"),
+                "change_24h_pct": data.get("usd_24h_change"),
                 "source": "coingecko",
                 "fetched_at": fetched_at,
-        }
-    except Exception as e:
-        return {"error": str(e)}
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     if tok.get("usd_price") is not None:
         return {
@@ -980,22 +980,22 @@ def _execute_jupiter_swap_v2(
     last_error: Any = None
     for attempt in range(1, 4):
         # ── 3. Get latest blockhash ────────────────────────────────────────────
-    try:
+        try:
             # Circle signing adds latency; finalized blockhashes stay valid longer.
             commitment = "finalized" if circle_wallet_id else "confirmed"
             bh_result = sol_rpc("getLatestBlockhash", [{"commitment": commitment}])
-        blockhash = Hash.from_string(bh_result["value"]["blockhash"])
-    except Exception as e:
+            blockhash = Hash.from_string(bh_result["value"]["blockhash"])
+        except Exception as e:
             last_error = e
             if attempt < 3:
                 time.sleep(0.35 * attempt)
                 continue
-        return {"error": f"Failed to fetch blockhash: {e}"}
+            return {"error": f"Failed to fetch blockhash: {e}"}
 
         # ── 4. Compile MessageV0 with LUTs + sign ──────────────────────────────
-    try:
-        payer = SPubkey.from_string(wallet_pubkey)
-        msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
+        try:
+            payer = SPubkey.from_string(wallet_pubkey)
+            msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
             if circle_wallet_id:
                 from circle_dca_wallets import circle_sign_versioned_message
 
@@ -1004,55 +1004,55 @@ def _execute_jupiter_swap_v2(
                 if not keypair:
                     return {"error": "No signing key available for Jupiter swap."}
                 tx = VersionedTransaction(msg, [keypair])
-        encoded = base64.b64encode(bytes(tx)).decode("utf-8")
-    except Exception as e:
+                encoded = base64.b64encode(bytes(tx)).decode("utf-8")
+        except Exception as e:
             last_error = e
             if _is_blockhash_error(e) and attempt < 3:
                 print(f"    ⚠️  Blockhash stale while signing swap (attempt {attempt}/3), retrying…")
                 time.sleep(0.35 * attempt)
                 continue
-        return {"error": f"Transaction compilation/signing failed: {e}"}
+            return {"error": f"Transaction compilation/signing failed: {e}"}
 
         # ── 5. Send via RPC (skipPreflight mirrors Node.js) ───────────────────
         # Avoid minContextSlot — public RPCs often drop or delay those sends.
         send_opts: dict[str, Any] = {
-                "encoding":            "base64",
+            "encoding":            "base64",
             "skipPreflight":       True,
-                "preflightCommitment": "confirmed",
+            "preflightCommitment": "confirmed",
             "maxRetries":          5,
         }
         try:
             sig = sol_rpc("sendTransaction", [encoded, send_opts])
-    except Exception as e:
+        except Exception as e:
             last_error = e
             if _is_blockhash_error(e) and attempt < 3:
                 print(f"    ⚠️  Blockhash rejected on swap send (attempt {attempt}/3), retrying…")
                 time.sleep(0.35 * attempt)
                 continue
-        return {"error": f"sendTransaction failed: {e}"}
+            return {"error": f"sendTransaction failed: {e}"}
 
-    print(f"    Signature: {sig}")
+        print(f"    Signature: {sig}")
 
         # ── 6. Poll for confirmation (rebroadcast on the way) ─────────────────
         confirm = _confirm_transaction(sig, timeout_s=75, encoded_tx=encoded)
-    if not confirm["confirmed"]:
-        err     = confirm.get("error", "unknown")
+        if not confirm["confirmed"]:
+            err     = confirm.get("error", "unknown")
             if (_is_blockhash_error(err) or _is_confirmation_timeout(err) or confirm.get("retryable")) and attempt < 3:
                 print(f"    ⚠️  Swap not confirmed (attempt {attempt}/3): {err} — resigning…")
                 time.sleep(0.5 * attempt)
                 continue
             err_str = json.dumps(err) if not isinstance(err, str) else err
-        if "'Custom':1" in err_str or (isinstance(err, dict) and err.get("InstructionError")):
-            print("    ↳ Custom:1 usually means insufficient SOL for ATA rent (~0.002 SOL per new token account)")
-        return {"status": "failed", "signature": sig, "error": err}
+            if "'Custom':1" in err_str or (isinstance(err, dict) and err.get("InstructionError")):
+                print("    ↳ Custom:1 usually means insufficient SOL for ATA rent (~0.002 SOL per new token account)")
+            return {"status": "failed", "signature": sig, "error": err}
 
-    print("    Status: ✅ Success")
-    explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
-    return {
-        "status":       "success",
-        "signature":    sig,
-        "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
-    }
+        print("    Status: ✅ Success")
+        explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
+        return {
+            "status":       "success",
+            "signature":    sig,
+            "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
+        }
 
     return {"error": f"Swap failed after blockhash retries: {last_error}"}
 
@@ -2232,7 +2232,7 @@ def get_dca_history(plan_id: str, user_wallet: Optional[str] = None) -> dict:
             return owned
         plan = owned
     else:
-    plan = _find_plan(plan_id)
+        plan = _find_plan(plan_id)
     if not plan:
         return {"error": f"Plan '{plan_id}' not found."}
     return {
@@ -2422,11 +2422,11 @@ def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
             for plan in claim_due_dca_plans():
                 owner = (plan.get("user_wallet") or "unknown")[:8]
                 print(f"\n  ⏰ DCA due: {plan['name']} ({plan['id']}) · user {owner}…")
-                    result = _run_plan_execution(plan["id"])
-                    if result.get("status") == "success":
-                        print(f"  ✅ Tx: {result.get('signature', 'ok')}")
-                    else:
-                        print(f"  ⚠️  {result.get('error', result)}")
+                result = _run_plan_execution(plan["id"])
+                if result.get("status") == "success":
+                    print(f"  ✅ Tx: {result.get('signature', 'ok')}")
+                else:
+                    print(f"  ⚠️  {result.get('error', result)}")
         except Exception as e:
             print(f"  ⚠️  Scheduler error: {e}")
         time.sleep(poll_seconds)
@@ -3684,7 +3684,7 @@ def run_agent_with_actions(
                 if recovered:
                     tool_name, args, result, reply = recovered
                     actions.append({"tool": tool_name, "args": args, "result": result})
-            conversation_history.append({"role": "assistant", "content": reply})
+                    conversation_history.append({"role": "assistant", "content": reply})
                     return reply, conversation_history, actions
             reply = (message.get("content") or "").strip()
             # Models sometimes invent "plan created" / fake tool narration without tool_calls.
