@@ -6,12 +6,158 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 import {
+  confirmAgentNotify,
   fetchAgentPriceWatch,
   fetchMyLaunchedAgents,
+  getAgentNotifyTelegramStatus,
+  setAgentNotifyEmail,
+  startAgentNotifyTelegram,
+  testAgentNotify,
   updateLaunchedAgent,
   type LaunchedAgentRecord,
   type PriceWatch,
 } from "@/lib/launchpadBuilderClient";
+
+function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; token: string; onUpdated: (a: LaunchedAgentRecord) => void }) {
+  const [channel, setChannel] = useState<"email" | "telegram">(agent.notify_channel ?? "email");
+  const [email, setEmail] = useState(agent.notify_channel === "email" ? agent.notify_destination ?? "" : "");
+  const [telegramLink, setTelegramLink] = useState<string | null>(null);
+  const [telegramLinked, setTelegramLinked] = useState(agent.notify_channel === "telegram");
+  const [testSent, setTestSent] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!telegramLink || telegramLinked) return;
+    const interval = setInterval(async () => {
+      const status = await getAgentNotifyTelegramStatus(agent.id, token);
+      if (status.linked) {
+        setTelegramLinked(true);
+        setMsg("Telegram connected — click Send Test below.");
+        clearInterval(interval);
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [telegramLink, telegramLinked, agent.id, token]);
+
+  async function saveEmail() {
+    setBusy(true);
+    setMsg(null);
+    const { ok, data } = await setAgentNotifyEmail(agent.id, email.trim(), token);
+    setBusy(false);
+    setTestSent(false);
+    setMsg(ok ? "Email set — click Send Test to verify it." : data.detail ?? "Failed to set email.");
+  }
+
+  async function connectTelegram() {
+    setBusy(true);
+    setMsg(null);
+    const { ok, data } = await startAgentNotifyTelegram(agent.id, token);
+    setBusy(false);
+    if (ok) {
+      setTelegramLink(data.deep_link);
+      setTelegramLinked(false);
+      setTestSent(false);
+      setMsg("Click the link, press Start in Telegram, then wait a moment.");
+    } else {
+      setMsg(data.detail ?? "Failed to start Telegram connect.");
+    }
+  }
+
+  async function sendTest() {
+    setBusy(true);
+    setMsg(null);
+    const { ok, data } = await testAgentNotify(agent.id, token);
+    setBusy(false);
+    setTestSent(!!data.ok);
+    setMsg(data.ok ? "Test sent — check your inbox/Telegram, then confirm below." : data.error ?? "Test send failed.");
+  }
+
+  async function confirmReceived() {
+    setBusy(true);
+    setMsg(null);
+    const { ok, data } = await confirmAgentNotify(agent.id, token);
+    setBusy(false);
+    if (ok) {
+      onUpdated(data);
+      setMsg("Confirmed — this agent will now notify this destination.");
+    } else {
+      setMsg(data.detail ?? "Could not confirm.");
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        {(["email", "telegram"] as const).map((c) => (
+          <button
+            key={c}
+            onClick={() => setChannel(c)}
+            className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] ${
+              channel === c ? "border-signal text-signal" : "border-grid text-muted-foreground"
+            }`}
+          >
+            {c === "email" ? "Email" : "Telegram"}
+          </button>
+        ))}
+      </div>
+
+      {channel === "email" ? (
+        <div className="flex gap-2">
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="you@example.com"
+            className="flex-1 border border-grid bg-background px-3 py-2 text-sm text-foreground"
+          />
+          <button
+            onClick={saveEmail}
+            disabled={busy || !email.trim()}
+            className="border border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+          >
+            Set
+          </button>
+        </div>
+      ) : telegramLinked ? (
+        <p className="text-xs text-signal">Telegram connected.</p>
+      ) : (
+        <button
+          onClick={connectTelegram}
+          disabled={busy}
+          className="border border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+        >
+          {telegramLink ? "Re-generate link" : "Connect Telegram"}
+        </button>
+      )}
+      {telegramLink && !telegramLinked && (
+        <a href={telegramLink} target="_blank" rel="noreferrer" className="block text-xs text-signal underline">
+          {telegramLink}
+        </a>
+      )}
+
+      {((channel === "email" && agent.notify_destination) || telegramLinked) && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <button
+            onClick={sendTest}
+            disabled={busy}
+            className="border border-grid px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+          >
+            Send Test
+          </button>
+          <button
+            onClick={confirmReceived}
+            disabled={busy || !testSent}
+            className="border border-signal bg-signal/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-signal disabled:opacity-40"
+          >
+            I received it — Confirm
+          </button>
+        </div>
+      )}
+      {msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+    </div>
+  );
+}
 
 const STATUS_LABEL: Record<LaunchedAgentRecord["status"], string> = {
   draft: "Draft — not launched",
@@ -124,6 +270,15 @@ function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; tok
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
+
+          <div className="border-t border-grid pt-4">
+            <label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              Notification destination — change where THIS agent alerts you
+            </label>
+            <div className="mt-2">
+              <NotifySection agent={agent} token={token} onUpdated={onUpdated} />
+            </div>
+          </div>
         </div>
       )}
 

@@ -60,10 +60,13 @@ from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
 from telegram_linking import start_poller as start_telegram_link_poller
+from telegram_linking import build_deep_link
+from db import create_telegram_link_code, get_telegram_link_code, mark_notification_verified
+from notifications import send_notification
 from product_price_watch import start_scheduler as start_product_price_scheduler
 from product_price_watch import SCHEDULER_POLL_SECONDS as PRODUCT_PRICE_POLL_SECONDS
 from product_price_watch import check_product_price_watch, fetch_product_price
-from db import create_product_price_watch
+from db import create_product_price_watch, get_product_price_watch_by_agent, update_product_price_watch_params
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -1021,13 +1024,97 @@ def update_launched_agent(
 
     if body.threshold_pct is not None or body.window_hours is not None:
         alert = get_btc_price_alert_by_agent(agent_id)
-        if not alert:
-            raise HTTPException(status_code=400, detail="This agent has no price watch to edit.")
-        update_btc_price_alert_params(
-            alert["id"], threshold_pct=body.threshold_pct, window_hours=body.window_hours
-        )
+        if alert:
+            update_btc_price_alert_params(
+                alert["id"], threshold_pct=body.threshold_pct, window_hours=body.window_hours
+            )
+        else:
+            watch = get_product_price_watch_by_agent(agent_id)
+            if not watch:
+                raise HTTPException(status_code=400, detail="This agent has no price watch to edit.")
+            update_product_price_watch_params(watch["id"], threshold_pct=body.threshold_pct)
 
     return agent or {}
+
+
+class NotifyEmailRequest(BaseModel):
+    email: str = Field(min_length=3)
+
+
+def _require_owned_agent(agent_id: str, auth_wallet: str) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=403, detail="Only this agent's creator can edit it.")
+    return agent
+
+
+@app.post("/agents/custom/{agent_id}/notify/set-email")
+def set_agent_notify_email(
+    agent_id: str, body: NotifyEmailRequest, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_owned_agent(agent_id, auth_wallet)
+    return update_custom_agent_fields(
+        agent_id, notify_channel="email", notify_destination=body.email.strip(),
+        notify_test_sent_ok=False, pending_telegram_code=None,
+    ) or {}
+
+
+@app.post("/agents/custom/{agent_id}/notify/telegram/start")
+def start_agent_notify_telegram(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_owned_agent(agent_id, auth_wallet)
+    code = create_telegram_link_code()
+    link = build_deep_link(code)
+    if not link:
+        raise HTTPException(status_code=503, detail="Telegram isn't configured on the backend.")
+    update_custom_agent_fields(agent_id, pending_telegram_code=code)
+    return {"code": code, "deep_link": link}
+
+
+@app.get("/agents/custom/{agent_id}/notify/telegram/status")
+def get_agent_notify_telegram_status(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    agent = _require_owned_agent(agent_id, auth_wallet)
+    code = agent.get("pending_telegram_code")
+    if not code:
+        return {"linked": agent.get("notify_channel") == "telegram"}
+    record = get_telegram_link_code(code)
+    if not record or not record.get("chat_id"):
+        return {"linked": False}
+    updated = update_custom_agent_fields(
+        agent_id, notify_channel="telegram", notify_destination=record["chat_id"],
+        notify_test_sent_ok=False, pending_telegram_code=None,
+    )
+    return {"linked": True, "agent": updated}
+
+
+@app.post("/agents/custom/{agent_id}/notify/test")
+def test_agent_notify(agent_id: str, auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    agent = _require_owned_agent(agent_id, auth_wallet)
+    if not agent.get("notify_channel") or not agent.get("notify_destination"):
+        raise HTTPException(status_code=400, detail="No notification channel set yet.")
+    result = send_notification(
+        agent["notify_channel"], agent["notify_destination"],
+        subject="Your BITAGENTS test alert",
+        body="This is a test alert -- if you got this, notifications are working.",
+    )
+    update_custom_agent_fields(agent_id, notify_test_sent_ok=bool(result.get("ok")))
+    return result
+
+
+@app.post("/agents/custom/{agent_id}/notify/confirm")
+def confirm_agent_notify(agent_id: str, auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    _require_owned_agent(agent_id, auth_wallet)
+    result = mark_notification_verified(agent_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @app.post("/agents/custom/{agent_id}/chat", response_model=ChatResponse)

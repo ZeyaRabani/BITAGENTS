@@ -82,6 +82,39 @@ export async function fetchAgentPriceWatch(
   return (await res.json()) as PriceWatch;
 }
 
+async function postNotify(agentId: string, path: string, authToken: string, body?: unknown) {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/notify/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+}
+
+export function setAgentNotifyEmail(agentId: string, email: string, authToken: string) {
+  return postNotify(agentId, "set-email", authToken, { email });
+}
+
+export function startAgentNotifyTelegram(agentId: string, authToken: string) {
+  return postNotify(agentId, "telegram/start", authToken);
+}
+
+export async function getAgentNotifyTelegramStatus(agentId: string, authToken: string) {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/notify/telegram/status`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  return (await res.json()) as { linked: boolean };
+}
+
+export function testAgentNotify(agentId: string, authToken: string) {
+  return postNotify(agentId, "test", authToken);
+}
+
+export function confirmAgentNotify(agentId: string, authToken: string) {
+  return postNotify(agentId, "confirm", authToken);
+}
+
 export async function updateLaunchedAgent(
   agentId: string,
   updates: { description?: string; threshold_pct?: number },
