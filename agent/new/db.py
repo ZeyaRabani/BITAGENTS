@@ -414,6 +414,35 @@ MIGRATION_STATEMENTS = [
         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # Experiment 2: watches an arbitrary product page for a price drop.
+    # "Drops X%" is relative to a running baseline that resets to the new,
+    # lower price each time it fires -- so it keeps catching further drops,
+    # not just the first one, without re-firing on the same drop repeatedly.
+    """
+    CREATE TABLE IF NOT EXISTS product_price_watches (
+        id                  VARCHAR(32) PRIMARY KEY,
+        agent_id            UUID REFERENCES custom_agents (id) ON DELETE CASCADE,
+        url                 TEXT NOT NULL,
+        product_label       TEXT,
+        threshold_pct       DOUBLE PRECISION NOT NULL,
+        currency            VARCHAR(8),
+        baseline_price      DOUBLE PRECISION,
+        last_checked_at     TIMESTAMPTZ,
+        last_alert_price    DOUBLE PRECISION,
+        last_alert_at       TIMESTAMPTZ,
+        last_error          TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS product_price_watch_log (
+        id          BIGSERIAL PRIMARY KEY,
+        watch_id    VARCHAR(32) NOT NULL REFERENCES product_price_watches (id) ON DELETE CASCADE,
+        price       DOUBLE PRECISION NOT NULL,
+        change_pct  DOUBLE PRECISION NOT NULL,
+        fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 
@@ -839,6 +868,117 @@ def list_active_btc_price_alerts() -> list[str]:
             )
             rows = cur.fetchall()
     return [r["id"] for r in rows]
+
+
+def create_product_price_watch(
+    url: str, threshold_pct: float, *, agent_id: Optional[str] = None,
+    product_label: Optional[str] = None, baseline_price: Optional[float] = None,
+    currency: Optional[str] = None,
+) -> dict[str, Any]:
+    init_db()
+    watch_id = uuid.uuid4().hex[:8]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO product_price_watches
+                    (id, agent_id, url, product_label, threshold_pct, currency, baseline_price, last_checked_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                RETURNING *
+                """,
+                (watch_id, agent_id, url, product_label, threshold_pct, currency, baseline_price),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_product_price_watch(watch_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM product_price_watches WHERE id = %s", (watch_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_product_price_watch_by_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM product_price_watches WHERE agent_id = %s", (agent_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def list_active_product_price_watches() -> list[str]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT w.id FROM product_price_watches w
+                JOIN custom_agents c ON c.id = w.agent_id
+                WHERE c.status IN ('testing', 'live')
+                """
+            )
+            rows = cur.fetchall()
+    return [r["id"] for r in rows]
+
+
+def update_product_price_watch_check(
+    watch_id: str, *, price: Optional[float] = None, error: Optional[str] = None,
+    new_baseline: Optional[float] = None, fired: bool = False,
+) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            sets = ["last_checked_at = NOW()", "last_error = %s"]
+            values: list[Any] = [error]
+            if new_baseline is not None:
+                sets.append("baseline_price = %s")
+                values.append(new_baseline)
+            if fired and price is not None:
+                sets.append("last_alert_price = %s")
+                values.append(price)
+                sets.append("last_alert_at = NOW()")
+            values.append(watch_id)
+            cur.execute(f"UPDATE product_price_watches SET {', '.join(sets)} WHERE id = %s", values)
+
+
+def log_product_price_watch_fire(watch_id: str, price: float, change_pct: float) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO product_price_watch_log (watch_id, price, change_pct) VALUES (%s, %s, %s)",
+                (watch_id, price, change_pct),
+            )
+
+
+def update_product_price_watch_params(
+    watch_id: str, *, threshold_pct: Optional[float] = None, url: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    if threshold_pct is None and url is None:
+        return get_product_price_watch(watch_id)
+    init_db()
+    sets = []
+    values: list[Any] = []
+    if threshold_pct is not None:
+        sets.append("threshold_pct = %s")
+        values.append(threshold_pct)
+    if url is not None:
+        sets.append("url = %s")
+        sets.append("baseline_price = NULL")
+        values.append(url)
+    values.append(watch_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE product_price_watches SET {', '.join(sets)} WHERE id = %s RETURNING *",
+                values,
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
 
 
 def create_telegram_link_code() -> str:

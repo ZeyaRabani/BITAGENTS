@@ -20,6 +20,7 @@ import db
 from agent_tool_runner import run_tool_agent
 from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
 from btc_price_alert import fetch_btc_price_usd
+from product_price_watch import fetch_product_price
 from hosted_llm import call_openrouter
 from notifications import VALID_CHANNELS, send_notification
 from telegram_linking import build_deep_link
@@ -98,9 +99,14 @@ need two more things before it can go live, and you must get them in this order:
    explicitly confirmed receipt (e.g. "I got it", "received") — a reply like "yes launch it" after \
    a failed test is not confirmation of receipt, it's the user trying to move past your last message; \
    address the failure first.
-If the agent is specifically a price-move watcher (e.g. "alert me when BTC moves X% in an hour"), \
-call create_price_watch with the threshold percentage once the notification channel is verified — \
-this is what actually makes the alert run in the background after this chat ends.
+If the agent is specifically a Bitcoin price-move watcher (e.g. "alert me when BTC moves X% in an \
+hour"), call create_price_watch with the threshold percentage once the notification channel is \
+verified — this is what actually makes the alert run in the background after this chat ends.
+If the agent is a product-page price-drop watcher instead (e.g. "tell me when this drops in price" \
+with a URL), call create_product_price_watch with the URL and drop threshold once the notification \
+channel is verified. It tries to fetch the page and read a real price immediately — if it can't \
+find one, tell the user honestly which page failed and why, don't guess a price or pretend it \
+worked.
 
 When you believe the draft is complete, call show_draft, present the full configuration clearly to \
 the user (name, handle, category, description, the system prompt you wrote, which capabilities it \
@@ -284,6 +290,33 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "create_product_price_watch",
+            "description": (
+                "Create a background watch on a product page URL that alerts when its price drops. "
+                "Fetches the page immediately to confirm a price can actually be read -- if it fails, "
+                "report the real error to the user, don't invent a price. Only call once the "
+                "notification channel is verified via confirm_notification_received."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "The product page URL to watch."},
+                    "threshold_pct": {
+                        "type": "number",
+                        "description": "Percent drop from the current price that should trigger an alert.",
+                    },
+                    "product_label": {
+                        "type": "string",
+                        "description": "Short human name for the product, for the alert message.",
+                    },
+                },
+                "required": ["url", "threshold_pct"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finalize_and_launch",
             "description": (
                 "Finalize the draft and move it into the 24h testing window. Only call this after "
@@ -417,6 +450,16 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         draft = db.get_custom_agent(agent_id)
         if not draft or not draft.get("notify_verified_at"):
             return {"error": "Notification channel must be verified before creating a price watch."}
+        # Idempotent: the model may call this more than once in a turn (e.g.
+        # after an earlier attempt errored) -- update the existing watch
+        # instead of inserting a duplicate row, which would otherwise fire
+        # two alerts for the same real price move.
+        existing = db.get_btc_price_alert_by_agent(agent_id)
+        if existing:
+            updated = db.update_btc_price_alert_params(
+                existing["id"], threshold_pct=float(threshold_pct), window_hours=float(window_hours)
+            )
+            return {"ok": True, "alert": updated}
         try:
             current_price = fetch_btc_price_usd()
         except Exception as exc:
@@ -425,6 +468,35 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             float(threshold_pct), agent_id=agent_id, window_hours=float(window_hours)
         )
         return {"ok": True, "alert": alert, "current_btc_price_usd": current_price}
+
+    def create_product_price_watch(**kwargs):
+        url = (kwargs.get("url") or "").strip()
+        threshold_pct = kwargs.get("threshold_pct")
+        product_label = (kwargs.get("product_label") or "").strip() or None
+        if not url:
+            return {"error": "url is required"}
+        if threshold_pct is None:
+            return {"error": "threshold_pct is required"}
+        draft = db.get_custom_agent(agent_id)
+        if not draft or not draft.get("notify_verified_at"):
+            return {"error": "Notification channel must be verified before creating a price watch."}
+        # Same idempotency guard as create_price_watch.
+        existing = db.get_product_price_watch_by_agent(agent_id)
+        if existing:
+            updated = db.update_product_price_watch_params(
+                existing["id"], threshold_pct=float(threshold_pct),
+                url=url if url != existing["url"] else None,
+            )
+            return {"ok": True, "watch": updated}
+        try:
+            price, currency = fetch_product_price(url)
+        except Exception as exc:
+            return {"error": f"Could not read a price from that page: {exc}"}
+        watch = db.create_product_price_watch(
+            url, float(threshold_pct), agent_id=agent_id,
+            product_label=product_label, baseline_price=price, currency=currency,
+        )
+        return {"ok": True, "watch": watch, "current_price": price, "currency": currency}
 
     def finalize_and_launch(**_kwargs):
         draft = db.get_custom_agent(agent_id)
@@ -455,6 +527,7 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         "send_test_notification": send_test_notification,
         "confirm_notification_received": confirm_notification_received,
         "create_price_watch": create_price_watch,
+        "create_product_price_watch": create_product_price_watch,
         "finalize_and_launch": finalize_and_launch,
     }
 

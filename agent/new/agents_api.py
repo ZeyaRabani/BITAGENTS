@@ -60,6 +60,10 @@ from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
 from telegram_linking import start_poller as start_telegram_link_poller
+from product_price_watch import start_scheduler as start_product_price_scheduler
+from product_price_watch import SCHEDULER_POLL_SECONDS as PRODUCT_PRICE_POLL_SECONDS
+from product_price_watch import check_product_price_watch, fetch_product_price
+from db import create_product_price_watch
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -388,6 +392,8 @@ def _startup() -> None:
         print("  💬 Telegram link poller started")
     else:
         print("  ⚠️  TELEGRAM_BOT_TOKEN not set -- Telegram connect unavailable")
+    if start_product_price_scheduler():
+        print(f"  🛒 Product price-watch scheduler started (every {PRODUCT_PRICE_POLL_SECONDS}s)")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent")
 
@@ -479,6 +485,21 @@ def btc_alert_check(alert_id: str) -> dict[str, Any]:
 @app.get("/btc-alert/{alert_id}/log")
 def btc_alert_log(alert_id: str) -> dict[str, Any]:
     return {"log": list_btc_price_alert_log(alert_id)}
+
+
+# ── Product Price Watch MVP: local-test-only endpoints, no auth ────────────
+@app.post("/product-watch/create")
+def product_watch_create(url: str = Query(...), threshold_pct: float = Query(5.0)) -> dict[str, Any]:
+    try:
+        price, currency = fetch_product_price(url)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read a price: {exc}") from exc
+    return create_product_price_watch(url, threshold_pct, baseline_price=price, currency=currency)
+
+
+@app.post("/product-watch/{watch_id}/check")
+def product_watch_check(watch_id: str) -> dict[str, Any]:
+    return check_product_price_watch(watch_id)
 
 
 @app.get("/kickstart/health")
