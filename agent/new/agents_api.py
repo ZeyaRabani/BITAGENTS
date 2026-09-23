@@ -53,7 +53,9 @@ from db import (
     list_custom_agents,
     list_watchlist,
     load_chat_history,
+    update_custom_agent_fields,
 )
+from db import get_btc_price_alert_by_agent, update_btc_price_alert_params
 from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
@@ -245,6 +247,14 @@ class AuthVerifyResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
     session_id: Optional[str] = None
+
+
+class LaunchedAgentUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    threshold_pct: Optional[float] = None
+    window_hours: Optional[float] = None
 
 
 class KickstartChatRequest(BaseModel):
@@ -951,6 +961,52 @@ def get_launched_agent(agent_id: str) -> dict[str, Any]:
     if agent["status"] not in ("live", "testing"):
         raise HTTPException(status_code=404, detail="Agent not found.")
     return agent
+
+
+@app.get("/agents/custom/{agent_id}/price-watch")
+def get_launched_agent_price_watch(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent or agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    alert = get_btc_price_alert_by_agent(agent_id)
+    if not alert:
+        raise HTTPException(status_code=404, detail="This agent has no price watch.")
+    return alert
+
+
+@app.patch("/agents/custom/{agent_id}")
+def update_launched_agent(
+    agent_id: str,
+    body: LaunchedAgentUpdateRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=403, detail="Only this agent's creator can edit it.")
+
+    fields: dict[str, Any] = {}
+    if body.name is not None:
+        fields["name"] = body.name.strip()
+    if body.description is not None:
+        fields["description"] = body.description.strip()
+    if body.system_prompt is not None:
+        fields["system_prompt"] = body.system_prompt.strip()
+    if fields:
+        agent = update_custom_agent_fields(agent_id, **fields)
+
+    if body.threshold_pct is not None or body.window_hours is not None:
+        alert = get_btc_price_alert_by_agent(agent_id)
+        if not alert:
+            raise HTTPException(status_code=400, detail="This agent has no price watch to edit.")
+        update_btc_price_alert_params(
+            alert["id"], threshold_pct=body.threshold_pct, window_hours=body.window_hours
+        )
+
+    return agent or {}
 
 
 @app.post("/agents/custom/{agent_id}/chat", response_model=ChatResponse)

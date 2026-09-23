@@ -69,12 +69,16 @@ export function AgentBuilderChat() {
     }
   }
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  function submitInput() {
     const text = input.trim();
     if (!text) return;
     setInput("");
     void runMessage(text);
+  }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    submitInput();
   }
 
   return (
@@ -154,18 +158,28 @@ export function AgentBuilderChat() {
 
         <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
           <div className="flex gap-2">
-            <input
-              type="text"
+            <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder={isAuthenticated ? "Tell it what you want to build…" : "Connect wallet and sign in to chat"}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitInput();
+                }
+              }}
+              placeholder={
+                isAuthenticated
+                  ? "Tell it what you want to build… (Shift+Enter for a new line)"
+                  : "Connect wallet and sign in to chat"
+              }
               disabled={!token || busy}
-              className="flex-1 border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+              rows={1}
+              className="max-h-40 min-h-[42px] flex-1 resize-y border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
             />
             <button
               type="submit"
               disabled={!token || busy || !input.trim()}
-              className="border border-signal bg-signal/10 px-4 py-2 font-mono text-xs uppercase tracking-wider text-signal disabled:opacity-40"
+              className="self-start border border-signal bg-signal/10 px-4 py-2 font-mono text-xs uppercase tracking-wider text-signal disabled:opacity-40"
             >
               Send
             </button>

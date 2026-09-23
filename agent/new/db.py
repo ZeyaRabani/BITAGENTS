@@ -712,6 +712,44 @@ def get_btc_price_alert(alert_id: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_btc_price_alert_by_agent(agent_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM btc_price_alerts WHERE agent_id = %s", (agent_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def update_btc_price_alert_params(
+    alert_id: str, *, threshold_pct: Optional[float] = None, window_hours: Optional[float] = None
+) -> Optional[dict[str, Any]]:
+    """User-driven edit of an existing watch's threshold/window -- distinct
+    from update_btc_price_alert_check, which is the scheduler recording a
+    tick. Resets window_started_at so the new threshold applies to a fresh
+    hour rather than being retroactively compared against an old baseline."""
+    if threshold_pct is None and window_hours is None:
+        return get_btc_price_alert(alert_id)
+    init_db()
+    sets = ["window_started_at = NOW()", "baseline_price_usd = NULL"]
+    values: list[Any] = []
+    if threshold_pct is not None:
+        sets.append("threshold_pct = %s")
+        values.append(threshold_pct)
+    if window_hours is not None:
+        sets.append("window_hours = %s")
+        values.append(window_hours)
+    values.append(alert_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE btc_price_alerts SET {', '.join(sets)} WHERE id = %s RETURNING *",
+                values,
+            )
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
 def update_btc_price_alert_check(
     alert_id: str,
     *,

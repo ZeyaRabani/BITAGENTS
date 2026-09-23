@@ -61,3 +61,41 @@ export async function fetchMyLaunchedAgents(authToken: string): Promise<Launched
   if (!res.ok) return [];
   return (data.agents ?? []) as LaunchedAgentRecord[];
 }
+
+export type PriceWatch = {
+  id: string;
+  threshold_pct: number;
+  window_hours: number;
+  baseline_price_usd: number | null;
+  last_checked_at: string | null;
+};
+
+export async function fetchAgentPriceWatch(
+  agentId: string,
+  authToken: string
+): Promise<PriceWatch | null> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/price-watch`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as PriceWatch;
+}
+
+export async function updateLaunchedAgent(
+  agentId: string,
+  updates: { description?: string; threshold_pct?: number },
+  authToken: string
+): Promise<LaunchedAgentRecord> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify(updates),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail ?? data.error ?? "Update failed");
+  return data as LaunchedAgentRecord;
+}
