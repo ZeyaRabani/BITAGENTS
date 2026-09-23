@@ -22,6 +22,7 @@ from agent_tool_catalog import catalog_summary_for_builder, valid_tool_names
 from btc_price_alert import fetch_btc_price_usd
 from hosted_llm import call_openrouter
 from notifications import VALID_CHANNELS, send_notification
+from telegram_linking import build_deep_link
 
 # Routed directly through OpenRouter (bypassing the shared CapIX-first
 # call_llm router) because the platform-locked CapIX model doesn't reliably
@@ -79,8 +80,15 @@ want to check what's already been captured before asking your next question.
 
 If the agent needs to alert the user about something (a price move, a condition being met), you \
 need two more things before it can go live, and you must get them in this order:
-8. Ask where they want to be alerted: email or Telegram, and the destination (their email address, \
-   or their Telegram chat). Call set_notification_channel as soon as they answer.
+8. Ask where they want to be alerted: email or Telegram.
+   - Email: ask for their address, then call set_notification_channel(channel="email", destination=<address>) \
+     right away.
+   - Telegram: never ask them to type a chat ID or username — they don't have one to give you. Call \
+     start_telegram_connect instead. It returns a link; tell them to click it and press Start in \
+     Telegram, then come back and tell you when they've done that. Call check_telegram_connect only \
+     after they say so — if it reports linked=false, they haven't pressed Start yet, ask them to \
+     and try again; do not guess or invent a chat id. Once linked=true, set_notification_channel is \
+     called for you automatically — move straight to the next step.
 9. Immediately call send_test_notification — never skip this and never claim you sent something \
    without actually calling the tool. If it returns ok=false, tell the user plainly that the test \
    failed and why (e.g. a sandbox/domain restriction) — do not ask them to confirm receipt of \
@@ -183,17 +191,47 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "set_notification_channel",
-            "description": "Set where the launched agent should send alerts: email or telegram, plus the destination.",
+            "description": (
+                "Set where the launched agent should send alerts. For email, call this directly "
+                "with the user's address. For Telegram, do NOT call this directly -- use "
+                "start_telegram_connect and check_telegram_connect instead, which call this for you."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "channel": {"type": "string", "enum": list(VALID_CHANNELS)},
                     "destination": {
                         "type": "string",
-                        "description": "Email address for channel=email, or Telegram chat id/username for channel=telegram.",
+                        "description": "Email address. Only used for channel=email.",
                     },
                 },
                 "required": ["channel", "destination"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_telegram_connect",
+            "description": (
+                "Generate a one-click Telegram connect link for the user. They click it, press "
+                "Start in Telegram, and come back -- they never type a chat ID."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_telegram_connect",
+            "description": (
+                "Check whether the user has pressed Start on the link from start_telegram_connect. "
+                "Only call after they say they've done it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {"code": {"type": "string"}},
+                "required": ["code"],
             },
         },
     },
@@ -297,9 +335,7 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
     def show_draft(**_kwargs):
         return db.get_custom_agent(agent_id) or {"error": "draft not found"}
 
-    def set_notification_channel(**kwargs):
-        channel = (kwargs.get("channel") or "").strip()
-        destination = (kwargs.get("destination") or "").strip()
+    def _set_notification_channel(channel: str, destination: str) -> dict[str, Any]:
         if channel not in VALID_CHANNELS:
             return {"error": f"channel must be one of {VALID_CHANNELS}"}
         if not destination:
@@ -317,6 +353,39 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             fields["notify_test_sent_ok"] = False
         updated = db.update_custom_agent_fields(agent_id, **fields)
         return {"ok": True, "draft": updated}
+
+    def set_notification_channel(**kwargs):
+        channel = (kwargs.get("channel") or "").strip()
+        destination = (kwargs.get("destination") or "").strip()
+        if channel == "telegram":
+            return {
+                "error": "Don't call this directly for Telegram -- use start_telegram_connect "
+                         "so the user connects by clicking a link, not typing a chat ID.",
+            }
+        return _set_notification_channel(channel, destination)
+
+    def start_telegram_connect(**_kwargs):
+        code = db.create_telegram_link_code()
+        link = build_deep_link(code)
+        if not link:
+            return {
+                "error": "Telegram isn't configured on the backend yet "
+                         "(TELEGRAM_BOT_TOKEN missing) -- offer email instead for now.",
+            }
+        return {"ok": True, "code": code, "deep_link": link}
+
+    def check_telegram_connect(**kwargs):
+        code = (kwargs.get("code") or "").strip()
+        if not code:
+            return {"error": "code is required"}
+        record = db.get_telegram_link_code(code)
+        if not record:
+            return {"error": "Unknown code -- call start_telegram_connect again."}
+        if not record.get("chat_id"):
+            return {"linked": False}
+        result = _set_notification_channel("telegram", record["chat_id"])
+        result["linked"] = True
+        return result
 
     def send_test_notification(**_kwargs):
         draft = db.get_custom_agent(agent_id)
@@ -381,6 +450,8 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         "select_agent_capabilities": select_agent_capabilities,
         "show_draft": show_draft,
         "set_notification_channel": set_notification_channel,
+        "start_telegram_connect": start_telegram_connect,
+        "check_telegram_connect": check_telegram_connect,
         "send_test_notification": send_test_notification,
         "confirm_notification_received": confirm_notification_received,
         "create_price_watch": create_price_watch,

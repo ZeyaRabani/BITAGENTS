@@ -403,6 +403,17 @@ MIGRATION_STATEMENTS = [
     # regardless of whether the alert fired, so the comparison stays hourly.
     "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS window_hours DOUBLE PRECISION NOT NULL DEFAULT 1.0",
     "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS window_started_at TIMESTAMPTZ",
+    # One-click Telegram connect: the user clicks a t.me deep link and presses
+    # Start -- never types a chat ID. A background poller (telegram_linking.py)
+    # reads Telegram's getUpdates and fills in chat_id once they do.
+    """
+    CREATE TABLE IF NOT EXISTS telegram_link_codes (
+        code        VARCHAR(24) PRIMARY KEY,
+        chat_id     VARCHAR(64),
+        linked_at   TIMESTAMPTZ,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 
@@ -790,6 +801,42 @@ def list_active_btc_price_alerts() -> list[str]:
             )
             rows = cur.fetchall()
     return [r["id"] for r in rows]
+
+
+def create_telegram_link_code() -> str:
+    init_db()
+    code = uuid.uuid4().hex[:12]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO telegram_link_codes (code) VALUES (%s)", (code,))
+    return code
+
+
+def get_telegram_link_code(code: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM telegram_link_codes WHERE code = %s", (code,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def claim_telegram_link_code(code: str, chat_id: str) -> bool:
+    """Called only by the background Telegram poller when it sees a real
+    /start <code> message -- this is the one place a chat_id is ever written,
+    so a code can only ever be claimed by someone who actually pressed Start
+    in Telegram, not composed by an agent or a user typing a guess."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE telegram_link_codes SET chat_id = %s, linked_at = NOW()
+                WHERE code = %s AND chat_id IS NULL
+                """,
+                (chat_id, code),
+            )
+            return cur.rowcount > 0
 
 
 def find_plan(plan_id: str) -> Optional[dict[str, Any]]:

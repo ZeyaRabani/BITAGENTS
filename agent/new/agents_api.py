@@ -57,6 +57,7 @@ from db import (
 from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
+from telegram_linking import start_poller as start_telegram_link_poller
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -373,6 +374,10 @@ def _startup() -> None:
         print(f"  📊 Volume Agent scheduler started (every {VOLUME_SCHEDULER_POLL_SECONDS}s)")
     if start_btc_alert_scheduler():
         print(f"  🟠 BTC price-alert scheduler started (every {BTC_ALERT_POLL_SECONDS}s)")
+    if start_telegram_link_poller():
+        print("  💬 Telegram link poller started")
+    else:
+        print("  ⚠️  TELEGRAM_BOT_TOKEN not set -- Telegram connect unavailable")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent")
 
