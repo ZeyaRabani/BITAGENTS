@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Bell } from "lucide-react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
@@ -236,13 +237,18 @@ function AgentRow({
   return (
     <article className="border border-grid bg-surface/40 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-display text-lg font-bold">{agent.name ?? "Untitled agent"}</h3>
-          <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-            {agent.category ?? "Uncategorized"} {agent.handle ? `· @${agent.handle}` : ""}
-          </p>
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-grid bg-background/80 text-signal">
+            <Bell size={18} strokeWidth={1.75} />
+          </div>
+          <div>
+            <h3 className="font-display text-lg font-bold">{agent.name ?? "Untitled agent"}</h3>
+            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {agent.category ?? "Uncategorized"} {agent.handle ? `· @${agent.handle}` : ""}
+            </p>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className={`font-mono text-[10px] uppercase tracking-[0.14em] ${STATUS_COLOR[agent.status]}`}>
             {STATUS_LABEL[agent.status]}
           </span>

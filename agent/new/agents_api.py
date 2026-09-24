@@ -1202,8 +1202,6 @@ def custom_agent_chat(
     agent = get_custom_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found.")
-    if agent["status"] == "testing" and agent["creator_wallet"] != auth_wallet:
-        raise HTTPException(status_code=403, detail="This agent is still in its private testing window.")
     if agent["status"] not in ("testing", "live"):
         raise HTTPException(status_code=404, detail="Agent not found.")
 
