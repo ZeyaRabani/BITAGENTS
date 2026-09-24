@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -20,10 +20,42 @@ const STARTER_PROMPTS = [
   "I want an agent that DCAs into SOL every day automatically",
 ];
 
+const MARKDOWN_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+
+function renderLineWithLinks(line: string, key: number) {
+  const parts: ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let linkIndex = 0;
+  MARKDOWN_LINK.lastIndex = 0;
+  while ((match = MARKDOWN_LINK.exec(line))) {
+    if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index));
+    const isTelegram = /t\.me\//.test(match[2]);
+    parts.push(
+      <a
+        key={`${key}-link-${linkIndex++}`}
+        href={match[2]}
+        target="_blank"
+        rel="noreferrer"
+        className={
+          isTelegram
+            ? "mx-0.5 inline-flex items-center gap-1 border border-signal bg-signal/10 px-2 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-wider text-signal hover:bg-signal/20"
+            : "text-signal underline underline-offset-2 hover:opacity-80"
+        }
+      >
+        {match[1]}
+      </a>
+    );
+    lastIndex = MARKDOWN_LINK.lastIndex;
+  }
+  if (lastIndex < line.length) parts.push(line.slice(lastIndex));
+  return parts;
+}
+
 function formatReply(text: string) {
   return text.split("\n").map((line, i) => (
     <p key={i} className={line.trim() === "" ? "h-2" : undefined}>
-      {line}
+      {renderLineWithLinks(line, i)}
     </p>
   ));
 }

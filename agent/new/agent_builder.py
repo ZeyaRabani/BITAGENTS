@@ -690,6 +690,52 @@ def _ensure_finalized_if_ready(
     return reply, history, actions + extra_actions
 
 
+def _ensure_notification_confirmed_if_stuck(
+    agent_id: str, reply: str, history: list, actions: list[dict[str, Any]]
+) -> tuple[str, list, list[dict[str, Any]]]:
+    """Runs every turn, deliberately NOT gated by overall launch-readiness.
+    _ensure_finalized_if_ready only ever activates once every other field
+    (name, handle, category...) is already filled in -- real testing showed
+    a user confirming receipt of a Telegram test EARLY in the conversation,
+    before naming the agent or anything else, could get stuck in an endless
+    "the connection hasn't been established" loop even though the test had
+    already genuinely succeeded, because the safety net that would have
+    caught it never turned on yet. This catches that gap specifically,
+    independent of what else is or isn't filled in."""
+    if any(a["tool"] == "confirm_notification_received" for a in actions):
+        return reply, history, actions
+    draft = db.get_custom_agent(agent_id)
+    if not draft or draft.get("status") != "draft":
+        return reply, history, actions
+    if not draft.get("notify_test_sent_ok") or draft.get("notify_verified_at"):
+        return reply, history, actions
+
+    nudge = (
+        "SYSTEM CHECK (internal -- not a real user message): the notification "
+        "test-send already succeeded, but it has not been marked verified yet. "
+        "If the user has said anything in this real conversation indicating "
+        "they received the test (e.g. 'confirmed', 'yes it works', 'got it', "
+        "'received', 'how about now') -- read the actual history, don't assume "
+        "-- call confirm_notification_received now. Do NOT ask them to click "
+        "the connect link again or repeat the test; the connection already "
+        "works, this is purely a missing confirmation step on your end."
+    )
+    _, _, extra_actions = run_tool_agent(
+        nudge,
+        list(history),
+        system_prompt=_build_system_prompt(),
+        tools=TOOLS,
+        tool_registry=_builder_tools(agent_id),
+        model=BUILDER_MODEL,
+        app_suffix="agent-builder-selfcheck",
+        llm_call=call_openrouter,
+    )
+    refreshed = db.get_custom_agent(agent_id)
+    if refreshed and refreshed.get("notify_verified_at"):
+        reply = f"{reply}\n\n(Double-checked: your notification channel is now verified.)"
+    return reply, history, actions + extra_actions
+
+
 def _auto_resolve_telegram_link(agent_id: str) -> None:
     """Deterministic, model-independent resolution of a pending Telegram
     connect code -- runs before every turn so a user pressing Start in
@@ -735,4 +781,5 @@ def run_builder_agent(
         session_id=session_id,
         llm_call=call_openrouter,
     )
+    reply, history, actions = _ensure_notification_confirmed_if_stuck(agent_id, reply, history, actions)
     return _ensure_finalized_if_ready(agent_id, reply, history, actions)
