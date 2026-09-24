@@ -571,6 +571,19 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             return {"error": f"Cannot launch yet, missing: {', '.join(missing)}"}
         if draft.get("notify_channel") and not draft.get("notify_verified_at"):
             return {"error": "Notification channel is set but not yet verified. Confirm the test alert first."}
+        # A notification channel with no watch behind it is exactly the
+        # failure this caught in testing: the agent launches and claims
+        # "it will alert you when X happens" while nothing is actually
+        # configured to check X. If a channel is set, a watch must exist --
+        # call create_price_watch / create_product_price_watch /
+        # create_digest_watch (whichever matches what this agent is for)
+        # before finalize_and_launch can succeed.
+        if draft.get("notify_channel") and not db.get_watch_by_agent(agent_id):
+            return {
+                "error": "This agent has a verified notification channel but no watch configured yet -- "
+                         "call create_price_watch, create_product_price_watch, or create_digest_watch "
+                         "(whichever matches what this agent actually does) before launching.",
+            }
         finalized = db.finalize_custom_agent(agent_id)
         if not finalized:
             return {"error": "Could not finalize — draft may already be launched."}
@@ -630,6 +643,14 @@ def _ensure_finalized_if_ready(
         return reply, history, actions
 
     needs_confirm_call = bool(draft.get("notify_channel")) and not draft.get("notify_verified_at")
+    # Caught in real testing: an agent can finalize successfully while
+    # having NO watch at all -- e.g. create_price_watch was correctly
+    # rejected earlier (channel not verified yet) and never retried after
+    # verification succeeded. finalize_and_launch now refuses this too, but
+    # nudge the model to actually fix it (it has the conversation history
+    # to figure out which watch type this agent needs) rather than just
+    # leaving it stuck.
+    needs_watch = bool(draft.get("notify_channel")) and not db.get_watch_by_agent(agent_id)
     nudge = (
         "SYSTEM CHECK (internal -- not a real user message): every required "
         "field is set and the notification test-send already succeeded. "
@@ -639,6 +660,14 @@ def _ensure_finalized_if_ready(
             "conversation (read the actual history, don't assume), call "
             "confirm_notification_received now, then finalize_and_launch. "
             if needs_confirm_call
+            else ""
+        )
+        + (
+            "This agent has NO watch configured yet -- re-read the conversation "
+            "to see what this agent is actually supposed to watch (BTC price, a "
+            "product page, or a news topic) and call the matching create_*_watch "
+            "tool with the details the user already gave you, then finalize_and_launch. "
+            if needs_watch
             else ""
         )
         + "finalize_and_launch was not confirmed as successful this turn. If "
