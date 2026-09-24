@@ -6,7 +6,12 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { Panel } from "@/components/AppShell";
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
-import { sendBuilderMessage } from "@/lib/launchpadBuilderClient";
+import {
+  fetchAgentBuilderHistory,
+  fetchAgentDraftState,
+  sendBuilderMessage,
+  type AgentChecklist,
+} from "@/lib/launchpadBuilderClient";
 
 type ChatMessage = {
   id: string;
@@ -60,13 +65,59 @@ function formatReply(text: string) {
   ));
 }
 
-export function AgentBuilderChat() {
+const CHECKLIST_ITEMS: { key: keyof AgentChecklist | "fields"; label: string }[] = [
+  { key: "fields", label: "Name, category, description & system prompt" },
+  { key: "notification_set", label: "Notification destination set" },
+  { key: "notification_verified", label: "Notification verified (test confirmed)" },
+  { key: "watch_configured", label: "Watch configured (what it actually checks)" },
+];
+
+function ChecklistSidebar({ checklist, loading }: { checklist: AgentChecklist | null; loading: boolean }) {
+  return (
+    <div className="border border-grid bg-surface/40 p-4">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+        Launch checklist
+      </div>
+      {loading && !checklist ? (
+        <p className="mt-3 text-xs text-muted-foreground">Waiting for the first message…</p>
+      ) : !checklist ? (
+        <p className="mt-3 text-xs text-muted-foreground">Nothing started yet.</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {CHECKLIST_ITEMS.map((item) => {
+            const done =
+              item.key === "fields" ? checklist.fields_complete : Boolean(checklist[item.key as keyof AgentChecklist]);
+            return (
+              <li key={item.label} className="flex items-start gap-2 text-xs leading-relaxed">
+                <span className={done ? "text-signal" : "text-muted-foreground/50"}>{done ? "✓" : "○"}</span>
+                <span className={done ? "text-foreground" : "text-muted-foreground"}>{item.label}</span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {checklist?.watch_type && (
+        <p className="mt-3 border-t border-grid pt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          Type: {checklist.watch_type.replace("_", " ")}
+        </p>
+      )}
+      {checklist?.launched && (
+        <p className="mt-3 border-t border-grid pt-3 text-xs text-signal">This agent is already live.</p>
+      )}
+    </div>
+  );
+}
+
+export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) {
   const router = useRouter();
   const { publicKey } = useWallet();
   const { token, busy: authBusy, error: authError, isAuthenticated } = useDcaWalletAuth();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string>();
+  const [agentId, setAgentId] = useState<string | undefined>(resumeAgentId);
+  const [checklist, setChecklist] = useState<AgentChecklist | null>(null);
+  const [resuming, setResuming] = useState(Boolean(resumeAgentId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justLaunched, setJustLaunched] = useState(false);
@@ -75,6 +126,37 @@ export function AgentBuilderChat() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, busy]);
+
+  useEffect(() => {
+    if (!resumeAgentId || !token) return;
+    let cancelled = false;
+    (async () => {
+      const [history, draft] = await Promise.all([
+        fetchAgentBuilderHistory(resumeAgentId, token),
+        fetchAgentDraftState(resumeAgentId, token),
+      ]);
+      if (cancelled) return;
+      if (history.session_id) setSessionId(history.session_id);
+      setMessages(
+        history.messages.map((m, i) => ({
+          id: `resume-${i}`,
+          role: m.role === "user" ? "user" : "assistant",
+          content: m.content,
+        }))
+      );
+      if (draft) setChecklist(draft.checklist);
+      setResuming(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeAgentId, token]);
+
+  async function refreshChecklist(id: string) {
+    if (!token) return;
+    const draft = await fetchAgentDraftState(id, token);
+    if (draft) setChecklist(draft.checklist);
+  }
 
   async function runMessage(text: string) {
     if (!token || !text.trim()) return;
@@ -85,6 +167,10 @@ export function AgentBuilderChat() {
     try {
       const res = await sendBuilderMessage(text.trim(), token, sessionId);
       setSessionId(res.session_id);
+      if (res.agent_id) {
+        setAgentId(res.agent_id);
+        void refreshChecklist(res.agent_id);
+      }
       setMessages((prev) => [...prev, { id: `a-${Date.now()}`, role: "assistant", content: res.reply }]);
       const launched = res.actions?.some(
         (a) => a.tool === "finalize_and_launch" && a.result?.includes('"ok": true')
@@ -140,7 +226,14 @@ export function AgentBuilderChat() {
         </div>
       )}
 
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_260px]">
       <Panel title="Build your agent">
+        {resuming ? (
+          <p className="py-6 text-center font-mono text-xs uppercase tracking-[0.14em] text-muted-foreground">
+            Loading this draft…
+          </p>
+        ) : (
+        <>
         <div className="flex max-h-125 flex-col gap-4 overflow-y-auto pr-1">
           {messages.length === 0 && (
             <div className="space-y-3">
@@ -217,7 +310,11 @@ export function AgentBuilderChat() {
             </button>
           </div>
         </form>
+        </>
+        )}
       </Panel>
+      <ChecklistSidebar checklist={checklist} loading={resuming || (!checklist && (busy || messages.length > 0))} />
+      </div>
     </div>
   );
 }

@@ -657,6 +657,20 @@ export async function proxyGetLaunchedAgentPriceWatch(
   });
 }
 
+export async function proxyGetAgentDraftState(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/agents/custom/${agentId}/draft`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyGetAgentBuilderHistory(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/agents/custom/${agentId}/builder-history`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyCustomAgentChat(
   agentId: string,
   body: { message: string; session_id?: string },

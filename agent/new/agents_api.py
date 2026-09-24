@@ -56,6 +56,7 @@ from db import (
     update_custom_agent_fields,
 )
 from db import get_btc_price_alert_by_agent, update_btc_price_alert_params
+from db import get_any_watch_summary
 from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
@@ -278,6 +279,7 @@ class ChatResponse(BaseModel):
     reply: str
     session_id: str
     actions: list[dict[str, Any]]
+    agent_id: Optional[str] = None
 
 
 class QuickSwapPreviewRequest(BaseModel):
@@ -978,7 +980,7 @@ def agent_builder_chat(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
-    return ChatResponse(reply=reply, session_id=session_id, actions=actions)
+    return ChatResponse(reply=reply, session_id=session_id, actions=actions, agent_id=draft["id"])
 
 
 @app.get("/agents/custom")
@@ -1002,6 +1004,48 @@ def get_launched_agent(agent_id: str) -> dict[str, Any]:
     if agent["status"] not in ("live", "testing"):
         raise HTTPException(status_code=404, detail="Agent not found.")
     return agent
+
+
+REQUIRED_AGENT_FIELDS = ("name", "handle", "category", "description", "system_prompt")
+
+
+@app.get("/agents/custom/{agent_id}/draft")
+def get_agent_draft_state(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    """Full state for the checklist/resume view -- unlike GET /agents/custom/{id},
+    this works for any status (draft included) but only for the owner. Single
+    source of truth for "what's left to do", computed from real DB state, not
+    guessed from chat text."""
+    agent = get_custom_agent(agent_id)
+    if not agent or agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    watch = get_any_watch_summary(agent_id)
+    checklist = {
+        "fields_complete": all((agent.get(f) or "").strip() for f in REQUIRED_AGENT_FIELDS),
+        "missing_fields": [f for f in REQUIRED_AGENT_FIELDS if not (agent.get(f) or "").strip()],
+        "notification_set": bool(agent.get("notify_channel")),
+        "notification_verified": bool(agent.get("notify_verified_at")),
+        "watch_configured": watch is not None,
+        "watch_type": watch.get("type") if watch else None,
+        "launched": agent["status"] != "draft",
+    }
+    return {"agent": agent, "watch": watch, "checklist": checklist}
+
+
+@app.get("/agents/custom/{agent_id}/builder-history")
+def get_agent_builder_history(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    """Lets a draft be resumed from My Agents -- the chat history is already
+    persisted per builder_session_id, this just exposes it by agent_id."""
+    agent = get_custom_agent(agent_id)
+    if not agent or agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    session_id = agent.get("builder_session_id")
+    if not session_id:
+        return {"session_id": None, "messages": []}
+    return {"session_id": session_id, "messages": load_chat_history(session_id)}
 
 
 @app.get("/agents/custom/{agent_id}/price-watch")

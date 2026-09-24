@@ -2,6 +2,7 @@ export type BuilderChatResponse = {
   reply: string;
   session_id: string;
   actions: { tool: string; result: string }[];
+  agent_id?: string;
 };
 
 export async function sendBuilderMessage(
@@ -24,6 +25,46 @@ export async function sendBuilderMessage(
     throw new Error(detail);
   }
   return data as BuilderChatResponse;
+}
+
+export type AgentChecklist = {
+  fields_complete: boolean;
+  missing_fields: string[];
+  notification_set: boolean;
+  notification_verified: boolean;
+  watch_configured: boolean;
+  watch_type: "btc_price" | "product_price" | "news_digest" | null;
+  launched: boolean;
+};
+
+export type AgentDraftState = {
+  agent: Record<string, unknown>;
+  watch: Record<string, unknown> | null;
+  checklist: AgentChecklist;
+};
+
+export async function fetchAgentDraftState(
+  agentId: string,
+  authToken: string
+): Promise<AgentDraftState | null> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/draft`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as AgentDraftState;
+}
+
+export async function fetchAgentBuilderHistory(
+  agentId: string,
+  authToken: string
+): Promise<{ session_id: string | null; messages: { role: string; content: string }[] }> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/builder-history`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!res.ok) return { session_id: null, messages: [] };
+  return await res.json();
 }
 
 export type LaunchedAgentRecord = {

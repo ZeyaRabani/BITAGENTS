@@ -762,6 +762,23 @@ def get_btc_price_alert(alert_id: str) -> Optional[dict[str, Any]]:
     return dict(row) if row else None
 
 
+def get_any_watch_summary(agent_id: str) -> Optional[dict[str, Any]]:
+    """Checks all three watch tables and returns whichever exists, tagged
+    with its type -- used by the checklist/draft-status view so it can say
+    "watch configured" without the frontend needing to know about three
+    separate table shapes."""
+    alert = get_btc_price_alert_by_agent(agent_id)
+    if alert:
+        return {"type": "btc_price", **alert}
+    watch = get_product_price_watch_by_agent(agent_id)
+    if watch:
+        return {"type": "product_price", **watch}
+    digest = get_digest_watch_by_agent(agent_id)
+    if digest:
+        return {"type": "news_digest", **digest}
+    return None
+
+
 def get_btc_price_alert_by_agent(agent_id: str) -> Optional[dict[str, Any]]:
     init_db()
     with get_conn() as conn:

@@ -219,7 +219,14 @@ function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; tok
           <span className={`font-mono text-[10px] uppercase tracking-[0.14em] ${STATUS_COLOR[agent.status]}`}>
             {STATUS_LABEL[agent.status]}
           </span>
-          {agent.status !== "draft" && (
+          {agent.status === "draft" ? (
+            <Link
+              href={`/launch/create?agentId=${agent.id}`}
+              className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
+            >
+              Resume
+            </Link>
+          ) : (
             <button
               onClick={() => setEditing((v) => !v)}
               className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
