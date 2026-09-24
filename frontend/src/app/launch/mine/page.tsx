@@ -183,7 +183,7 @@ function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; tok
     if (!editing) return;
     fetchAgentPriceWatch(agent.id, token).then((pw) => {
       setPriceWatch(pw);
-      if (pw) setThreshold(String(pw.threshold_pct));
+      if (pw) setThreshold(String(pw.condition_config?.threshold_pct ?? ""));
     });
   }, [editing, agent.id, token]);
 

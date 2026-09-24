@@ -64,9 +64,9 @@ export async function fetchMyLaunchedAgents(authToken: string): Promise<Launched
 
 export type PriceWatch = {
   id: string;
-  threshold_pct: number;
-  window_hours: number;
-  baseline_price_usd: number | null;
+  source_type: string;
+  condition_config: { threshold_pct?: number; window_hours?: number; [key: string]: unknown };
+  baseline_value: number | null;
   last_checked_at: string | null;
 };
 

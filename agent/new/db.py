@@ -464,6 +464,40 @@ MIGRATION_STATEMENTS = [
         created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
     """,
+    # Generic watch engine (generic-watch-engine branch): unifies
+    # btc_price_alerts / product_price_watches / digest_watches into one
+    # schema so a new trigger type is "register a source function", not
+    # "build a whole new table+scheduler+tool stack". See watch_engine.py.
+    # source_type: 'btc_price' | 'product_price' | 'news'
+    # condition_type: 'percent_move' (rolling window) | 'percent_drop' (resets baseline down) | 'daily_fire'
+    """
+    CREATE TABLE IF NOT EXISTS watches (
+        id                      VARCHAR(32) PRIMARY KEY,
+        agent_id                UUID REFERENCES custom_agents (id) ON DELETE CASCADE,
+        source_type             VARCHAR(32) NOT NULL,
+        source_config           JSONB NOT NULL DEFAULT '{}'::jsonb,
+        condition_type          VARCHAR(32) NOT NULL,
+        condition_config        JSONB NOT NULL DEFAULT '{}'::jsonb,
+        poll_interval_seconds   INTEGER NOT NULL DEFAULT 60,
+        baseline_value          DOUBLE PRECISION,
+        window_started_at       TIMESTAMPTZ,
+        last_checked_at         TIMESTAMPTZ,
+        last_alert_value        DOUBLE PRECISION,
+        last_alert_at           TIMESTAMPTZ,
+        last_error              TEXT,
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_watches_agent ON watches (agent_id)",
+    """
+    CREATE TABLE IF NOT EXISTS watch_log (
+        id          BIGSERIAL PRIMARY KEY,
+        watch_id    VARCHAR(32) NOT NULL REFERENCES watches (id) ON DELETE CASCADE,
+        value       DOUBLE PRECISION,
+        change_pct  DOUBLE PRECISION,
+        fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
 ]
 
 
@@ -1000,6 +1034,206 @@ def update_product_price_watch_params(
             )
             row = cur.fetchone()
     return dict(row) if row else None
+
+
+def create_watch(
+    source_type: str, source_config: dict[str, Any], condition_type: str, condition_config: dict[str, Any],
+    *, agent_id: Optional[str] = None, poll_interval_seconds: int = 60,
+    baseline_value: Optional[float] = None,
+) -> dict[str, Any]:
+    init_db()
+    watch_id = uuid.uuid4().hex[:8]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO watches
+                    (id, agent_id, source_type, source_config, condition_type, condition_config,
+                     poll_interval_seconds, baseline_value, window_started_at, last_checked_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                RETURNING *
+                """,
+                (watch_id, agent_id, source_type, Json(source_config), condition_type,
+                 Json(condition_config), poll_interval_seconds, baseline_value),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_watch(watch_id: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM watches WHERE id = %s", (watch_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def get_watch_by_agent(agent_id: str, source_type: Optional[str] = None) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            if source_type:
+                cur.execute(
+                    "SELECT * FROM watches WHERE agent_id = %s AND source_type = %s",
+                    (agent_id, source_type),
+                )
+            else:
+                cur.execute("SELECT * FROM watches WHERE agent_id = %s", (agent_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def list_due_watches() -> list[dict[str, Any]]:
+    """Active watches (linked to a launched agent) whose own poll interval
+    has elapsed -- lets one scheduler loop serve every source type at its
+    own natural cadence instead of running N fixed-interval threads."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT w.* FROM watches w
+                JOIN custom_agents c ON c.id = w.agent_id
+                WHERE c.status IN ('testing', 'live')
+                  AND (w.last_checked_at IS NULL
+                       OR w.last_checked_at <= NOW() - (w.poll_interval_seconds || ' seconds')::interval)
+                """
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_watch_check(
+    watch_id: str, *, value: Optional[float] = None, baseline_value: Optional[float] = None,
+    reset_window: bool = False, fired: bool = False, error: Optional[str] = None,
+) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            sets = ["last_checked_at = NOW()", "last_error = %s"]
+            values: list[Any] = [error]
+            if baseline_value is not None:
+                sets.append("baseline_value = %s")
+                values.append(baseline_value)
+            if reset_window:
+                sets.append("window_started_at = NOW()")
+            if fired:
+                sets.append("last_alert_at = NOW()")
+                if value is not None:
+                    sets.append("last_alert_value = %s")
+                    values.append(value)
+            values.append(watch_id)
+            cur.execute(f"UPDATE watches SET {', '.join(sets)} WHERE id = %s", values)
+
+
+def log_watch_fire(watch_id: str, value: Optional[float], change_pct: Optional[float]) -> None:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO watch_log (watch_id, value, change_pct) VALUES (%s, %s, %s)",
+                (watch_id, value, change_pct),
+            )
+
+
+def update_watch_params(
+    watch_id: str, *, source_config: Optional[dict[str, Any]] = None,
+    condition_config: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    if source_config is None and condition_config is None:
+        return get_watch(watch_id)
+    init_db()
+    sets = ["baseline_value = NULL", "window_started_at = NOW()"]
+    values: list[Any] = []
+    if source_config is not None:
+        sets.append("source_config = %s")
+        values.append(Json(source_config))
+    if condition_config is not None:
+        sets.append("condition_config = %s")
+        values.append(Json(condition_config))
+    values.append(watch_id)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(f"UPDATE watches SET {', '.join(sets)} WHERE id = %s RETURNING *", values)
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def migrate_legacy_watches_to_generic() -> int:
+    """One-time backfill: copies existing btc_price_alerts / product_price_watches
+    / digest_watches rows into the unified `watches` table, preserving agent_id
+    and current state, so already-launched agents keep working unchanged after
+    the refactor. Safe to call repeatedly -- skips agent_ids already migrated."""
+    init_db()
+    migrated = 0
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT agent_id FROM watches WHERE agent_id IS NOT NULL")
+            already_migrated = {r["agent_id"] for r in cur.fetchall()}
+
+            cur.execute("SELECT * FROM btc_price_alerts WHERE agent_id IS NOT NULL")
+            for r in cur.fetchall():
+                r = dict(r)
+                if r["agent_id"] in already_migrated:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO watches (id, agent_id, source_type, source_config, condition_type,
+                        condition_config, poll_interval_seconds, baseline_value, window_started_at,
+                        last_checked_at, last_alert_value, last_alert_at)
+                    VALUES (%s, %s, 'btc_price', '{}'::jsonb, 'percent_move', %s, 60, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        "w_" + r["id"], r["agent_id"],
+                        Json({"threshold_pct": r["threshold_pct"], "window_hours": r.get("window_hours", 1.0)}),
+                        r.get("baseline_price_usd"), r.get("window_started_at"), r.get("last_checked_at"),
+                        r.get("last_alert_price"), r.get("last_alert_at"),
+                    ),
+                )
+                migrated += 1
+
+            cur.execute("SELECT * FROM product_price_watches WHERE agent_id IS NOT NULL")
+            for r in cur.fetchall():
+                r = dict(r)
+                if r["agent_id"] in already_migrated:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO watches (id, agent_id, source_type, source_config, condition_type,
+                        condition_config, poll_interval_seconds, baseline_value, last_checked_at,
+                        last_alert_value, last_alert_at, last_error)
+                    VALUES (%s, %s, 'product_price', %s, 'percent_drop', %s, 300, %s, %s, %s, %s, %s)
+                    """,
+                    (
+                        "w_" + r["id"], r["agent_id"],
+                        Json({"url": r["url"], "product_label": r.get("product_label")}),
+                        Json({"threshold_pct": r["threshold_pct"]}),
+                        r.get("baseline_price"), r.get("last_checked_at"),
+                        r.get("last_alert_price"), r.get("last_alert_at"), r.get("last_error"),
+                    ),
+                )
+                migrated += 1
+
+            cur.execute("SELECT * FROM digest_watches WHERE agent_id IS NOT NULL")
+            for r in cur.fetchall():
+                r = dict(r)
+                if r["agent_id"] in already_migrated:
+                    continue
+                cur.execute(
+                    """
+                    INSERT INTO watches (id, agent_id, source_type, source_config, condition_type,
+                        condition_config, poll_interval_seconds, last_alert_at, last_error)
+                    VALUES (%s, %s, 'news', %s, 'daily_fire', %s, 900, %s, %s)
+                    """,
+                    (
+                        "w_" + r["id"], r["agent_id"], Json({"topic": r["topic"]}),
+                        Json({"schedule_hour": r["schedule_hour"]}),
+                        r.get("last_sent_at"), r.get("last_error"),
+                    ),
+                )
+                migrated += 1
+    return migrated
 
 
 def create_digest_watch(topic: str, schedule_hour: int, *, agent_id: Optional[str] = None) -> dict[str, Any]:

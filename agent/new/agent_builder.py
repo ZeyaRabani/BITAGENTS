@@ -481,24 +481,24 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         draft = db.get_custom_agent(agent_id)
         if not draft or not draft.get("notify_verified_at"):
             return {"error": "Notification channel must be verified before creating a price watch."}
+        condition_config = {"threshold_pct": float(threshold_pct), "window_hours": float(window_hours)}
         # Idempotent: the model may call this more than once in a turn (e.g.
         # after an earlier attempt errored) -- update the existing watch
         # instead of inserting a duplicate row, which would otherwise fire
         # two alerts for the same real price move.
-        existing = db.get_btc_price_alert_by_agent(agent_id)
+        existing = db.get_watch_by_agent(agent_id, source_type="btc_price")
         if existing:
-            updated = db.update_btc_price_alert_params(
-                existing["id"], threshold_pct=float(threshold_pct), window_hours=float(window_hours)
-            )
-            return {"ok": True, "alert": updated}
+            updated = db.update_watch_params(existing["id"], condition_config=condition_config)
+            return {"ok": True, "watch": updated}
         try:
             current_price = fetch_btc_price_usd()
         except Exception as exc:
             return {"error": f"Could not reach the price feed: {exc}"}
-        alert = db.create_btc_price_alert(
-            float(threshold_pct), agent_id=agent_id, window_hours=float(window_hours)
+        watch = db.create_watch(
+            "btc_price", {}, "percent_move", condition_config,
+            agent_id=agent_id, poll_interval_seconds=60, baseline_value=current_price,
         )
-        return {"ok": True, "alert": alert, "current_btc_price_usd": current_price}
+        return {"ok": True, "watch": watch, "current_btc_price_usd": current_price}
 
     def create_product_price_watch(**kwargs):
         url = (kwargs.get("url") or "").strip()
@@ -512,20 +512,22 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         if not draft or not draft.get("notify_verified_at"):
             return {"error": "Notification channel must be verified before creating a price watch."}
         # Same idempotency guard as create_price_watch.
-        existing = db.get_product_price_watch_by_agent(agent_id)
+        existing = db.get_watch_by_agent(agent_id, source_type="product_price")
         if existing:
-            updated = db.update_product_price_watch_params(
-                existing["id"], threshold_pct=float(threshold_pct),
-                url=url if url != existing["url"] else None,
+            new_source = {"url": url, "product_label": product_label} if url != existing["source_config"].get("url") else None
+            updated = db.update_watch_params(
+                existing["id"], source_config=new_source,
+                condition_config={"threshold_pct": float(threshold_pct)},
             )
             return {"ok": True, "watch": updated}
         try:
             price, currency = fetch_product_price(url)
         except Exception as exc:
             return {"error": f"Could not read a price from that page: {exc}"}
-        watch = db.create_product_price_watch(
-            url, float(threshold_pct), agent_id=agent_id,
-            product_label=product_label, baseline_price=price, currency=currency,
+        watch = db.create_watch(
+            "product_price", {"url": url, "product_label": product_label}, "percent_drop",
+            {"threshold_pct": float(threshold_pct)},
+            agent_id=agent_id, poll_interval_seconds=300, baseline_value=price,
         )
         return {"ok": True, "watch": watch, "current_price": price, "currency": currency}
 
@@ -540,15 +542,21 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
         draft = db.get_custom_agent(agent_id)
         if not draft or not draft.get("notify_verified_at"):
             return {"error": "Notification channel must be verified before creating a digest watch."}
-        existing = db.get_digest_watch_by_agent(agent_id)
+        existing = db.get_watch_by_agent(agent_id, source_type="news")
         if existing:
-            updated = db.update_digest_watch_params(existing["id"], topic=topic, schedule_hour=schedule_hour)
+            updated = db.update_watch_params(
+                existing["id"], source_config={"topic": topic},
+                condition_config={"schedule_hour": schedule_hour},
+            )
             return {"ok": True, "watch": updated}
         try:
             sample_headlines = fetch_topic_headlines(topic, limit=3)
         except Exception as exc:
             return {"error": f"Could not fetch news for that topic: {exc}"}
-        watch = db.create_digest_watch(topic, schedule_hour, agent_id=agent_id)
+        watch = db.create_watch(
+            "news", {"topic": topic}, "daily_fire", {"schedule_hour": schedule_hour},
+            agent_id=agent_id, poll_interval_seconds=900,
+        )
         return {"ok": True, "watch": watch, "sample_headlines": sample_headlines}
 
     def finalize_and_launch(**_kwargs):

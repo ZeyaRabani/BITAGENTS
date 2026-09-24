@@ -57,20 +57,17 @@ from db import (
 )
 from db import get_btc_price_alert_by_agent, update_btc_price_alert_params
 from btc_price_alert import check_btc_price_alert
-from btc_price_alert import start_scheduler as start_btc_alert_scheduler
-from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
 from telegram_linking import start_poller as start_telegram_link_poller
 from telegram_linking import build_deep_link
 from db import create_telegram_link_code, get_telegram_link_code, mark_notification_verified
 from notifications import send_notification
-from product_price_watch import start_scheduler as start_product_price_scheduler
-from product_price_watch import SCHEDULER_POLL_SECONDS as PRODUCT_PRICE_POLL_SECONDS
 from product_price_watch import check_product_price_watch, fetch_product_price
 from db import create_product_price_watch, get_product_price_watch_by_agent, update_product_price_watch_params
-from digest_watch import start_scheduler as start_digest_scheduler
-from digest_watch import SCHEDULER_POLL_SECONDS as DIGEST_POLL_SECONDS
 from digest_watch import check_digest_watch
 from db import create_digest_watch
+from watch_engine import start_scheduler as start_watch_engine_scheduler
+from watch_engine import SCHEDULER_TICK_SECONDS as WATCH_ENGINE_TICK_SECONDS
+from db import get_watch_by_agent, update_watch_params, migrate_legacy_watches_to_generic
 from agent_builder import run_builder_agent
 from custom_agent_runtime import run_custom_agent
 from hosted_llm import (
@@ -393,16 +390,15 @@ def _startup() -> None:
         print(f"  📈 EasyA limit-order scheduler started (every {EASYA_ORDER_POLL_SECONDS}s)")
     if start_volume_scheduler():
         print(f"  📊 Volume Agent scheduler started (every {VOLUME_SCHEDULER_POLL_SECONDS}s)")
-    if start_btc_alert_scheduler():
-        print(f"  🟠 BTC price-alert scheduler started (every {BTC_ALERT_POLL_SECONDS}s)")
     if start_telegram_link_poller():
         print("  💬 Telegram link poller started")
     else:
         print("  ⚠️  TELEGRAM_BOT_TOKEN not set -- Telegram connect unavailable")
-    if start_product_price_scheduler():
-        print(f"  🛒 Product price-watch scheduler started (every {PRODUCT_PRICE_POLL_SECONDS}s)")
-    if start_digest_scheduler():
-        print(f"  📰 Digest scheduler started (every {DIGEST_POLL_SECONDS}s)")
+    migrated = migrate_legacy_watches_to_generic()
+    if migrated:
+        print(f"  🔀 Migrated {migrated} legacy watch(es) into the generic watch engine")
+    if start_watch_engine_scheduler():
+        print(f"  ⚡ Watch engine scheduler started (tick every {WATCH_ENGINE_TICK_SECONDS}s, per-watch cadence)")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent")
 
@@ -1011,10 +1007,10 @@ def get_launched_agent_price_watch(
     agent = get_custom_agent(agent_id)
     if not agent or agent["creator_wallet"] != auth_wallet:
         raise HTTPException(status_code=404, detail="Agent not found.")
-    alert = get_btc_price_alert_by_agent(agent_id)
-    if not alert:
+    watch = get_watch_by_agent(agent_id)
+    if not watch:
         raise HTTPException(status_code=404, detail="This agent has no price watch.")
-    return alert
+    return watch
 
 
 @app.patch("/agents/custom/{agent_id}")
@@ -1040,16 +1036,15 @@ def update_launched_agent(
         agent = update_custom_agent_fields(agent_id, **fields)
 
     if body.threshold_pct is not None or body.window_hours is not None:
-        alert = get_btc_price_alert_by_agent(agent_id)
-        if alert:
-            update_btc_price_alert_params(
-                alert["id"], threshold_pct=body.threshold_pct, window_hours=body.window_hours
-            )
-        else:
-            watch = get_product_price_watch_by_agent(agent_id)
-            if not watch:
-                raise HTTPException(status_code=400, detail="This agent has no price watch to edit.")
-            update_product_price_watch_params(watch["id"], threshold_pct=body.threshold_pct)
+        watch = get_watch_by_agent(agent_id)
+        if not watch:
+            raise HTTPException(status_code=400, detail="This agent has no price watch to edit.")
+        condition_config = dict(watch.get("condition_config") or {})
+        if body.threshold_pct is not None:
+            condition_config["threshold_pct"] = body.threshold_pct
+        if body.window_hours is not None:
+            condition_config["window_hours"] = body.window_hours
+        update_watch_params(watch["id"], condition_config=condition_config)
 
     return agent or {}
 
