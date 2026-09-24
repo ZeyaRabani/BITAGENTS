@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowUpRight, Search } from "lucide-react";
 import { LaunchTicker } from "@/components/launch/LaunchTicker";
-import { AgentCard } from "@/components/launch/AgentCard";
-import { LAUNCHED_AGENTS, type LaunchedAgent } from "@/lib/launchpadMock";
+import { LiveAgentCard } from "@/components/agents/LiveAgentCard";
+import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
+import { fetchVisibleCustomAgents, type LaunchedAgentRecord } from "@/lib/launchpadBuilderClient";
 
 type SortKey = "newest" | "volume" | "runs";
 
@@ -15,27 +16,39 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "runs", label: "Most Run" },
 ];
 
-const CATEGORIES: ("All" | LaunchedAgent["category"])[] = ["All", "Trading", "Research", "Monitoring", "Utility"];
-
 export default function LaunchPage() {
+  const { token } = useDcaWalletAuth();
+  const [allAgents, setAllAgents] = useState<LaunchedAgentRecord[]>([]);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
-  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("All");
+  const [category, setCategory] = useState("All");
+
+  useEffect(() => {
+    void fetchVisibleCustomAgents(token ?? undefined).then(setAllAgents);
+  }, [token]);
+
+  const categories = useMemo(() => {
+    const found = new Set(allAgents.map((a) => a.category).filter((c): c is string => Boolean(c)));
+    return ["All", ...Array.from(found).sort()];
+  }, [allAgents]);
 
   const agents = useMemo(() => {
-    let list = [...LAUNCHED_AGENTS];
+    let list = [...allAgents];
     if (category !== "All") list = list.filter((a) => a.category === category);
     if (query.trim()) {
       const q = query.trim().toLowerCase();
       list = list.filter(
-        (a) => a.name.toLowerCase().includes(q) || a.handle.toLowerCase().includes(q) || a.creator.toLowerCase().includes(q)
+        (a) =>
+          (a.name ?? "").toLowerCase().includes(q) ||
+          (a.handle ?? "").toLowerCase().includes(q) ||
+          a.creator_wallet.toLowerCase().includes(q)
       );
     }
-    if (sort === "newest") list.sort((a, b) => a.ageDays - b.ageDays);
-    if (sort === "volume") list.sort((a, b) => b.volumeUsd - a.volumeUsd);
+    if (sort === "newest") list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    if (sort === "volume") list.sort((a, b) => b.volume_usd - a.volume_usd);
     if (sort === "runs") list.sort((a, b) => b.runs - a.runs);
     return list;
-  }, [query, sort, category]);
+  }, [allAgents, query, sort, category]);
 
   return (
     <div className="min-h-screen">
@@ -89,7 +102,7 @@ export default function LaunchPage() {
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-1.5">
-              {CATEGORIES.map((c) => (
+              {categories.map((c) => (
                 <button
                   key={c}
                   onClick={() => setCategory(c)}
@@ -128,7 +141,7 @@ export default function LaunchPage() {
         ) : (
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {agents.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
+              <LiveAgentCard key={agent.id} agent={agent} />
             ))}
           </div>
         )}

@@ -11,7 +11,7 @@ export function AgentMarketplace() {
   return (
     <AppShell
       title="Agent Marketplace"
-      subtitle="Discover and run BIT Agents. Pay per task on Solana - listing your own agent is not open yet."
+      subtitle="Discover and run BIT Agents. Pay per task on Solana - launch your own from the Launchpad."
     >
       {/* <MarketplaceStatsBar /> */}
 

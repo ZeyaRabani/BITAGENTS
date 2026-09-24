@@ -103,6 +103,22 @@ export async function fetchMyLaunchedAgents(authToken: string): Promise<Launched
   return (data.agents ?? []) as LaunchedAgentRecord[];
 }
 
+/** Everyone's public live agents, plus -- if signed in -- the viewer's own
+ * agents that are still in the 24h testing window. That's the fix for
+ * "when I press Marketplace my new agent should be there": a just-launched
+ * agent is status=testing, not yet publicly live, but its own creator
+ * should see it immediately rather than wait 24h. De-duplicated by id in
+ * case an own agent has already gone fully live. */
+export async function fetchVisibleCustomAgents(authToken?: string): Promise<LaunchedAgentRecord[]> {
+  const [live, mine] = await Promise.all([
+    fetchLaunchedAgents("live"),
+    authToken ? fetchMyLaunchedAgents(authToken) : Promise.resolve([]),
+  ]);
+  const seen = new Set(live.map((a) => a.id));
+  const ownVisible = mine.filter((a) => a.status !== "draft" && !seen.has(a.id));
+  return [...live, ...ownVisible];
+}
+
 export type PriceWatch = {
   id: string;
   threshold_pct: number;
