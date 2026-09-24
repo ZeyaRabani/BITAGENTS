@@ -57,6 +57,7 @@ from db import (
 )
 from db import get_btc_price_alert_by_agent, update_btc_price_alert_params
 from db import get_any_watch_summary
+from db import delete_custom_agent
 from btc_price_alert import check_btc_price_alert
 from btc_price_alert import start_scheduler as start_btc_alert_scheduler
 from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
@@ -1096,6 +1097,20 @@ def update_launched_agent(
             update_product_price_watch_params(watch["id"], threshold_pct=body.threshold_pct)
 
     return agent or {}
+
+
+@app.delete("/agents/custom/{agent_id}")
+def delete_launched_agent(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    agent = get_custom_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    if agent["creator_wallet"] != auth_wallet:
+        raise HTTPException(status_code=403, detail="Only this agent's creator can delete it.")
+    delete_custom_agent(agent_id)
+    return {"deleted": True, "id": agent_id}
 
 
 class NotifyEmailRequest(BaseModel):

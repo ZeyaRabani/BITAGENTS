@@ -1593,6 +1593,17 @@ def list_custom_agents(status: Optional[str] = None, creator_wallet: Optional[st
     return [_custom_agent_row_to_dict(r) for r in rows]
 
 
+def delete_custom_agent(agent_id: str) -> bool:
+    """Delete a custom agent. Watch rows (btc_price_alerts, product_price_watches,
+    digest_watches) cascade automatically via their agent_id FK. Returns True if a
+    row was actually deleted."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM custom_agents WHERE id = %s", (agent_id,))
+            return cur.rowcount > 0
+
+
 def record_custom_agent_run(agent_id: str, volume_usd: float = 0.0) -> None:
     init_db()
     with get_conn() as conn:

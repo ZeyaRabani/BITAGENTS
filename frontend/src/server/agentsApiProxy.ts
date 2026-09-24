@@ -647,6 +647,16 @@ export async function proxyUpdateLaunchedAgent(
   });
 }
 
+export async function proxyDeleteLaunchedAgent(
+  agentId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/agents/custom/${agentId}`, {
+    method: "DELETE",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyGetLaunchedAgentPriceWatch(
   agentId: string,
   authToken: string

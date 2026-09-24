@@ -103,20 +103,31 @@ export async function fetchMyLaunchedAgents(authToken: string): Promise<Launched
   return (data.agents ?? []) as LaunchedAgentRecord[];
 }
 
-/** Everyone's public live agents, plus -- if signed in -- the viewer's own
- * agents that are still in the 24h testing window. That's the fix for
- * "when I press Marketplace my new agent should be there": a just-launched
- * agent is status=testing, not yet publicly live, but its own creator
- * should see it immediately rather than wait 24h. De-duplicated by id in
- * case an own agent has already gone fully live. */
+/** Every launched agent -- live or still in its testing window -- from any
+ * creator, plus (if signed in) the viewer's own non-draft agents in case
+ * either public list missed one. Launched agents show up immediately, the
+ * same way a token shows up the moment it's launched: no 24h promotion gate
+ * hides it from the feed. De-duplicated by id. */
 export async function fetchVisibleCustomAgents(authToken?: string): Promise<LaunchedAgentRecord[]> {
-  const [live, mine] = await Promise.all([
+  const [live, testing, mine] = await Promise.all([
     fetchLaunchedAgents("live"),
+    fetchLaunchedAgents("testing"),
     authToken ? fetchMyLaunchedAgents(authToken) : Promise.resolve([]),
   ]);
-  const seen = new Set(live.map((a) => a.id));
-  const ownVisible = mine.filter((a) => a.status !== "draft" && !seen.has(a.id));
-  return [...live, ...ownVisible];
+  const byId = new Map<string, LaunchedAgentRecord>();
+  for (const agent of [...live, ...testing, ...mine]) {
+    if (agent.status === "draft") continue;
+    byId.set(agent.id, agent);
+  }
+  return Array.from(byId.values());
+}
+
+export async function deleteLaunchedAgent(agentId: string, authToken: string): Promise<boolean> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  return res.ok;
 }
 
 export type PriceWatch = {

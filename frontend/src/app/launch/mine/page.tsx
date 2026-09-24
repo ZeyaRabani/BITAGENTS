@@ -7,6 +7,7 @@ import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 import {
   confirmAgentNotify,
+  deleteLaunchedAgent,
   fetchAgentPriceWatch,
   fetchMyLaunchedAgents,
   getAgentNotifyTelegramStatus,
@@ -161,7 +162,7 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
 
 const STATUS_LABEL: Record<LaunchedAgentRecord["status"], string> = {
   draft: "Draft — not launched",
-  testing: "Testing (24h window before public listing)",
+  testing: "Testing — listed publicly",
   live: "Live",
 };
 
@@ -171,13 +172,26 @@ const STATUS_COLOR: Record<LaunchedAgentRecord["status"], string> = {
   live: "text-signal",
 };
 
-function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; token: string; onUpdated: (a: LaunchedAgentRecord) => void }) {
+function AgentRow({
+  agent,
+  token,
+  onUpdated,
+  onDeleted,
+}: {
+  agent: LaunchedAgentRecord;
+  token: string;
+  onUpdated: (a: LaunchedAgentRecord) => void;
+  onDeleted: (id: string) => void;
+}) {
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState(agent.description ?? "");
   const [priceWatch, setPriceWatch] = useState<PriceWatch | null>(null);
   const [threshold, setThreshold] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!editing) return;
@@ -203,6 +217,19 @@ function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; tok
       setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    const ok = await deleteLaunchedAgent(agent.id, token);
+    setDeleting(false);
+    if (ok) {
+      onDeleted(agent.id);
+    } else {
+      setDeleteError("Delete failed — try again.");
+      setConfirmingDelete(false);
     }
   }
 
@@ -234,8 +261,35 @@ function AgentRow({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; tok
               {editing ? "Cancel" : "Edit"}
             </button>
           )}
+          {confirmingDelete ? (
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-destructive">Delete?</span>
+              <button
+                onClick={confirmDelete}
+                disabled={deleting}
+                className="border border-destructive px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-destructive disabled:opacity-40"
+              >
+                {deleting ? "…" : "Confirm"}
+              </button>
+              <button
+                onClick={() => setConfirmingDelete(false)}
+                disabled={deleting}
+                className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmingDelete(true)}
+              className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-destructive hover:text-destructive"
+            >
+              Delete
+            </button>
+          )}
         </div>
       </div>
+      {deleteError && <p className="mt-2 text-xs text-destructive">{deleteError}</p>}
 
       {!editing && agent.description && (
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{agent.description}</p>
@@ -374,6 +428,7 @@ export default function MyAgentsPage() {
               onUpdated={(updated) =>
                 setAgents((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)))
               }
+              onDeleted={(id) => setAgents((prev) => prev.filter((a) => a.id !== id))}
             />
           ))}
         </div>
