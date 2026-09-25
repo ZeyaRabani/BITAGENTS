@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Panel } from "@/components/AppShell";
@@ -9,8 +10,10 @@ import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import { explorerUrlForSignature } from "@/lib/dcaActionResults";
 import {
   fetchLaunchConfig,
+  fetchLaunchedAgent,
   launchAgent,
   listLaunchedAgents,
+  updateLaunchedAgent,
   type LaunchConfig,
   type LaunchedAgent,
 } from "@/lib/launchAgentClient";
@@ -24,7 +27,7 @@ const CATEGORY_LABEL: Record<LaunchModule["category"], string> = {
   infra: "Infrastructure",
 };
 
-export function LaunchAgentConsole() {
+export function LaunchAgentConsole({ editId }: { editId?: string }) {
   const { connection } = useConnection();
   const { publicKey, connected, sendTransaction } = useWallet();
   const { token, busy: authBusy, error: authError, isAuthenticated } = useKickstartWalletAuth();
@@ -42,6 +45,7 @@ export function LaunchAgentConsole() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launchSuccess, setLaunchSuccess] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(editId?.trim() || null);
 
   const feeSol = typeof config?.fee_sol === "number" ? config.fee_sol : LAUNCH_COST_SOL;
   const feeFree =
@@ -85,6 +89,24 @@ export function LaunchAgentConsole() {
   useEffect(() => {
     void fetchLaunchConfig().then(setConfig);
   }, []);
+
+  useEffect(() => {
+    if (!token || !editingId) return;
+    void fetchLaunchedAgent(editingId, token)
+      .then(({ agent }) => {
+        setName(agent.name);
+        setDescription(agent.description);
+        setTask(agent.task);
+        setVisibility(agent.visibility);
+        setPricePerMonth(
+          agent.price_per_month_sol != null ? String(agent.price_per_month_sol) : ""
+        );
+        setSelectedModules(agent.modules);
+      })
+      .catch((err) => {
+        setLaunchError(err instanceof Error ? err.message : "Failed to load agent");
+      });
+  }, [token, editingId]);
 
   useEffect(() => {
     if (!token) {
@@ -150,6 +172,25 @@ export function LaunchAgentConsole() {
     setLaunchBusy(true);
 
     try {
+      if (editingId) {
+        setLaunchPhase("Saving changes…");
+        const result = await updateLaunchedAgent(
+          editingId,
+          {
+            name: name.trim(),
+            description: description.trim(),
+            task: task.trim(),
+            modules: selectedModules,
+            visibility,
+            price_per_month_sol: monthlyPrice,
+          },
+          token
+        );
+        setLaunchSuccess(result.message ?? `Agent "${name.trim()}" relaunched.`);
+        await refreshAgents(token);
+        return;
+      }
+
       const latest = (await fetchLaunchConfig()) ?? config;
       const latestFee =
         typeof latest?.fee_sol === "number" ? latest.fee_sol : LAUNCH_COST_SOL;
@@ -228,20 +269,37 @@ export function LaunchAgentConsole() {
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Compose a new agent: name it, describe its job, pick the modules it needs
-          {feeFree ? (
+          {editingId ? (
             <>
-              , then launch for{" "}
-              <strong className="text-foreground">0 SOL</strong> (development mode).
+              Update this agent&apos;s name, task, modules, or listing. Saving relaunches it
+              with no extra launch fee.
             </>
           ) : (
             <>
-              , then pay the{" "}
-              <strong className="text-foreground">{feeSol} SOL</strong> launch fee.
+              Compose a new agent: name it, describe its job, pick the modules it needs
+              {feeFree ? (
+                <>
+                  , then launch for{" "}
+                  <strong className="text-foreground">0 SOL</strong> (development mode).
+                </>
+              ) : (
+                <>
+                  , then pay the{" "}
+                  <strong className="text-foreground">{feeSol} SOL</strong> launch fee.
+                </>
+              )}{" "}
+              You must connect your wallet and sign the auth message before launch.
             </>
-          )}{" "}
-          You must connect your wallet and sign the auth message before launch.
+          )}
         </p>
+        {editingId && (
+          <Link
+            href="/agents/launch"
+            className="mt-3 inline-block font-mono text-[10px] uppercase tracking-[0.14em] text-signal hover:underline"
+          >
+            Cancel edit · launch new
+          </Link>
+        )}
         {!feeFree && feeWallet && (
           <p className="mt-2 font-mono text-[10px] text-muted-foreground">
             Fee wallet: {feeWallet.slice(0, 4)}…{feeWallet.slice(-4)}
@@ -486,19 +544,21 @@ export function LaunchAgentConsole() {
           )}
         </Panel>
 
-        <Panel title="Launch cost">
+        <Panel title={editingId ? "Relaunch" : "Launch cost"}>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                Required payment
+                {editingId ? "Save changes" : "Required payment"}
               </div>
               <div className="mt-2 font-display text-3xl font-bold tabular-nums text-signal">
-                {feeSol} SOL
+                {editingId ? "0 SOL" : `${feeSol} SOL`}
               </div>
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                {feeFree
-                  ? "Development mode: no on-chain transfer. The API saves your agent definition at 0 SOL."
-                  : `Launching sends ${feeSol} SOL to the fee wallet. The API verifies the transfer, then saves your agent definition.`}
+                {editingId
+                  ? "Editing does not charge another launch fee. Your existing listing is updated in place."
+                  : feeFree
+                    ? "Development mode: no on-chain transfer. The API saves your agent definition at 0 SOL."
+                    : `Launching sends ${feeSol} SOL to the fee wallet. The API verifies the transfer, then saves your agent definition.`}
               </p>
               {launchPhase && (
                 <p className="mt-2 font-mono text-[11px] text-muted-foreground">{launchPhase}</p>
@@ -510,10 +570,14 @@ export function LaunchAgentConsole() {
               className="bg-signal px-6 py-3 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {launchBusy
-                ? "Launching…"
-                : feeFree
-                  ? "Launch · 0 SOL"
-                  : `Launch · ${feeSol} SOL`}
+                ? editingId
+                  ? "Saving…"
+                  : "Launching…"
+                : editingId
+                  ? "Relaunch agent"
+                  : feeFree
+                    ? "Launch · 0 SOL"
+                    : `Launch · ${feeSol} SOL`}
             </button>
           </div>
         </Panel>
@@ -564,6 +628,20 @@ export function LaunchAgentConsole() {
                     <p className="mt-1 text-xs text-muted-foreground">{agent.description}</p>
                   )}
                   <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{agent.task}</p>
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <Link
+                      href={`/agents/launch?edit=${agent.id}`}
+                      className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal hover:underline"
+                    >
+                      Edit / relaunch
+                    </Link>
+                    <Link
+                      href={`/agents/launched/${agent.id}`}
+                      className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-signal"
+                    >
+                      Open agent
+                    </Link>
+                  </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {agent.modules.map((mid) => (
                       <span

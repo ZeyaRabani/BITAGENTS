@@ -51,13 +51,17 @@ from db import (
     save_custom_instructions,
 )
 from launch_agent import (
+    chat_with_launched_agent,
+    check_agent_access,
     get_launch_config,
     get_marketplace_launched_agent,
+    get_owned_or_accessible_agent,
     get_user_launch_dashboard,
     launch_agent,
     list_marketplace_launched_agents,
     list_user_launched_agents,
     subscribe_to_agent,
+    update_user_launched_agent,
 )
 from hosted_llm import (
     CAPIX_API_URL,
@@ -1807,7 +1811,72 @@ def launch_list(
 
 
 class SubscribeAgentRequest(BaseModel):
-    signature: str = Field(min_length=32, max_length=128)
+    signature: str = Field(default="", max_length=128)
+
+
+class LaunchChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    session_id: Optional[str] = None
+    history: Optional[list[dict[str, str]]] = None
+
+
+@app.get("/launch/{agent_id}")
+def launch_get(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = get_owned_or_accessible_agent(agent_id, auth_wallet)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.patch("/launch/{agent_id}")
+def launch_update(
+    agent_id: str,
+    body: LaunchAgentRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = update_user_launched_agent(
+        user_wallet=auth_wallet,
+        agent_id=agent_id,
+        name=body.name,
+        description=body.description or "",
+        task=body.task,
+        modules=body.modules,
+        visibility=body.visibility,
+        price_per_month_sol=body.price_per_month_sol,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/launch/{agent_id}/access")
+def launch_access(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    return check_agent_access(agent_id, auth_wallet)
+
+
+@app.post("/launch/{agent_id}/chat")
+def launch_chat(
+    agent_id: str,
+    body: LaunchChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = chat_with_launched_agent(
+        user_wallet=auth_wallet,
+        agent_id=agent_id,
+        message=body.message,
+        history=body.history,
+        session_id=body.session_id,
+    )
+    if result.get("error"):
+        status = 403 if result.get("status") == "payment_required" else 400
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
 
 
 @app.post("/launch/{agent_id}/subscribe")
@@ -1819,7 +1888,7 @@ def launch_subscribe(
     result = subscribe_to_agent(
         buyer_wallet=auth_wallet,
         agent_id=agent_id,
-        signature=body.signature,
+        signature=body.signature or "",
     )
     if result.get("error"):
         status = 403 if result.get("status") == "rejected" else 400

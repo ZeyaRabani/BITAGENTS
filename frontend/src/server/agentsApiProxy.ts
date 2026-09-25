@@ -842,10 +842,41 @@ export async function proxyLaunchAgent(
 
 export async function proxySubscribeAgent(
   agentId: string,
-  body: { signature: string },
+  body: { signature?: string },
   authToken: string
 ): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/subscribe`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyLaunchAgentGet(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyUpdateLaunchAgent(
+  agentId: string,
+  body: Record<string, unknown>,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyLaunchAgentChat(
+  agentId: string,
+  body: Record<string, unknown>,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/chat`, {
     method: "POST",
     headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
     body: JSON.stringify(body),

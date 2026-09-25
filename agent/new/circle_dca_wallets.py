@@ -29,12 +29,13 @@ CIRCLE_API_KEY = os.environ.get("CIRCLE_API_KEY", "").strip()
 CIRCLE_ENTITY_SECRET = os.environ.get("CIRCLE_ENTITY_SECRET", "").strip()
 CIRCLE_WALLET_SET_ID = os.environ.get("CIRCLE_WALLET_SET_ID", "").strip()
 
-AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund")
+AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund", "launch")
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
     "easya": "EasyA",
     "volume": "Volume",
     "hedge_fund": "HedgeFund",
+    "launch": "Launch",
 }
 
 _wallet_set_lock = threading.Lock()

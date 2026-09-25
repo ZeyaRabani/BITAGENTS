@@ -2235,6 +2235,52 @@ def create_launched_agent(record: dict[str, Any]) -> dict[str, Any]:
     return _launched_agent_row_to_dict(row)
 
 
+def update_launched_agent(agent_id: str, user_wallet: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
+    ensure_launch_schema()
+    aid = (agent_id or "").strip()
+    wallet = (user_wallet or "").strip()
+    if not aid or not wallet:
+        return None
+    sets: list[str] = []
+    params: dict[str, Any] = {"id": aid, "user_wallet": wallet}
+    if "name" in fields:
+        sets.append("name = %(name)s")
+        params["name"] = fields["name"]
+    if "description" in fields:
+        sets.append("description = %(description)s")
+        params["description"] = fields["description"]
+    if "task" in fields:
+        sets.append("task = %(task)s")
+        params["task"] = fields["task"]
+    if "modules" in fields:
+        sets.append("modules = %(modules)s")
+        params["modules"] = Json(fields["modules"] or [])
+    if "visibility" in fields:
+        sets.append("visibility = %(visibility)s")
+        params["visibility"] = fields["visibility"]
+    if "price_per_month_sol" in fields:
+        sets.append("price_per_month_sol = %(price_per_month_sol)s")
+        params["price_per_month_sol"] = fields["price_per_month_sol"]
+    if "status" in fields:
+        sets.append("status = %(status)s")
+        params["status"] = fields["status"]
+    if not sets:
+        return get_launched_agent(aid)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE launched_agents
+                SET {", ".join(sets)}
+                WHERE id = %(id)s AND user_wallet = %(user_wallet)s
+                RETURNING *
+                """,
+                params,
+            )
+            row = cur.fetchone()
+    return _launched_agent_row_to_dict(row) if row else None
+
+
 def _subscription_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
     modules = row.get("agent_modules")
     if isinstance(modules, str):

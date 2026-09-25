@@ -22,10 +22,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const signature = body.signature?.trim();
-  if (!signature) {
-    return NextResponse.json({ error: "signature is required" }, { status: 400 });
-  }
+  const signature = body.signature?.trim() ?? "";
 
   try {
     const res = await proxySubscribeAgent(agentId, { signature }, authToken);

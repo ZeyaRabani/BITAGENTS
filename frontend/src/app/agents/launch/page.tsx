@@ -7,13 +7,22 @@ export const metadata: Metadata = {
   description: "Compose and launch a custom agent with modules and connectors.",
 };
 
-export default function LaunchAgentsPage() {
+export default function LaunchAgentsPage({
+  searchParams,
+}: {
+  searchParams?: { edit?: string };
+}) {
+  const editing = Boolean(searchParams?.edit);
   return (
     <AppShell
-      title="Launch Agents"
-      subtitle="Name your agent, define its task, pick modules, then launch."
+      title={editing ? "Edit agent" : "Launch Agents"}
+      subtitle={
+        editing
+          ? "Update this agent and relaunch it. No extra launch fee."
+          : "Name your agent, define its task, pick modules, then launch."
+      }
     >
-      <LaunchAgentConsole />
+      <LaunchAgentConsole editId={searchParams?.edit} />
     </AppShell>
   );
 }

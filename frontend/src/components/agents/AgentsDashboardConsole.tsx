@@ -38,13 +38,13 @@ function formatExpiry(value?: string) {
 }
 
 function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
-  const href =
-    agent.visibility === "public" ? `/agents/launched/${agent.id}` : "/agents/launch";
-
   return (
     <div className="border border-grid bg-surface/30 px-3 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <Link href={href} className="font-mono text-sm font-semibold text-foreground hover:text-signal">
+        <Link
+          href={`/agents/launched/${agent.id}`}
+          className="font-mono text-sm font-semibold text-foreground hover:text-signal"
+        >
           {agent.name}
         </Link>
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -59,6 +59,20 @@ function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
         <p className="mt-1 text-xs text-muted-foreground">{agent.description}</p>
       )}
       <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{agent.task}</p>
+      <div className="mt-3 flex flex-wrap gap-3">
+        <Link
+          href={`/agents/launch?edit=${agent.id}`}
+          className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal hover:underline"
+        >
+          Edit / relaunch
+        </Link>
+        <Link
+          href={`/agents/launched/${agent.id}`}
+          className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground hover:text-signal"
+        >
+          Open agent
+        </Link>
+      </div>
     </div>
   );
 }
@@ -235,6 +249,22 @@ export function AgentsDashboardConsole() {
               {loading ? "Refreshing…" : "Refresh"}
             </button>
           </div>
+
+          {data.creator_payout_wallet && (
+            <div className="border border-grid bg-surface/40 px-4 py-3">
+              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                Creator earnings wallet
+              </div>
+              <p className="mt-2 break-all font-mono text-xs text-foreground">
+                {data.creator_payout_wallet}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Subscriptions send {Math.round((1 - (data.platform_fee_rate ?? 0.1)) * 100)}% here
+                via Circle. You can claim this SOL later. The platform keeps{" "}
+                {Math.round((data.platform_fee_rate ?? 0.1) * 100)}%.
+              </p>
+            </div>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Stat
