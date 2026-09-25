@@ -37,7 +37,27 @@ from deposit_ledger import (
     _valid_signature,
 )
 
-LAUNCH_COST_SOL = float(os.getenv("LAUNCH_COST_SOL", "1") or "1")
+def get_app_mode() -> str:
+    """Runtime mode: development | testing | production (default)."""
+    raw = (os.getenv("MODE") or os.getenv("APP_MODE") or "production").strip().lower()
+    if raw in ("dev", "development"):
+        return "development"
+    if raw in ("test", "testing"):
+        return "testing"
+    return "production"
+
+
+def get_launch_cost_sol() -> float:
+    """Launch fee is 0 SOL in development; 1 SOL in testing/production."""
+    if get_app_mode() == "development":
+        return 0.0
+    try:
+        return float(os.getenv("LAUNCH_COST_SOL", "1") or "1")
+    except (TypeError, ValueError):
+        return 1.0
+
+
+LAUNCH_COST_SOL = get_launch_cost_sol()
 
 ALLOWED_LAUNCH_MODULES = {
     "web_search",
@@ -67,14 +87,23 @@ def get_launch_fee_wallet() -> Optional[str]:
     return None
 
 
+def is_free_launch() -> bool:
+    return get_launch_cost_sol() <= 0
+
+
 def get_launch_config() -> dict[str, Any]:
     fee_wallet = get_launch_fee_wallet()
+    fee_sol = get_launch_cost_sol()
+    mode = get_app_mode()
+    free = fee_sol <= 0
     return {
-        "fee_sol": LAUNCH_COST_SOL,
+        "mode": mode,
+        "fee_sol": fee_sol,
         "fee_wallet": fee_wallet,
-        "configured": bool(fee_wallet),
+        "configured": True if free else bool(fee_wallet),
         "cluster": SOLANA_CLUSTER,
         "allowed_modules": sorted(ALLOWED_LAUNCH_MODULES),
+        "payment_required": not free,
     }
 
 
@@ -116,6 +145,7 @@ def launch_agent(
     task = (task or "").strip()
     signature = (signature or "").strip()
     modules_norm = _normalize_modules(modules)
+    fee_sol = get_launch_cost_sol()
     fee_wallet = get_launch_fee_wallet()
     visibility_norm = (visibility or "private").strip().lower()
     if visibility_norm not in ("public", "private"):
@@ -134,7 +164,7 @@ def launch_agent(
     else:
         price = None
 
-    if not fee_wallet:
+    if fee_sol > 0 and not fee_wallet:
         return {
             "error": (
                 "Launch fee wallet is not configured. "
@@ -155,6 +185,41 @@ def launch_agent(
         return {"error": "Agent description is too long."}
     if not modules_norm:
         return {"error": "Select at least one valid module."}
+
+    now = datetime.now(timezone.utc).isoformat()
+    agent_id = uuid.uuid4().hex[:16]
+    dest_wallet = fee_wallet or user_wallet
+
+    if fee_sol <= 0:
+        signature = f"development-{uuid.uuid4().hex[:16]}"
+        try:
+            agent = create_launched_agent(
+                {
+                    "id": agent_id,
+                    "user_wallet": user_wallet,
+                    "name": name,
+                    "description": description,
+                    "task": task,
+                    "modules": modules_norm,
+                    "visibility": visibility_norm,
+                    "price_per_month_sol": price,
+                    "fee_sol": 0,
+                    "fee_signature": signature,
+                    "fee_wallet": dest_wallet,
+                    "status": "active",
+                    "explorer_url": None,
+                }
+            )
+        except Exception as exc:
+            return {"error": f"Failed to save launched agent: {exc}"}
+        return {
+            "status": "confirmed",
+            "agent": agent,
+            "fee_sol": 0,
+            "paid_sol": 0,
+            "message": f'Agent "{name}" launched successfully ({get_app_mode()}: no launch fee).',
+        }
+
     if not signature:
         return {"error": "Transaction signature is required."}
     if not _valid_signature(signature):
@@ -204,7 +269,7 @@ def launch_agent(
                 ),
             }
 
-        inbound = _parse_verified_user_deposits(tx, user_wallet, fee_wallet)
+        inbound = _parse_verified_user_deposits(tx, user_wallet, dest_wallet)
         sol_transfers = [
             t for t in inbound if str(t.get("token", "")).upper() in ("SOL", "WSOL")
         ]
@@ -212,20 +277,18 @@ def launch_agent(
             return {
                 "error": (
                     f"No verifiable SOL transfer from your wallet to the launch fee wallet "
-                    f"({fee_wallet[:4]}…{fee_wallet[-4:]}) was found."
+                    f"({dest_wallet[:4]}…{dest_wallet[-4:]}) was found."
                 ),
             }
 
         paid = max(float(t.get("amount") or 0) for t in sol_transfers)
-        if paid + 1e-9 < LAUNCH_COST_SOL:
+        if paid + 1e-9 < fee_sol:
             return {
                 "error": (
-                    f"Launch fee is {LAUNCH_COST_SOL} SOL. This transaction paid {paid} SOL."
+                    f"Launch fee is {fee_sol} SOL. This transaction paid {paid} SOL."
                 ),
             }
 
-        now = datetime.now(timezone.utc).isoformat()
-        agent_id = uuid.uuid4().hex[:16]
         explorer = _explorer_url(signature)
 
         agent = create_launched_agent(
@@ -238,9 +301,9 @@ def launch_agent(
                 "modules": modules_norm,
                 "visibility": visibility_norm,
                 "price_per_month_sol": price,
-                "fee_sol": LAUNCH_COST_SOL,
+                "fee_sol": fee_sol,
                 "fee_signature": signature,
-                "fee_wallet": fee_wallet,
+                "fee_wallet": dest_wallet,
                 "status": "active",
                 "explorer_url": explorer,
             }
@@ -252,7 +315,7 @@ def launch_agent(
             {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
-                "agent_wallet": fee_wallet,
+                "agent_wallet": dest_wallet,
                 "signature": signature,
                 "token": "SOL",
                 "mint": SOL_ADDRESS_FULL,
@@ -269,7 +332,7 @@ def launch_agent(
         return {
             "status": "confirmed",
             "agent": agent,
-            "fee_sol": LAUNCH_COST_SOL,
+            "fee_sol": fee_sol,
             "paid_sol": paid,
             "message": f'Agent "{name}" launched successfully.',
         }

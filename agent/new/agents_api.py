@@ -1756,7 +1756,7 @@ class LaunchAgentRequest(BaseModel):
     description: str = Field(default="", max_length=2000)
     task: str = Field(min_length=1, max_length=20000)
     modules: list[str] = Field(min_length=1)
-    signature: str = Field(min_length=32, max_length=128)
+    signature: str = Field(default="", max_length=128)
     visibility: str = Field(default="private", pattern="^(public|private)$")
     price_per_month_sol: Optional[float] = Field(default=None, ge=0, le=1000)
 
@@ -1781,7 +1781,11 @@ def launch_public_list(
     _: None = Depends(require_internal_key),
     limit: int = Query(100, ge=1, le=200),
 ) -> dict[str, Any]:
-    return list_marketplace_launched_agents(limit=limit)
+    try:
+        return list_marketplace_launched_agents(limit=limit)
+    except Exception as exc:
+        print(f"  ⚠️  /launch/public failed: {exc}")
+        return {"agents": [], "count": 0}
 
 
 @app.get("/launch/public/{agent_id}")
@@ -1828,16 +1832,19 @@ def launch_create(
     body: LaunchAgentRequest,
     auth_wallet: str = Depends(require_wallet_session),
 ) -> dict[str, Any]:
-    result = launch_agent(
-        user_wallet=auth_wallet,
-        name=body.name,
-        description=body.description or "",
-        task=body.task,
-        modules=body.modules,
-        signature=body.signature,
-        visibility=body.visibility,
-        price_per_month_sol=body.price_per_month_sol,
-    )
+    try:
+        result = launch_agent(
+            user_wallet=auth_wallet,
+            name=body.name,
+            description=body.description or "",
+            task=body.task,
+            modules=body.modules,
+            signature=body.signature or "",
+            visibility=body.visibility,
+            price_per_month_sol=body.price_per_month_sol,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Launch failed: {exc}") from exc
     if result.get("error"):
         status = 403 if result.get("status") == "rejected" else 400
         raise HTTPException(status_code=status, detail=result["error"])

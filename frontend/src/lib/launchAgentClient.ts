@@ -50,9 +50,11 @@ export type LaunchDashboard = {
 };
 
 export type LaunchConfig = {
+  mode?: "development" | "testing" | "production";
   fee_sol: number;
   fee_wallet: string | null;
   configured: boolean;
+  payment_required?: boolean;
   cluster?: string;
   allowed_modules: string[];
 };
@@ -167,7 +169,7 @@ export async function launchAgent(
     description?: string;
     task: string;
     modules: string[];
-    signature: string;
+    signature?: string;
     visibility: "public" | "private";
     price_per_month_sol?: number | null;
   },

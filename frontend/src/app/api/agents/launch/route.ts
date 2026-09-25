@@ -52,9 +52,9 @@ export async function POST(request: Request) {
       ? body.price_per_month_sol
       : null;
 
-  if (!name || !task || !signature || modules.length === 0) {
+  if (!name || !task || modules.length === 0) {
     return NextResponse.json(
-      { error: "name, task, modules, and signature are required" },
+      { error: "name, task, and modules are required" },
       { status: 400 }
     );
   }
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
         description: body.description?.trim() ?? "",
         task,
         modules,
-        signature,
+        signature: signature ?? "",
         visibility,
         price_per_month_sol: visibility === "public" ? price : null,
       },

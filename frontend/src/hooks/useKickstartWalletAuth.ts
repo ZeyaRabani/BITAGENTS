@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import bs58 from "bs58";
+
+const signInLocks = new Map<string, Promise<string | null>>();
 
 type AuthSession = {
   token: string;
@@ -80,48 +82,77 @@ export function useKickstartWalletAuth() {
       return null;
     }
 
-    setBusy(true);
-    setError(null);
+    const existing = signInLocks.get(wallet);
+    if (existing) {
+      return existing;
+    }
 
-    try {
-      const cached = getStoredAuth(wallet);
-      if (cached) {
-        const me = await fetchMe(cached);
-        if (me?.user_wallet === wallet) {
+    const run = (async () => {
+      setBusy(true);
+      setError(null);
+
+      try {
+        const cached = getStoredAuth(wallet);
+        if (cached) {
+          const me = await fetchMe(cached);
+          if (me?.user_wallet === wallet) {
+            setToken(cached);
+            return cached;
+          }
+          clearAuth(wallet);
+        }
+
+        const challenge = await fetchChallenge(wallet);
+        const messageBytes = new TextEncoder().encode(challenge.message);
+        const signatureBytes = await signMessage(messageBytes);
+        const session = await verifyAuth({
+          user_wallet: wallet,
+          message: challenge.message,
+          signature: bs58.encode(signatureBytes),
+        });
+
+        storeAuth(wallet, session.token);
+        setToken(session.token);
+        return session.token;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Wallet sign-in failed";
+        const cached = getStoredAuth(wallet);
+        if (cached) {
           setToken(cached);
+          setError(null);
           return cached;
         }
-        clearAuth(wallet);
+        setError(message === "Unexpected error" ? "Sign-in was interrupted. Reconnect the wallet and try once." : message);
+        setToken(null);
+        return null;
+      } finally {
+        setBusy(false);
       }
+    })();
 
-      const challenge = await fetchChallenge(wallet);
-      const messageBytes = new TextEncoder().encode(challenge.message);
-      const signatureBytes = await signMessage(messageBytes);
-      const session = await verifyAuth({
-        user_wallet: wallet,
-        message: challenge.message,
-        signature: bs58.encode(signatureBytes),
-      });
-
-      storeAuth(wallet, session.token);
-      setToken(session.token);
-      return session.token;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Wallet sign-in failed";
-      setError(message);
-      setToken(null);
-      return null;
+    signInLocks.set(wallet, run);
+    try {
+      return await run;
     } finally {
-      setBusy(false);
+      if (signInLocks.get(wallet) === run) {
+        signInLocks.delete(wallet);
+      }
     }
   }, [wallet, signMessage]);
 
+  const startedForWallet = useRef<string | null>(null);
+
   useEffect(() => {
     if (!connected || !wallet) {
+      startedForWallet.current = null;
       setToken(null);
       setError(null);
       return;
     }
+    if (startedForWallet.current === wallet) {
+      return;
+    }
+    startedForWallet.current = wallet;
     void signIn();
   }, [connected, wallet, signIn]);
 

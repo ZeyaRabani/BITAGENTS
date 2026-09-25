@@ -43,7 +43,11 @@ export function LaunchAgentConsole() {
   const [launchSuccess, setLaunchSuccess] = useState<string | null>(null);
   const [lastTx, setLastTx] = useState<string | null>(null);
 
-  const feeSol = config?.fee_sol ?? LAUNCH_COST_SOL;
+  const feeSol = typeof config?.fee_sol === "number" ? config.fee_sol : LAUNCH_COST_SOL;
+  const feeFree =
+    config?.mode === "development" ||
+    config?.payment_required === false ||
+    feeSol <= 0;
   const feeWallet = config?.fee_wallet ?? null;
   const cluster = config?.cluster;
 
@@ -120,12 +124,6 @@ export function LaunchAgentConsole() {
       setLaunchError("Approve the wallet sign-in message before launching.");
       return;
     }
-    if (!feeWallet || !config?.configured) {
-      setLaunchError(
-        "Launch fee wallet is not configured on the API. Set LAUNCH_FEE_WALLET (or TREASURY_PUBLIC_KEY)."
-      );
-      return;
-    }
     if (!name.trim()) {
       setLaunchError("Agent name is required.");
       return;
@@ -150,32 +148,51 @@ export function LaunchAgentConsole() {
     }
 
     setLaunchBusy(true);
-    setLaunchPhase("Preparing transaction…");
 
     try {
-      const feePk = new PublicKey(feeWallet);
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-      const tx = new Transaction().add(
-        SystemProgram.transfer({
-          fromPubkey: publicKey,
-          toPubkey: feePk,
-          lamports: Math.round(feeSol * LAMPORTS_PER_SOL),
-        })
-      );
-      tx.recentBlockhash = blockhash;
-      tx.feePayer = publicKey;
+      const latest = (await fetchLaunchConfig()) ?? config;
+      const latestFee =
+        typeof latest?.fee_sol === "number" ? latest.fee_sol : LAUNCH_COST_SOL;
+      const skipPayment =
+        latest?.mode === "development" ||
+        latest?.payment_required === false ||
+        latestFee <= 0;
+      const latestFeeWallet = latest?.fee_wallet ?? feeWallet;
 
-      setLaunchPhase("Approve in wallet…");
-      const signature = await sendTransaction(tx, connection);
-      setLastTx(signature);
+      let signature = "";
+      if (!skipPayment) {
+        if (!latestFeeWallet) {
+          throw new Error(
+            "Launch fee wallet is not configured on the API. Set LAUNCH_FEE_WALLET (or TREASURY_PUBLIC_KEY)."
+          );
+        }
+        setLaunchPhase("Preparing transaction…");
+        const feePk = new PublicKey(latestFeeWallet);
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+        const tx = new Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: publicKey,
+            toPubkey: feePk,
+            lamports: Math.round(latestFee * LAMPORTS_PER_SOL),
+          })
+        );
+        tx.recentBlockhash = blockhash;
+        tx.feePayer = publicKey;
 
-      setLaunchPhase("Confirming on-chain…");
-      await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed"
-      );
+        setLaunchPhase("Approve in wallet…");
+        signature = await sendTransaction(tx, connection);
+        setLastTx(signature);
 
-      setLaunchPhase("Verifying fee and saving agent…");
+        setLaunchPhase("Confirming on-chain…");
+        await connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          "confirmed"
+        );
+        setLaunchPhase("Verifying fee and saving agent…");
+      } else {
+        setLaunchPhase("Saving agent…");
+      }
+
       const result = await launchAgent(
         {
           name: name.trim(),
@@ -205,32 +222,33 @@ export function LaunchAgentConsole() {
     }
   }
 
-  const canSubmit =
-    isAuthenticated &&
-    !authBusy &&
-    !launchBusy &&
-    Boolean(feeWallet) &&
-    Boolean(config?.configured) &&
-    name.trim().length > 0 &&
-    task.trim().length > 0 &&
-    selectedModules.length > 0 &&
-    (visibility === "private" || Number(pricePerMonth) > 0);
+  const canSubmit = !launchBusy;
 
   return (
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Compose a new agent: name it, describe its job, pick the modules it needs, then pay the{" "}
-          <strong className="text-foreground">{feeSol} SOL</strong> launch fee. You must connect
-          your wallet and sign the auth message before launch.
+          Compose a new agent: name it, describe its job, pick the modules it needs
+          {feeFree ? (
+            <>
+              , then launch for{" "}
+              <strong className="text-foreground">0 SOL</strong> (development mode).
+            </>
+          ) : (
+            <>
+              , then pay the{" "}
+              <strong className="text-foreground">{feeSol} SOL</strong> launch fee.
+            </>
+          )}{" "}
+          You must connect your wallet and sign the auth message before launch.
         </p>
-        {feeWallet && (
+        {!feeFree && feeWallet && (
           <p className="mt-2 font-mono text-[10px] text-muted-foreground">
             Fee wallet: {feeWallet.slice(0, 4)}…{feeWallet.slice(-4)}
             {cluster ? ` · ${cluster}` : ""}
           </p>
         )}
-        {config && !config.configured && (
+        {config && !config.configured && !feeFree && (
           <p className="mt-2 font-mono text-[11px] text-warn">
             Launch fee wallet not configured on the agents API.
           </p>
@@ -273,7 +291,7 @@ export function LaunchAgentConsole() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="e.g. Sol News Scout"
-                disabled={!isAuthenticated || launchBusy}
+                disabled={launchBusy}
                 className="w-full border border-grid bg-background px-3 py-2.5 font-mono text-sm disabled:opacity-50"
               />
             </div>
@@ -286,7 +304,7 @@ export function LaunchAgentConsole() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Short summary shown on the marketplace"
-                disabled={!isAuthenticated || launchBusy}
+                disabled={launchBusy}
                 className="w-full border border-grid bg-background px-3 py-2.5 font-mono text-sm disabled:opacity-50"
               />
             </div>
@@ -298,7 +316,7 @@ export function LaunchAgentConsole() {
                 value={task}
                 onChange={(e) => setTask(e.target.value)}
                 placeholder="Describe what this agent can do - capabilities, workflows, constraints…"
-                disabled={!isAuthenticated || launchBusy}
+                disabled={launchBusy}
                 rows={6}
                 className="w-full resize-y border border-grid bg-background px-3 py-2.5 font-mono text-sm leading-relaxed disabled:opacity-50"
               />
@@ -319,7 +337,7 @@ export function LaunchAgentConsole() {
             <div className="grid gap-2 sm:grid-cols-2">
               <button
                 type="button"
-                disabled={!isAuthenticated || launchBusy}
+                disabled={launchBusy}
                 onClick={() => {
                   setVisibility("private");
                   setPricePerMonth("");
@@ -339,7 +357,7 @@ export function LaunchAgentConsole() {
               </button>
               <button
                 type="button"
-                disabled={!isAuthenticated || launchBusy}
+                disabled={launchBusy}
                 onClick={() => setVisibility("public")}
                 className={`border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   visibility === "public"
@@ -368,7 +386,7 @@ export function LaunchAgentConsole() {
                   value={pricePerMonth}
                   onChange={(e) => setPricePerMonth(e.target.value)}
                   placeholder="e.g. 0.5"
-                  disabled={!isAuthenticated || launchBusy}
+                  disabled={launchBusy}
                   className="w-full max-w-xs border border-grid bg-background px-3 py-2.5 font-mono text-sm disabled:opacity-50"
                 />
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -404,7 +422,7 @@ export function LaunchAgentConsole() {
                       <button
                         key={mod.id}
                         type="button"
-                        disabled={!isAuthenticated || launchBusy}
+                        disabled={launchBusy}
                         onClick={() => toggleModule(mod.id)}
                         className={`border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
                           active
@@ -478,8 +496,9 @@ export function LaunchAgentConsole() {
                 {feeSol} SOL
               </div>
               <p className="mt-2 max-w-md text-sm text-muted-foreground">
-                Launching sends {feeSol} SOL to the fee wallet. The API verifies the transfer, then
-                saves your agent definition.
+                {feeFree
+                  ? "Development mode: no on-chain transfer. The API saves your agent definition at 0 SOL."
+                  : `Launching sends ${feeSol} SOL to the fee wallet. The API verifies the transfer, then saves your agent definition.`}
               </p>
               {launchPhase && (
                 <p className="mt-2 font-mono text-[11px] text-muted-foreground">{launchPhase}</p>
@@ -492,13 +511,9 @@ export function LaunchAgentConsole() {
             >
               {launchBusy
                 ? "Launching…"
-                : !connected
-                  ? "Connect wallet"
-                  : !isAuthenticated
-                    ? "Sign in required"
-                    : !config?.configured
-                      ? "Fee wallet missing"
-                      : `Launch · ${feeSol} SOL`}
+                : feeFree
+                  ? "Launch · 0 SOL"
+                  : `Launch · ${feeSol} SOL`}
             </button>
           </div>
         </Panel>

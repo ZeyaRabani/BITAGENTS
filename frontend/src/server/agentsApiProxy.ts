@@ -827,7 +827,7 @@ export async function proxyLaunchAgent(
     description?: string;
     task: string;
     modules: string[];
-    signature: string;
+    signature?: string;
     visibility?: "public" | "private";
     price_per_month_sol?: number | null;
   },

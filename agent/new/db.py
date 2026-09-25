@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -61,6 +62,7 @@ def get_database_url() -> str:
 _db_lock = threading.RLock()
 _schema_ready = False
 _import_done = False
+_launch_schema_ready = False
 
 SCHEMA_STATEMENTS = [
     """
@@ -598,22 +600,68 @@ def _require_db() -> None:
         )
 
 
+_TRANSIENT_CONN_MARKERS = (
+    "could not translate host name",
+    "temporary failure in name resolution",
+    "name or service not known",
+    "timeout expired",
+    "connection timed out",
+    "could not connect to server",
+    "server closed the connection unexpectedly",
+    "connection refused",
+    "network is unreachable",
+)
+
+
+def _is_transient_db_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _TRANSIENT_CONN_MARKERS)
+
+
+def _connect_with_retry(attempts: int = 5):
+    last_exc: Optional[BaseException] = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return psycopg2.connect(
+                get_database_url(),
+                cursor_factory=RealDictCursor,
+                connect_timeout=15,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+            )
+        except psycopg2.OperationalError as exc:
+            last_exc = exc
+            if not _is_transient_db_error(exc) or attempt == attempts:
+                raise
+            delay = min(2 ** (attempt - 1), 8)
+            print(
+                f"  ⚠️  Neon connect failed (attempt {attempt}/{attempts}): {exc}. "
+                f"Retrying in {delay}s..."
+            )
+            time.sleep(delay)
+    raise last_exc or RuntimeError("Neon connect failed")
+
+
 @contextmanager
 def get_conn():
     _require_db()
-    conn = psycopg2.connect(
-        get_database_url(),
-        cursor_factory=RealDictCursor,
-        connect_timeout=15,
-    )
+    conn = _connect_with_retry()
     try:
         yield conn
         conn.commit()
     except Exception:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except psycopg2.Error:
+            pass
         raise
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except psycopg2.Error:
+            pass
 
 
 def _iso(value: Any) -> Any:
@@ -676,15 +724,34 @@ def init_db() -> None:
     with _db_lock:
         if _schema_ready:
             return
-        with get_conn() as conn:
-            with conn.cursor() as cur:
-                for stmt in SCHEMA_STATEMENTS:
-                    cur.execute(stmt)
-                for stmt in MIGRATION_STATEMENTS:
-                    cur.execute(stmt)
-            _repair_bitagents_decimal_scale(conn)
-            # _repair_dca_circle_ledger_migration(conn)  # Migration completed 2026-09-10
-        _schema_ready = True
+        last_exc: Optional[BaseException] = None
+        for attempt in range(1, 4):
+            try:
+                with get_conn() as conn:
+                    with conn.cursor() as cur:
+                        for stmt in SCHEMA_STATEMENTS:
+                            cur.execute(stmt)
+                            conn.commit()
+                        for stmt in MIGRATION_STATEMENTS:
+                            cur.execute(stmt)
+                            conn.commit()
+                    _repair_bitagents_decimal_scale(conn)
+                    # _repair_dca_circle_ledger_migration(conn)  # Migration completed 2026-09-10
+                _schema_ready = True
+                last_exc = None
+                break
+            except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+                last_exc = exc
+                if not _is_transient_db_error(exc) or attempt == 3:
+                    raise
+                delay = min(2 ** (attempt - 1), 8)
+                print(
+                    f"  ⚠️  Neon schema init failed (attempt {attempt}/3): {exc}. "
+                    f"Retrying in {delay}s..."
+                )
+                time.sleep(delay)
+        if last_exc:
+            raise last_exc
 
     if _import_done:
         return
@@ -2052,59 +2119,15 @@ def _launched_agent_row_to_dict(row: dict[str, Any]) -> dict[str, Any]:
 
 def ensure_launch_schema() -> None:
     """
-    Idempotent create/alter for launch + subscription tables.
-
-    Safe to call even when init_db() already marked the schema ready
-    (e.g. API process started before these tables were added).
+    Launch tables are created in init_db(). Do not ALTER here on every
+    request - concurrent AccessExclusiveLock on launched_agents deadlocks.
     """
+    global _launch_schema_ready
+    if _launch_schema_ready or _schema_ready:
+        _launch_schema_ready = True
+        return
     init_db()
-    stmts = [
-        """
-        CREATE TABLE IF NOT EXISTS launched_agents (
-            id              VARCHAR(16) PRIMARY KEY,
-            user_wallet     VARCHAR(64) NOT NULL,
-            name            TEXT NOT NULL,
-            description     TEXT NOT NULL DEFAULT '',
-            task            TEXT NOT NULL,
-            modules         JSONB NOT NULL DEFAULT '[]'::jsonb,
-            visibility      VARCHAR(16) NOT NULL DEFAULT 'private',
-            price_per_month_sol DOUBLE PRECISION,
-            fee_sol         DOUBLE PRECISION NOT NULL DEFAULT 1,
-            fee_signature   VARCHAR(128) NOT NULL UNIQUE,
-            fee_wallet      VARCHAR(64) NOT NULL,
-            status          VARCHAR(20) NOT NULL DEFAULT 'active',
-            explorer_url    TEXT,
-            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_launched_agents_user ON launched_agents (user_wallet)",
-        "CREATE INDEX IF NOT EXISTS idx_launched_agents_signature ON launched_agents (fee_signature)",
-        "CREATE INDEX IF NOT EXISTS idx_launched_agents_visibility ON launched_agents (visibility)",
-        "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS visibility VARCHAR(16) NOT NULL DEFAULT 'private'",
-        "ALTER TABLE launched_agents ADD COLUMN IF NOT EXISTS price_per_month_sol DOUBLE PRECISION",
-        """
-        CREATE TABLE IF NOT EXISTS agent_subscriptions (
-            id                VARCHAR(16) PRIMARY KEY,
-            agent_id          VARCHAR(16) NOT NULL,
-            buyer_wallet      VARCHAR(64) NOT NULL,
-            seller_wallet     VARCHAR(64) NOT NULL,
-            price_sol         DOUBLE PRECISION NOT NULL,
-            payment_signature VARCHAR(128) NOT NULL UNIQUE,
-            status            VARCHAR(20) NOT NULL DEFAULT 'active',
-            starts_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            expires_at        TIMESTAMPTZ NOT NULL,
-            explorer_url      TEXT,
-            created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )
-        """,
-        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_buyer ON agent_subscriptions (buyer_wallet)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_seller ON agent_subscriptions (seller_wallet)",
-        "CREATE INDEX IF NOT EXISTS idx_agent_subscriptions_agent ON agent_subscriptions (agent_id)",
-    ]
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            for stmt in stmts:
-                cur.execute(stmt)
+    _launch_schema_ready = True
 
 
 def get_launched_agent_by_signature(signature: str) -> Optional[dict[str, Any]]:
@@ -2199,7 +2222,7 @@ def create_launched_agent(record: dict[str, Any]) -> dict[str, Any]:
                     "modules": Json(record.get("modules") or []),
                     "visibility": (record.get("visibility") or "private").lower(),
                     "price_per_month_sol": record.get("price_per_month_sol"),
-                    "fee_sol": float(record.get("fee_sol") or 1),
+                    "fee_sol": float(record["fee_sol"]) if record.get("fee_sol") is not None else 1.0,
                     "fee_signature": record["fee_signature"],
                     "fee_wallet": record["fee_wallet"],
                     "status": record.get("status") or "active",
