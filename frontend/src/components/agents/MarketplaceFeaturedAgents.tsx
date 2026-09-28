@@ -2,21 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AgentCard } from "@/components/agents/AgentCard";
-import { LiveAgentCard } from "@/components/agents/LiveAgentCard";
 import { FEATURED_AGENTS } from "@/lib/agentsCatalog";
-import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 import {
   fetchPlatformMetrics,
   formatMetricNumber,
   formatVolumeSol,
 } from "@/lib/dcaPlanClient";
-import { fetchVisibleCustomAgents, type LaunchedAgentRecord } from "@/lib/launchpadBuilderClient";
 
+/** The hand-coded, official agents -- shown under "Verified" in the
+ * marketplace, mirroring the Verified/Community split from Harshal's
+ * hr-marketplace branch (agreed on in the Sept 28 meeting as the direction
+ * to combine both builds' UI). */
 export function MarketplaceFeaturedAgents() {
-  const { token } = useDcaWalletAuth();
   const [totalRuns, setTotalRuns] = useState<string | null>(null);
   const [volumeSol, setVolumeSol] = useState<string | null>(null);
-  const [customAgents, setCustomAgents] = useState<LaunchedAgentRecord[]>([]);
 
   useEffect(() => {
     void fetchPlatformMetrics().then((metrics) => {
@@ -27,10 +26,6 @@ export function MarketplaceFeaturedAgents() {
       setVolumeSol(formatVolumeSol(metrics.total_volume_sol ?? 0));
     });
   }, []);
-
-  useEffect(() => {
-    void fetchVisibleCustomAgents(token ?? undefined).then(setCustomAgents);
-  }, [token]);
 
   const agents = useMemo(
     () =>
@@ -49,9 +44,6 @@ export function MarketplaceFeaturedAgents() {
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {agents.map((agent) => (
         <AgentCard key={agent.id} agent={agent} />
-      ))}
-      {customAgents.map((agent) => (
-        <LiveAgentCard key={agent.id} agent={agent} />
       ))}
     </div>
   );

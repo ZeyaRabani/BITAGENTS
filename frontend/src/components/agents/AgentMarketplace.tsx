@@ -1,25 +1,25 @@
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+"use client";
+
+import { useState } from "react";
 import { MarketplaceFeaturedAgents } from "@/components/agents/MarketplaceFeaturedAgents";
-import { MarketplaceStatsBar } from "@/components/agents/MarketplaceStatsBar";
+import { MarketplaceCommunityAgents } from "@/components/agents/MarketplaceCommunityAgents";
 import { AppShell } from "@/components/AppShell";
-import { AGENT_CATEGORIES, FEATURED_AGENTS } from "@/lib/agentsCatalog";
+import { FEATURED_AGENTS } from "@/lib/agentsCatalog";
 
 export function AgentMarketplace() {
   const listedCount = FEATURED_AGENTS.length;
+  const [communityCount, setCommunityCount] = useState<number | null>(null);
 
   return (
     <AppShell
       title="Agent Marketplace"
       subtitle="Discover and run BIT Agents. Pay per task on Solana - launch your own from the Launchpad."
     >
-      {/* <MarketplaceStatsBar /> */}
-
-      <div className="mt-8 grid gap-6">
+      <div className="mt-8 grid gap-10">
         <section>
           <div className="mb-4 flex items-center justify-between gap-3">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-              Featured agents
+              Verified agents
             </h2>
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
               {listedCount} listed
@@ -28,6 +28,23 @@ export function AgentMarketplace() {
 
           <MarketplaceFeaturedAgents />
         </section>
+
+        {communityCount !== 0 && (
+          <section>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                Community agents
+              </h2>
+              {communityCount !== null && (
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {communityCount} listed
+                </span>
+              )}
+            </div>
+
+            <MarketplaceCommunityAgents onCount={setCommunityCount} />
+          </section>
+        )}
       </div>
     </AppShell>
   );
