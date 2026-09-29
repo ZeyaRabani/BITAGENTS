@@ -437,6 +437,14 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
     def check_telegram_connect(**kwargs):
         code = (kwargs.get("code") or "").strip()
         if not code:
+            # The model can call this with no code right after
+            # _auto_resolve_telegram_link has already silently resolved the
+            # same link this turn -- that's a success, not a missing-arg
+            # error. A real user seeing "I need a code" here would think
+            # they're stuck when the connection already went through.
+            current = db.get_custom_agent(agent_id)
+            if current and current.get("notify_channel") == "telegram":
+                return {"linked": True, "already_connected": True}
             return {"error": "code is required"}
         record = db.get_telegram_link_code(code)
         if not record:
