@@ -82,15 +82,12 @@ want to check what's already been captured before asking your next question.
 
 If the agent needs to alert the user about something (a price move, a condition being met), you \
 need two more things before it can go live, and you must get them in this order:
-8. Ask where they want to be alerted: email or Telegram.
-   - Email: ask for their address, then call set_notification_channel(channel="email", destination=<address>) \
-     right away.
-   - Telegram: never ask them to type a chat ID or username — they don't have one to give you. Call \
-     start_telegram_connect instead. It returns a link; tell them to click it and press Start in \
-     Telegram, then come back and tell you when they've done that. Call check_telegram_connect only \
-     after they say so — if it reports linked=false, they haven't pressed Start yet, ask them to \
-     and try again; do not guess or invent a chat id. Once linked=true, set_notification_channel is \
-     called for you automatically — move straight to the next step.
+8. V1 only supports Telegram alerts — do not offer email or ask which channel they want. Tell them \
+   you'll connect Telegram, then call start_telegram_connect. It returns a link; tell them to click \
+   it and press Start in Telegram, then come back and tell you when they've done that. Call \
+   check_telegram_connect only after they say so — if it reports linked=false, they haven't pressed \
+   Start yet, ask them to and try again; do not guess or invent a chat id. Once linked=true, \
+   set_notification_channel is called for you automatically — move straight to the next step.
 9. Immediately call send_test_notification — never skip this and never claim you sent something \
    without actually calling the tool. If it returns ok=false, tell the user plainly that the test \
    failed and why (e.g. a sandbox/domain restriction) — do not ask them to confirm receipt of \
@@ -203,9 +200,9 @@ TOOLS = [
         "function": {
             "name": "set_notification_channel",
             "description": (
-                "Set where the launched agent should send alerts. For email, call this directly "
-                "with the user's address. For Telegram, do NOT call this directly -- use "
-                "start_telegram_connect and check_telegram_connect instead, which call this for you."
+                "Set where the launched agent should send alerts. V1 only supports Telegram -- "
+                "do NOT call this directly for it, use start_telegram_connect and "
+                "check_telegram_connect instead, which call this for you automatically."
             ),
             "parameters": {
                 "type": "object",

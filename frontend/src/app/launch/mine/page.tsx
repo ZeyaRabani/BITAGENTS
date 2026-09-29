@@ -12,7 +12,6 @@ import {
   fetchAgentPriceWatch,
   fetchMyLaunchedAgents,
   getAgentNotifyTelegramStatus,
-  setAgentNotifyEmail,
   startAgentNotifyTelegram,
   testAgentNotify,
   updateLaunchedAgent,
@@ -21,8 +20,6 @@ import {
 } from "@/lib/launchpadBuilderClient";
 
 function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord; token: string; onUpdated: (a: LaunchedAgentRecord) => void }) {
-  const [channel, setChannel] = useState<"email" | "telegram">(agent.notify_channel ?? "email");
-  const [email, setEmail] = useState(agent.notify_channel === "email" ? agent.notify_destination ?? "" : "");
   const [telegramLink, setTelegramLink] = useState<string | null>(null);
   const [telegramLinked, setTelegramLinked] = useState(agent.notify_channel === "telegram");
   const [testSent, setTestSent] = useState(false);
@@ -41,15 +38,6 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
     }, 2000);
     return () => clearInterval(interval);
   }, [telegramLink, telegramLinked, agent.id, token]);
-
-  async function saveEmail() {
-    setBusy(true);
-    setMsg(null);
-    const { ok, data } = await setAgentNotifyEmail(agent.id, email.trim(), token);
-    setBusy(false);
-    setTestSent(false);
-    setMsg(ok ? "Email set — click Send Test to verify it." : data.detail ?? "Failed to set email.");
-  }
 
   async function connectTelegram() {
     setBusy(true);
@@ -90,38 +78,18 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-2">
-        {(["email", "telegram"] as const).map((c) => (
-          <button
-            key={c}
-            onClick={() => setChannel(c)}
-            className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] ${
-              channel === c ? "border-signal text-signal" : "border-grid text-muted-foreground"
-            }`}
-          >
-            {c === "email" ? "Email" : "Telegram"}
-          </button>
-        ))}
-      </div>
+      <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+        Telegram — V1's only notification channel
+      </p>
 
-      {channel === "email" ? (
-        <div className="flex gap-2">
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="flex-1 border border-grid bg-background px-3 py-2 text-sm text-foreground"
-          />
-          <button
-            onClick={saveEmail}
-            disabled={busy || !email.trim()}
-            className="border border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
-          >
-            Set
-          </button>
-        </div>
-      ) : telegramLinked ? (
+      {agent.notify_channel === "email" && (
+        <p className="text-xs text-warn">
+          Currently set to email ({agent.notify_destination}) from before the V1 switch — connect
+          Telegram below to move this agent over.
+        </p>
+      )}
+
+      {telegramLinked ? (
         <p className="text-xs text-signal">Telegram connected.</p>
       ) : (
         <button
@@ -138,7 +106,7 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
         </a>
       )}
 
-      {((channel === "email" && agent.notify_destination) || telegramLinked) && (
+      {telegramLinked && (
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <button
             onClick={sendTest}
