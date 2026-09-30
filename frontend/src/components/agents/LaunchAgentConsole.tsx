@@ -389,8 +389,9 @@ export function LaunchAgentConsole({ editId }: { editId?: string }) {
         <Panel title="Visibility · pricing">
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Private agents stay on your account only. Public agents can be listed for others with
-              a monthly SOL price.
+              Private hides the agent from the marketplace, like a GitHub private repo. People who
+              already subscribed keep using it until that subscription ends. After it ends, it is
+              no longer shown to them. Public listings can be subscribed to at a monthly SOL price.
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
               <button
@@ -410,7 +411,7 @@ export function LaunchAgentConsole({ editId }: { editId?: string }) {
                   Private
                 </div>
                 <p className="mt-1.5 text-xs text-muted-foreground">
-                  Only you can use this agent. No monthly price.
+                  Hidden from the marketplace. Current subscribers keep access until expiry.
                 </p>
               </button>
               <button
@@ -515,7 +516,7 @@ export function LaunchAgentConsole({ editId }: { editId?: string }) {
             This is how your agent will appear on the marketplace
             {visibility === "public"
               ? " after you publish (public listing)."
-              : " if you switch to public later. Private agents stay on your account only."}
+              : " if you switch to public later. While it is private, only you and current subscribers can use it."}
           </p>
           <div className="max-w-md">
             <AgentCard agent={previewAgent} preview />

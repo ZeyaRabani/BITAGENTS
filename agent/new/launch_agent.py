@@ -408,16 +408,19 @@ def get_owned_or_accessible_agent(agent_id: str, user_wallet: str) -> dict[str, 
 
 
 def check_agent_access(agent_id: str, user_wallet: str) -> dict[str, Any]:
+    """
+    Visibility works like GitHub:
+    public listings are discoverable; switching to private hides the agent from
+    new users. Anyone with an active paid subscription keeps access until it expires.
+    """
     agent = get_launched_agent(agent_id)
     if not agent:
         return {"allowed": False, "reason": "not_found"}
     user_wallet = (user_wallet or "").strip()
     if agent.get("user_wallet") == user_wallet:
         return {"allowed": True, "reason": "owner", "payment_required": False}
-    if agent.get("visibility") != "public" or agent.get("status") != "active":
-        return {"allowed": False, "reason": "private", "payment_required": True}
-    if is_free_launch():
-        return {"allowed": True, "reason": "development", "payment_required": False}
+    if agent.get("status") != "active":
+        return {"allowed": False, "reason": "inactive", "payment_required": False}
     sub = get_active_subscription(agent_id, user_wallet)
     if sub:
         return {
@@ -425,7 +428,12 @@ def check_agent_access(agent_id: str, user_wallet: str) -> dict[str, Any]:
             "reason": "subscribed",
             "payment_required": False,
             "subscription": sub,
+            "visibility": agent.get("visibility"),
         }
+    if agent.get("visibility") != "public":
+        return {"allowed": False, "reason": "private", "payment_required": False}
+    if is_free_launch():
+        return {"allowed": True, "reason": "development", "payment_required": False}
     return {
         "allowed": False,
         "reason": "payment_required",
@@ -492,10 +500,19 @@ def update_user_launched_agent(
     )
     if not updated:
         return {"error": "Failed to update agent."}
+    message = f'Agent "{name}" relaunched.'
+    if visibility_norm == "private" and existing.get("visibility") == "public":
+        message = (
+            f'Agent "{name}" is now private. People who already subscribed keep access '
+            "until that subscription ends. After it ends, the agent is hidden from them "
+            "and from the marketplace."
+        )
+    elif visibility_norm == "public" and existing.get("visibility") != "public":
+        message = f'Agent "{name}" is public on the marketplace again.'
     return {
         "status": "updated",
         "agent": _decorate_agent(updated),
-        "message": f'Agent "{name}" relaunched.',
+        "message": message,
     }
 
 
@@ -509,6 +526,14 @@ def chat_with_launched_agent(
 ) -> dict[str, Any]:
     access = check_agent_access(agent_id, user_wallet)
     if not access.get("allowed"):
+        if access.get("reason") == "private":
+            return {
+                "error": (
+                    "This agent is private. Existing subscriptions keep access until they "
+                    "expire, and it is hidden after that."
+                ),
+                "status": "private",
+            }
         return {
             "error": "Subscribe to this agent to chat with it.",
             "status": "payment_required",
@@ -774,6 +799,30 @@ def subscribe_to_agent(
         }
 
 
+def _subscription_is_active(sub: dict[str, Any]) -> bool:
+    if str(sub.get("status") or "") != "active":
+        return False
+    raw = sub.get("expires_at")
+    if not raw:
+        return False
+    try:
+        exp = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if exp.tzinfo is None:
+        exp = exp.replace(tzinfo=timezone.utc)
+    return exp > datetime.now(timezone.utc)
+
+
+def _buyer_subscription_visible(sub: dict[str, Any]) -> bool:
+    """Keep a private agent visible only while the buyer's subscription is still active."""
+    if _subscription_is_active(sub):
+        return True
+    visibility = str(sub.get("agent_visibility") or "").lower()
+    status = str(sub.get("agent_status") or "").lower()
+    return visibility == "public" and status == "active"
+
+
 def get_user_launch_dashboard(user_wallet: str) -> dict[str, Any]:
     from db import ensure_launch_schema
 
@@ -794,7 +843,11 @@ def get_user_launch_dashboard(user_wallet: str) -> dict[str, Any]:
             private.append(row)
 
     try:
-        bought = list_buyer_subscriptions(wallet, limit=100)
+        bought = [
+            sub
+            for sub in list_buyer_subscriptions(wallet, limit=100)
+            if _buyer_subscription_visible(sub)
+        ]
     except Exception:
         bought = []
     try:

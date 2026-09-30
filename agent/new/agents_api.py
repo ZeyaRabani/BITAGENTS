@@ -186,6 +186,23 @@ from volume_ledger import (
     verify_and_record_volume_deposit,
     withdraw_volume_tokens,
 )
+from yield_agent import (
+    YIELD_MODEL,
+    YIELD_SCHEDULER_POLL_SECONDS,
+    get_yield_dashboard,
+    invest_for_requirements,
+    run_yield_agent,
+    start_yield_scheduler,
+    yield_scheduler_status,
+)
+from yield_ledger import (
+    get_yield_agent_wallet_info,
+    get_yield_user_balances,
+    list_yield_user_ledger,
+    verify_and_record_yield_deposit,
+    withdraw_yield_tokens,
+)
+from yield_protocols import compare_solana_yields
 from wallet_auth import (
     create_auth_challenge,
     get_session_info,
@@ -415,8 +432,10 @@ def _startup() -> None:
             f"  📈 Hedge Fund paper monitor started "
             f"(every {HF_MONITOR_INTERVAL_SECONDS // 3600}h, close-poll {HF_SCHEDULER_POLL_SECONDS // 60}m)"
         )
+    if start_yield_scheduler():
+        print(f"  📈 Yield Agent scheduler started (every {YIELD_SCHEDULER_POLL_SECONDS}s)")
     print(f"  🗄️  Cache backend: {cache_backend()}")
-    print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund")
+    print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund, Yield")
 
 
 @app.get("/health")
@@ -441,6 +460,11 @@ def health(ping_llm: bool = Query(False)) -> dict[str, Any]:
                 "path_prefix": "/volume",
                 "chat": "/volume/chat",
                 "pricing": "0.25% per swap leg · Meteora DLMM",
+            },
+            "yield": {
+                "path_prefix": "/yield",
+                "chat": "/yield/chat",
+                "pricing": "free · wallet sign-in required",
             },
         },
         "llm": llm_provider(),
@@ -1423,6 +1447,103 @@ def due_diligence_chat(
     return _run_research_chat(run_due_diligence_agent, body, auth_wallet)
 
 
+@app.get("/yield/health")
+def yield_health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "agent": "Yield Agent",
+        "model": YIELD_MODEL,
+        "llm": llm_provider(),
+        "llm_configured": llm_configured(),
+        "auth_required": True,
+        "cluster": SOLANA_CLUSTER,
+        "pricing": "free · wallet sign-in required",
+        "live_routing": "liquid_staking",
+        "scheduler": yield_scheduler_status(),
+    }
+
+
+@app.get("/yield/yields")
+def yield_compare(_: None = Depends(require_internal_key)) -> dict[str, Any]:
+    return compare_solana_yields()
+
+
+@app.get("/yield/dashboard")
+def yield_dashboard(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_yield_dashboard(auth_wallet)
+
+
+@app.get("/yield/wallet/agent")
+def yield_wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_yield_agent_wallet_info(auth_wallet)
+
+
+@app.get("/yield/wallet/balance")
+def yield_wallet_balance(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_yield_user_balances(auth_wallet)
+
+
+@app.post("/yield/wallet/deposit/verify")
+def yield_deposit_verify(
+    body: DepositVerifyRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = verify_and_record_yield_deposit(body.signature.strip(), auth_wallet)
+    if result.get("error") and result.get("status") != "already_recorded":
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/yield/wallet/withdraw")
+def yield_wallet_withdraw(
+    body: WithdrawRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = withdraw_yield_tokens(auth_wallet, body.token.strip(), body.amount)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/yield/wallet/ledger")
+def yield_wallet_ledger(
+    auth_wallet: str = Depends(require_wallet_session),
+    limit: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    entries = list_yield_user_ledger(auth_wallet, limit=limit)
+    return {"user_wallet": auth_wallet, "entries": entries, "count": len(entries)}
+
+
+class YieldInvestRequest(BaseModel):
+    asset: str = "SOL"
+    capital: float
+    duration_days: int = 30
+
+
+@app.post("/yield/invest")
+def yield_invest(
+    body: YieldInvestRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = invest_for_requirements(
+        auth_wallet,
+        body.asset,
+        body.capital,
+        body.duration_days,
+    )
+    if result.get("error") and result.get("status") not in ("compared", "needs_deposit"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/yield/chat", response_model=ChatResponse)
+def yield_chat(
+    body: KickstartChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    return _run_research_chat(run_yield_agent, body, auth_wallet)
+
+
 class HfPaperStrategyCreate(BaseModel):
     tokens: Optional[list[str]] = None
     name: str = ""
@@ -1874,7 +1995,7 @@ def launch_chat(
         session_id=body.session_id,
     )
     if result.get("error"):
-        status = 403 if result.get("status") == "payment_required" else 400
+        status = 403 if result.get("status") in ("payment_required", "private") else 400
         raise HTTPException(status_code=status, detail=result["error"])
     return result
 

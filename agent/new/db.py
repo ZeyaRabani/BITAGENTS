@@ -586,6 +586,55 @@ MIGRATION_STATEMENTS = [
     FROM dca_user_agent_wallets
     ON CONFLICT (user_wallet, agent_type) DO NOTHING
     """,
+    """
+    CREATE TABLE IF NOT EXISTS yield_mandates (
+        user_wallet         VARCHAR(64) PRIMARY KEY,
+        auto_rebalance      BOOLEAN NOT NULL DEFAULT TRUE,
+        min_apy_gain        DOUBLE PRECISION NOT NULL DEFAULT 0.5,
+        idle_reserve_sol    DOUBLE PRECISION NOT NULL DEFAULT 0.03,
+        status              VARCHAR(20) NOT NULL DEFAULT 'active',
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS yield_positions (
+        id                  VARCHAR(16) PRIMARY KEY,
+        user_wallet         VARCHAR(64) NOT NULL,
+        protocol_id         VARCHAR(64) NOT NULL,
+        protocol_name       TEXT NOT NULL,
+        mint                VARCHAR(64) NOT NULL,
+        symbol              VARCHAR(32) NOT NULL,
+        amount              DOUBLE PRECISION NOT NULL,
+        entry_apy           DOUBLE PRECISION,
+        status              VARCHAR(20) NOT NULL DEFAULT 'active',
+        last_signature      TEXT,
+        explorer_url        TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_yield_positions_user ON yield_positions (user_wallet, status)",
+    """
+    CREATE TABLE IF NOT EXISTS yield_rebalances (
+        id                  VARCHAR(16) PRIMARY KEY,
+        user_wallet         VARCHAR(64) NOT NULL,
+        position_id         VARCHAR(16),
+        from_protocol       VARCHAR(64),
+        to_protocol         VARCHAR(64),
+        amount              DOUBLE PRECISION,
+        from_apy            DOUBLE PRECISION,
+        to_apy              DOUBLE PRECISION,
+        signature           TEXT,
+        explorer_url        TEXT,
+        status              VARCHAR(20) NOT NULL DEFAULT 'confirmed',
+        error               TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_yield_rebalances_user ON yield_rebalances (user_wallet, created_at DESC)",
+    "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL DEFAULT 'SOL'",
+    "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS capital DOUBLE PRECISION",
+    "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS duration_days INTEGER",
 ]
 
 
@@ -2467,3 +2516,204 @@ def count_agent_subscribers(agent_id: str) -> int:
     if not row:
         return 0
     return int(row.get("c") if isinstance(row, dict) else row[0] or 0)
+
+
+def _yield_position_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "user_wallet": row.get("user_wallet"),
+        "protocol_id": row.get("protocol_id"),
+        "protocol_name": row.get("protocol_name"),
+        "mint": row.get("mint"),
+        "symbol": row.get("symbol"),
+        "amount": float(row.get("amount") or 0),
+        "entry_apy": float(row["entry_apy"]) if row.get("entry_apy") is not None else None,
+        "status": row.get("status") or "active",
+        "last_signature": row.get("last_signature"),
+        "explorer_url": row.get("explorer_url"),
+        "created_at": row.get("created_at").isoformat() if hasattr(row.get("created_at"), "isoformat") else row.get("created_at"),
+        "updated_at": row.get("updated_at").isoformat() if hasattr(row.get("updated_at"), "isoformat") else row.get("updated_at"),
+    }
+
+
+def upsert_yield_mandate(user_wallet: str, fields: dict[str, Any]) -> dict[str, Any]:
+    wallet = (user_wallet or "").strip()
+    if not wallet:
+        raise ValueError("user_wallet is required")
+    existing = get_yield_mandate(wallet) or {}
+    auto_rebalance = bool(fields.get("auto_rebalance", existing.get("auto_rebalance", True)))
+    min_apy_gain = float(fields.get("min_apy_gain", existing.get("min_apy_gain", 0.5)) or 0.5)
+    idle_reserve = float(fields.get("idle_reserve_sol", existing.get("idle_reserve_sol", 0.03)) or 0.03)
+    status = str(fields.get("status") or existing.get("status") or "active")
+    asset = str(fields.get("asset") or existing.get("asset") or "SOL").upper()
+    capital = fields["capital"] if "capital" in fields else existing.get("capital")
+    duration_days = fields["duration_days"] if "duration_days" in fields else existing.get("duration_days")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO yield_mandates (
+                    user_wallet, auto_rebalance, min_apy_gain, idle_reserve_sol, status,
+                    asset, capital, duration_days, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (user_wallet) DO UPDATE SET
+                    auto_rebalance = EXCLUDED.auto_rebalance,
+                    min_apy_gain = EXCLUDED.min_apy_gain,
+                    idle_reserve_sol = EXCLUDED.idle_reserve_sol,
+                    status = EXCLUDED.status,
+                    asset = EXCLUDED.asset,
+                    capital = EXCLUDED.capital,
+                    duration_days = EXCLUDED.duration_days,
+                    updated_at = NOW()
+                RETURNING *
+                """,
+                (wallet, auto_rebalance, min_apy_gain, idle_reserve, status, asset, capital, duration_days),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else {}
+
+
+def get_yield_mandate(user_wallet: str) -> Optional[dict[str, Any]]:
+    wallet = (user_wallet or "").strip()
+    if not wallet:
+        return None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM yield_mandates WHERE user_wallet = %s", (wallet,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def list_active_yield_mandates() -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM yield_mandates
+                WHERE status = 'active' AND auto_rebalance = TRUE
+                """
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+def insert_yield_position(fields: dict[str, Any]) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO yield_positions (
+                    id, user_wallet, protocol_id, protocol_name, mint, symbol,
+                    amount, entry_apy, status, last_signature, explorer_url
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    fields["id"],
+                    fields["user_wallet"],
+                    fields["protocol_id"],
+                    fields["protocol_name"],
+                    fields["mint"],
+                    fields["symbol"],
+                    fields["amount"],
+                    fields.get("entry_apy"),
+                    fields.get("status") or "active",
+                    fields.get("last_signature"),
+                    fields.get("explorer_url"),
+                ),
+            )
+            row = cur.fetchone()
+    return _yield_position_row(row) if row else fields
+
+
+def update_yield_position(position_id: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
+    pid = (position_id or "").strip()
+    if not pid:
+        return None
+    sets = ["updated_at = NOW()"]
+    params: dict[str, Any] = {"id": pid}
+    for key in ("amount", "entry_apy", "status", "last_signature", "explorer_url", "protocol_id", "protocol_name", "mint", "symbol"):
+        if key in fields:
+            sets.append(f"{key} = %({key})s")
+            params[key] = fields[key]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE yield_positions SET {', '.join(sets)} WHERE id = %(id)s RETURNING *",
+                params,
+            )
+            row = cur.fetchone()
+    return _yield_position_row(row) if row else None
+
+
+def list_yield_positions(user_wallet: str, active_only: bool = True) -> list[dict[str, Any]]:
+    wallet = (user_wallet or "").strip()
+    if not wallet:
+        return []
+    sql = "SELECT * FROM yield_positions WHERE user_wallet = %s"
+    params: list[Any] = [wallet]
+    if active_only:
+        sql += " AND status = 'active'"
+    sql += " ORDER BY updated_at DESC"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+    return [_yield_position_row(row) for row in rows]
+
+
+def insert_yield_rebalance(fields: dict[str, Any]) -> dict[str, Any]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO yield_rebalances (
+                    id, user_wallet, position_id, from_protocol, to_protocol,
+                    amount, from_apy, to_apy, signature, explorer_url, status, error
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    fields["id"],
+                    fields["user_wallet"],
+                    fields.get("position_id"),
+                    fields.get("from_protocol"),
+                    fields.get("to_protocol"),
+                    fields.get("amount"),
+                    fields.get("from_apy"),
+                    fields.get("to_apy"),
+                    fields.get("signature"),
+                    fields.get("explorer_url"),
+                    fields.get("status") or "confirmed",
+                    fields.get("error"),
+                ),
+            )
+            row = cur.fetchone()
+    return dict(row) if row else fields
+
+
+def list_yield_rebalances(user_wallet: str, limit: int = 20) -> list[dict[str, Any]]:
+    wallet = (user_wallet or "").strip()
+    lim = max(1, min(int(limit or 20), 100))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM yield_rebalances
+                WHERE user_wallet = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (wallet, lim),
+            )
+            rows = cur.fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        if hasattr(item.get("created_at"), "isoformat"):
+            item["created_at"] = item["created_at"].isoformat()
+        out.append(item)
+    return out

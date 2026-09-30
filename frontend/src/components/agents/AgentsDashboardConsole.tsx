@@ -99,7 +99,10 @@ function SubscriptionRow({
           {name}
         </Link>
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          {active ? "active" : sub.status} · {sub.price_sol} SOL
+          {active ? "active" : sub.status}
+          {sub.agent_visibility === "private" && active ? " · private until expiry" : ""}
+          {" · "}
+          {sub.price_sol} SOL
         </span>
       </div>
       <p className="mt-2 font-mono text-[10px] text-muted-foreground">

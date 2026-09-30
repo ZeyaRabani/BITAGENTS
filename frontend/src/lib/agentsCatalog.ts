@@ -5,6 +5,7 @@ import {
   Bot,
   Radar,
   Search,
+  TrendingUp,
   Wallet,
 } from "lucide-react";
 
@@ -16,7 +17,8 @@ export type AgentIconId =
   | "bell"
   | "bot"
   | "radar"
-  | "swap";
+  | "swap"
+  | "yield";
 
 export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   wallet: Wallet,
@@ -25,6 +27,7 @@ export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   bot: Bot,
   radar: Radar,
   swap: ArrowLeftRight,
+  yield: TrendingUp,
 };
 
 export type MarketplaceAgent = {
@@ -50,7 +53,7 @@ export type MarketplaceAgent = {
 };
 
 export const MARKETPLACE_STATS = {
-  liveAgents: "8",
+  liveAgents: "9",
   tasks24h: "102",
   activeBuilders: "22",
   uptime30d: "99.2%",
@@ -184,8 +187,7 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     available: true,
     model: "meta-llama/llama-3.1-8b-instruct",
     cluster: "mainnet",
-  }
-  ,
+  },
   {
     id: "hedge-fund",
     slug: "hedge-fund",
@@ -202,7 +204,21 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     available: true,
     model: "meta-llama/llama-3.1-8b-instruct",
     cluster: "mainnet",
-  }
+  },
+  {
+    id: "yield",
+    slug: "yield",
+    name: "Yield Agent",
+    category: "Automation",
+    description:
+      "Deposit SOL, compare live Solana yields, deploy into the best liquid-staking venue, and rebalance when another protocol pays more.",
+    tagline: "Compare · allocate · rebalance",
+    rating: 4.8,
+    iconId: "yield",
+    available: true,
+    model: "meta-llama/llama-3.1-8b-instruct",
+    cluster: "mainnet",
+  },
 ];
 
 export function getAgentBySlug(slug: string): MarketplaceAgent | undefined {

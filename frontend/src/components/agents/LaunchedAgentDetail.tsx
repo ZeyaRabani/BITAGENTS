@@ -56,9 +56,11 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
   const [buySuccess, setBuySuccess] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const freeUse = agent?.mode === "development" || agent?.payment_required === false;
+  const listingPrivate = agent?.visibility === "private";
+  const freeUse =
+    !listingPrivate && (agent?.mode === "development" || agent?.payment_required === false);
   const isOwner = Boolean(publicKey && agent && publicKey.toBase58() === agent.user_wallet);
-  const canChat = Boolean(isAuthenticated && (accessAllowed || freeUse || isOwner));
+  const canChat = Boolean(isAuthenticated && (isOwner || accessAllowed || freeUse));
 
   useEffect(() => {
     let cancelled = false;
@@ -86,11 +88,14 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
               setAccessAllowed(true);
               setAccessReason(owned.access.reason ?? "allowed");
             } else if (
-              owned.agent.mode === "development" ||
-              owned.agent.payment_required === false
+              owned.agent.visibility !== "private" &&
+              (owned.agent.mode === "development" || owned.agent.payment_required === false)
             ) {
               setAccessAllowed(true);
               setAccessReason("development");
+            } else {
+              setAccessAllowed(false);
+              setAccessReason(owned.access?.reason ?? "denied");
             }
           } catch (err) {
             if (!pub && !cancelled) {
@@ -287,6 +292,12 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
               <span className="text-signal">Your agent</span>
             </>
           ) : null}
+          {listingPrivate && accessReason === "subscribed" ? (
+            <>
+              <span>·</span>
+              <span className="text-signal">Private · access until subscription ends</span>
+            </>
+          ) : null}
         </div>
 
         {error && (
@@ -321,12 +332,16 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
         )}
 
         {!canChat && isAuthenticated && !isOwner && (
-          <Panel title="Subscribe">
+          <Panel title={listingPrivate ? "Private agent" : "Subscribe"}>
             <p className="text-sm text-muted-foreground">
-              {freeUse
-                ? "Development mode: start this agent at 0 SOL."
-                : `Pay ${price ?? 0} SOL for 30 days. ${Math.round((1 - rate) * 100)}% goes to the creator Circle wallet so they can claim later. The platform keeps ${Math.round(rate * 100)}%.`}
+              {listingPrivate
+                ? "This agent is private. If you already subscribed, access continues until that subscription ends. After it ends, the agent is no longer shown."
+                : freeUse
+                  ? "Development mode: start this agent at 0 SOL."
+                  : `Pay ${price ?? 0} SOL for 30 days. ${Math.round((1 - rate) * 100)}% goes to the creator Circle wallet so they can claim later. The platform keeps ${Math.round(rate * 100)}%.`}
             </p>
+            {!listingPrivate && (
+              <>
             {buyError && <p className="mt-3 font-mono text-[11px] text-warn">{buyError}</p>}
             {buySuccess && <p className="mt-3 font-mono text-[11px] text-signal">{buySuccess}</p>}
             <button
@@ -343,6 +358,8 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
                     ? "Use agent · 0 SOL"
                     : `Subscribe · ${price} SOL / mo`}
             </button>
+              </>
+            )}
           </Panel>
         )}
 

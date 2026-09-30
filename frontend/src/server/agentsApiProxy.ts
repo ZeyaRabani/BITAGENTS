@@ -331,6 +331,60 @@ export async function proxyHedgeFundWalletLedger(
   });
 }
 
+export async function proxyYieldWalletAgent(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/wallet/agent`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyYieldWalletBalance(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/wallet/balance`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyYieldDepositVerify(
+  body: { signature: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/wallet/deposit/verify`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyYieldWithdraw(
+  body: { token: string; amount: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/wallet/withdraw`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyYieldInvest(
+  body: { asset: string; capital: number; duration_days: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/invest`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyYieldDashboard(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/dashboard`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyKickstartWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/kickstart/wallet/agent`, {
     cache: "no-store",

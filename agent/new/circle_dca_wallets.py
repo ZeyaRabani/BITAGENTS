@@ -29,13 +29,14 @@ CIRCLE_API_KEY = os.environ.get("CIRCLE_API_KEY", "").strip()
 CIRCLE_ENTITY_SECRET = os.environ.get("CIRCLE_ENTITY_SECRET", "").strip()
 CIRCLE_WALLET_SET_ID = os.environ.get("CIRCLE_WALLET_SET_ID", "").strip()
 
-AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund", "launch")
+AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund", "launch", "yield")
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
     "easya": "EasyA",
     "volume": "Volume",
     "hedge_fund": "HedgeFund",
     "launch": "Launch",
+    "yield": "Yield",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -69,6 +70,8 @@ def normalize_agent_type(agent_type: str) -> str:
         "hedgefund": "hedge_fund",
         "volume2": "volume",
         "bitagents_volume": "volume",
+        "yield_agent": "yield",
+        "yield-optimizer": "yield",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:
