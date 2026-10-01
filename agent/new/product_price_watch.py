@@ -25,6 +25,7 @@ from bs4 import BeautifulSoup
 from db import (
     get_product_price_watch,
     get_custom_agent,
+    list_active_agent_subscriptions,
     list_active_product_price_watches,
     log_product_price_watch_fire,
     update_product_price_watch_check,
@@ -114,14 +115,15 @@ def fetch_product_price(url: str) -> tuple[float, Optional[str]]:
 
 
 def _notify_agent_creator(watch: dict, price: float, change_pct: float, currency: Optional[str]) -> dict:
+    """Fans out to every verified subscriber of the template agent, falling
+    back to the agent's own legacy notify_* columns if it has no
+    subscription rows yet -- see btc_price_alert.py's version of this."""
     agent_id = watch.get("agent_id")
     if not agent_id:
         return {"ok": False, "error": "watch has no linked agent -- nothing to notify"}
     agent = get_custom_agent(agent_id)
-    if not agent or not agent.get("notify_channel") or not agent.get("notify_destination"):
-        return {"ok": False, "error": "linked agent has no verified notification channel"}
-    if not agent.get("notify_verified_at"):
-        return {"ok": False, "error": "notification destination was never confirmed by the user"}
+    if not agent:
+        return {"ok": False, "error": "linked agent no longer exists"}
     label = watch.get("product_label") or "your watched item"
     ccy = currency or "$"
     subject = f"{agent.get('name') or 'Your BITAGENTS agent'}: price drop on {label}"
@@ -129,6 +131,20 @@ def _notify_agent_creator(watch: dict, price: float, change_pct: float, currency
         f"{label} dropped {abs(change_pct):.1f}% -- now {ccy}{price:,.2f}.\n{watch['url']}\n\n"
         f"-- {agent.get('name') or 'BITAGENTS'}"
     )
+
+    subscribers = list_active_agent_subscriptions(agent_id)
+    if subscribers:
+        sent = 0
+        for sub in subscribers:
+            result = send_notification(sub["notify_channel"], sub["notify_destination"], subject, body)
+            if result.get("ok"):
+                sent += 1
+        return {"ok": sent > 0, "sent": sent, "total_subscribers": len(subscribers)}
+
+    if not agent.get("notify_channel") or not agent.get("notify_destination"):
+        return {"ok": False, "error": "linked agent has no verified notification channel"}
+    if not agent.get("notify_verified_at"):
+        return {"ok": False, "error": "notification destination was never confirmed by the user"}
     return send_notification(agent["notify_channel"], agent["notify_destination"], subject, body)
 
 

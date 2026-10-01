@@ -403,6 +403,29 @@ MIGRATION_STATEMENTS = [
     # this stopped being optional after real testing showed the model
     # narrating "still not connected" without ever re-checking.
     "ALTER TABLE custom_agents ADD COLUMN IF NOT EXISTS pending_telegram_code VARCHAR(24)",
+    # Reuse model: an agent definition (custom_agents) is a template, used by
+    # possibly many people. Each person's own notification setup is a row
+    # here, not on custom_agents -- the creator is just the first subscriber.
+    # Watch logic stays 1:1 with the template; schedulers fan out to every
+    # active row here when a condition fires, instead of each subscriber
+    # needing their own duplicate watch.
+    """
+    CREATE TABLE IF NOT EXISTS agent_notify_subscribers (
+        id                      UUID PRIMARY KEY,
+        agent_id                UUID NOT NULL REFERENCES custom_agents (id) ON DELETE CASCADE,
+        subscriber_wallet       VARCHAR(64) NOT NULL,
+        notify_channel          VARCHAR(20),
+        notify_destination      TEXT,
+        notify_verified_at      TIMESTAMPTZ,
+        notify_test_sent_ok     BOOLEAN NOT NULL DEFAULT FALSE,
+        pending_telegram_code   VARCHAR(24),
+        created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (agent_id, subscriber_wallet)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_agent_notify_subscribers_agent ON agent_notify_subscribers (agent_id)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_notify_subscribers_subscriber ON agent_notify_subscribers (subscriber_wallet)",
     "ALTER TABLE btc_price_alerts ADD COLUMN IF NOT EXISTS agent_id UUID REFERENCES custom_agents (id) ON DELETE CASCADE",
     # "moves 1% in one hour" is a rolling window, not "since the last check" --
     # window_started_at resets the baseline once window_hours has elapsed,
@@ -1570,6 +1593,149 @@ def mark_notification_verified(agent_id: str) -> Optional[dict[str, Any]]:
             )
             row = cur.fetchone()
     return _custom_agent_row_to_dict(row) if row else None
+
+
+def _subscription_row_to_dict(row) -> dict[str, Any]:
+    d = dict(row)
+    d["id"] = str(d["id"])
+    d["agent_id"] = str(d["agent_id"])
+    d["created_at"] = _iso(d.get("created_at"))
+    d["updated_at"] = _iso(d.get("updated_at"))
+    d["notify_verified_at"] = _iso(d.get("notify_verified_at"))
+    return d
+
+
+def get_agent_subscription(agent_id: str, subscriber_wallet: str) -> Optional[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM agent_notify_subscribers WHERE agent_id = %s AND subscriber_wallet = %s",
+                (agent_id, subscriber_wallet.strip()),
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row) if row else None
+
+
+def ensure_agent_subscription(agent_id: str, subscriber_wallet: str) -> dict[str, Any]:
+    """Get-or-create -- every interaction with a template (adopting it, or
+    being its creator) needs a subscription row to hang notify state off."""
+    existing = get_agent_subscription(agent_id, subscriber_wallet)
+    if existing:
+        return existing
+    init_db()
+    sub_id = str(uuid.uuid4())
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO agent_notify_subscribers (id, agent_id, subscriber_wallet)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (agent_id, subscriber_wallet) DO UPDATE SET agent_id = EXCLUDED.agent_id
+                RETURNING *
+                """,
+                (sub_id, agent_id, subscriber_wallet.strip()),
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row)
+
+
+def update_agent_subscription_fields(agent_id: str, subscriber_wallet: str, **fields: Any) -> Optional[dict[str, Any]]:
+    allowed = {
+        "notify_channel", "notify_destination", "notify_verified_at",
+        "notify_test_sent_ok", "pending_telegram_code",
+    }
+    sets = []
+    values: list[Any] = []
+    for key, value in fields.items():
+        if key not in allowed:
+            continue
+        sets.append(f"{key} = %s")
+        values.append(value)
+    if not sets:
+        return get_agent_subscription(agent_id, subscriber_wallet)
+    sets.append("updated_at = NOW()")
+    values.extend([agent_id, subscriber_wallet.strip()])
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE agent_notify_subscribers SET {', '.join(sets)} "
+                "WHERE agent_id = %s AND subscriber_wallet = %s RETURNING *",
+                values,
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row) if row else None
+
+
+def mark_subscription_notification_verified(agent_id: str, subscriber_wallet: str) -> dict[str, Any]:
+    """Same not-never-delivered guard as mark_notification_verified, scoped
+    to one subscriber instead of the agent's own (now legacy) notify_* cols."""
+    current = get_agent_subscription(agent_id, subscriber_wallet)
+    if not current:
+        return {"error": "Not subscribed to this agent yet."}
+    if not current.get("notify_test_sent_ok"):
+        return {
+            "error": "No successful test send on record for this subscription -- "
+                     "cannot confirm receipt of something that was never actually delivered.",
+        }
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE agent_notify_subscribers SET notify_verified_at = NOW(), updated_at = NOW()
+                WHERE agent_id = %s AND subscriber_wallet = %s
+                RETURNING *
+                """,
+                (agent_id, subscriber_wallet.strip()),
+            )
+            row = cur.fetchone()
+    return _subscription_row_to_dict(row) if row else {"error": "Subscription not found."}
+
+
+def list_active_agent_subscriptions(agent_id: str) -> list[dict[str, Any]]:
+    """Every subscriber with a verified notify destination -- what a watch
+    scheduler fans a notification out to when its condition fires."""
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT * FROM agent_notify_subscribers
+                WHERE agent_id = %s AND notify_verified_at IS NOT NULL AND notify_destination IS NOT NULL
+                """,
+                (agent_id,),
+            )
+            rows = cur.fetchall()
+    return [_subscription_row_to_dict(r) for r in rows]
+
+
+def list_my_agent_subscriptions(subscriber_wallet: str) -> list[dict[str, Any]]:
+    init_db()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT s.*, a.name AS agent_name, a.category AS agent_category,
+                       a.description AS agent_description, a.creator_wallet AS agent_creator_wallet
+                FROM agent_notify_subscribers s
+                JOIN custom_agents a ON a.id = s.agent_id
+                WHERE s.subscriber_wallet = %s
+                ORDER BY s.created_at DESC
+                """,
+                (subscriber_wallet.strip(),),
+            )
+            rows = cur.fetchall()
+    out = []
+    for r in rows:
+        d = _subscription_row_to_dict(r)
+        d["agent_name"] = r["agent_name"]
+        d["agent_category"] = r["agent_category"]
+        d["agent_description"] = r["agent_description"]
+        d["agent_creator_wallet"] = r["agent_creator_wallet"]
+        out.append(d)
+    return out
 
 
 def list_custom_agents(status: Optional[str] = None, creator_wallet: Optional[str] = None) -> list[dict[str, Any]]:

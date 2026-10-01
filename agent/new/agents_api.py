@@ -64,6 +64,13 @@ from btc_price_alert import SCHEDULER_POLL_SECONDS as BTC_ALERT_POLL_SECONDS
 from telegram_linking import start_poller as start_telegram_link_poller
 from telegram_linking import build_deep_link
 from db import create_telegram_link_code, get_telegram_link_code, mark_notification_verified
+from db import (
+    ensure_agent_subscription,
+    get_agent_subscription,
+    list_my_agent_subscriptions,
+    mark_subscription_notification_verified,
+    update_agent_subscription_fields,
+)
 from notifications import send_notification
 from product_price_watch import start_scheduler as start_product_price_scheduler
 from product_price_watch import SCHEDULER_POLL_SECONDS as PRODUCT_PRICE_POLL_SECONDS
@@ -1191,6 +1198,102 @@ def confirm_agent_notify(agent_id: str, auth_wallet: str = Depends(require_walle
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+def _require_public_agent(agent_id: str) -> dict[str, Any]:
+    """Any agent someone could actually adopt -- public listing, not a
+    private draft. Does not require ownership, unlike _require_owned_agent."""
+    agent = get_custom_agent(agent_id)
+    if not agent or agent["status"] not in ("testing", "live"):
+        raise HTTPException(status_code=404, detail="Agent not found.")
+    return agent
+
+
+@app.get("/agents/custom/{agent_id}/subscription")
+def get_my_agent_subscription(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    sub = get_agent_subscription(agent_id, auth_wallet)
+    return sub or {"subscribed": False}
+
+
+@app.post("/agents/custom/{agent_id}/subscribe/set-email")
+def set_subscription_email(
+    agent_id: str, body: NotifyEmailRequest, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    ensure_agent_subscription(agent_id, auth_wallet)
+    return update_agent_subscription_fields(
+        agent_id, auth_wallet, notify_channel="email", notify_destination=body.email.strip(),
+        notify_test_sent_ok=False, pending_telegram_code=None,
+    ) or {}
+
+
+@app.post("/agents/custom/{agent_id}/subscribe/telegram/start")
+def start_subscription_telegram(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    ensure_agent_subscription(agent_id, auth_wallet)
+    code = create_telegram_link_code()
+    link = build_deep_link(code)
+    if not link:
+        raise HTTPException(status_code=503, detail="Telegram isn't configured on the backend.")
+    update_agent_subscription_fields(agent_id, auth_wallet, pending_telegram_code=code)
+    return {"code": code, "deep_link": link}
+
+
+@app.get("/agents/custom/{agent_id}/subscribe/telegram/status")
+def get_subscription_telegram_status(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    sub = get_agent_subscription(agent_id, auth_wallet)
+    code = sub.get("pending_telegram_code") if sub else None
+    if not code:
+        return {"linked": bool(sub and sub.get("notify_channel") == "telegram")}
+    record = get_telegram_link_code(code)
+    if not record or not record.get("chat_id"):
+        return {"linked": False}
+    updated = update_agent_subscription_fields(
+        agent_id, auth_wallet, notify_channel="telegram", notify_destination=record["chat_id"],
+        notify_test_sent_ok=False, pending_telegram_code=None,
+    )
+    return {"linked": True, "subscription": updated}
+
+
+@app.post("/agents/custom/{agent_id}/subscribe/test")
+def test_subscription_notify(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    sub = get_agent_subscription(agent_id, auth_wallet)
+    if not sub or not sub.get("notify_channel") or not sub.get("notify_destination"):
+        raise HTTPException(status_code=400, detail="No notification channel set yet.")
+    result = send_notification(
+        sub["notify_channel"], sub["notify_destination"],
+        subject="Your BITAGENTS test alert",
+        body="This is a test alert -- if you got this, notifications are working.",
+    )
+    update_agent_subscription_fields(agent_id, auth_wallet, notify_test_sent_ok=bool(result.get("ok")))
+    return result
+
+
+@app.post("/agents/custom/{agent_id}/subscribe/confirm")
+def confirm_subscription_notify(
+    agent_id: str, auth_wallet: str = Depends(require_wallet_session)
+) -> dict[str, Any]:
+    _require_public_agent(agent_id)
+    result = mark_subscription_notification_verified(agent_id, auth_wallet)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/agents/mine/subscriptions")
+def list_my_subscriptions(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return {"subscriptions": list_my_agent_subscriptions(auth_wallet)}
 
 
 @app.post("/agents/custom/{agent_id}/chat", response_model=ChatResponse)

@@ -26,6 +26,7 @@ import requests
 from db import (
     get_btc_price_alert,
     get_custom_agent,
+    list_active_agent_subscriptions,
     list_active_btc_price_alerts,
     log_btc_price_alert_fire,
     update_btc_price_alert_check,
@@ -61,20 +62,38 @@ def _window_expired(alert: dict) -> bool:
 
 
 def _notify_agent_creator(alert: dict, price: float, change_pct: float) -> dict:
+    """Fans out to every verified subscriber of the template agent -- the
+    reuse model means one BTC-alert condition can serve many people, not
+    just whoever originally created it. Falls back to the agent's own
+    (legacy) notify_* columns if it has no subscription rows yet, so an
+    agent created before this migration keeps working unmodified."""
     agent_id = alert.get("agent_id")
     if not agent_id:
         return {"ok": False, "error": "alert has no linked agent -- nothing to notify"}
     agent = get_custom_agent(agent_id)
-    if not agent or not agent.get("notify_channel") or not agent.get("notify_destination"):
-        return {"ok": False, "error": "linked agent has no verified notification channel"}
-    if not agent.get("notify_verified_at"):
-        return {"ok": False, "error": "notification destination was never confirmed by the user"}
+    if not agent:
+        return {"ok": False, "error": "linked agent no longer exists"}
     direction = "up" if change_pct > 0 else "down"
     subject = f"{agent.get('name') or 'Your BITAGENTS agent'}: BTC moved {abs(change_pct):.2f}%"
     body = (
         f"BTC is {direction} {abs(change_pct):.2f}% in the last hour, now ${price:,.2f}.\n\n"
         f"-- {agent.get('name') or 'BITAGENTS'}"
     )
+
+    subscribers = list_active_agent_subscriptions(agent_id)
+    if subscribers:
+        sent = 0
+        last_result: dict = {"ok": False, "error": "no subscriber notification succeeded"}
+        for sub in subscribers:
+            last_result = send_notification(sub["notify_channel"], sub["notify_destination"], subject, body)
+            if last_result.get("ok"):
+                sent += 1
+        return {"ok": sent > 0, "sent": sent, "total_subscribers": len(subscribers)}
+
+    if not agent.get("notify_channel") or not agent.get("notify_destination"):
+        return {"ok": False, "error": "linked agent has no verified notification channel"}
+    if not agent.get("notify_verified_at"):
+        return {"ok": False, "error": "notification destination was never confirmed by the user"}
     return send_notification(agent["notify_channel"], agent["notify_destination"], subject, body)
 
 

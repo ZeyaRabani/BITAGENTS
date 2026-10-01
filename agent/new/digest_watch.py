@@ -22,6 +22,7 @@ import requests
 from db import (
     get_custom_agent,
     get_digest_watch,
+    list_active_agent_subscriptions,
     list_active_digest_watches,
     update_digest_watch_sent,
 )
@@ -61,14 +62,15 @@ def _is_due(watch: dict) -> bool:
 
 
 def _notify_agent_creator(watch: dict, headlines: list[str]) -> dict:
+    """Fans out to every verified subscriber of the template agent, falling
+    back to the agent's own legacy notify_* columns if it has no
+    subscription rows yet -- see btc_price_alert.py's version of this."""
     agent_id = watch.get("agent_id")
     if not agent_id:
         return {"ok": False, "error": "watch has no linked agent"}
     agent = get_custom_agent(agent_id)
-    if not agent or not agent.get("notify_channel") or not agent.get("notify_destination"):
-        return {"ok": False, "error": "linked agent has no verified notification channel"}
-    if not agent.get("notify_verified_at"):
-        return {"ok": False, "error": "notification destination was never confirmed by the user"}
+    if not agent:
+        return {"ok": False, "error": "linked agent no longer exists"}
     topic = watch.get("topic", "your topic")
     subject = f"{agent.get('name') or 'Your BITAGENTS agent'}: daily digest on {topic}"
     if headlines:
@@ -76,6 +78,20 @@ def _notify_agent_creator(watch: dict, headlines: list[str]) -> dict:
     else:
         body = f"No new headlines found for \"{topic}\" today."
     body += f"\n\n-- {agent.get('name') or 'BITAGENTS'}"
+
+    subscribers = list_active_agent_subscriptions(agent_id)
+    if subscribers:
+        sent = 0
+        for sub in subscribers:
+            result = send_notification(sub["notify_channel"], sub["notify_destination"], subject, body)
+            if result.get("ok"):
+                sent += 1
+        return {"ok": sent > 0, "sent": sent, "total_subscribers": len(subscribers)}
+
+    if not agent.get("notify_channel") or not agent.get("notify_destination"):
+        return {"ok": False, "error": "linked agent has no verified notification channel"}
+    if not agent.get("notify_verified_at"):
+        return {"ok": False, "error": "notification destination was never confirmed by the user"}
     return send_notification(agent["notify_channel"], agent["notify_destination"], subject, body)
 
 

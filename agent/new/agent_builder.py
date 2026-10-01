@@ -409,6 +409,15 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             # wipe out a test that already succeeded.
             fields["notify_test_sent_ok"] = False
         updated = db.update_custom_agent_fields(agent_id, **fields)
+        # Mirror into agent_subscriptions: the creator is just the agent's
+        # own first subscriber under the reuse model, not a special case --
+        # this is what lets fan-out notify them the same way it notifies
+        # anyone who later adopts the template.
+        creator_wallet = current.get("creator_wallet")
+        if creator_wallet:
+            db.ensure_agent_subscription(agent_id, creator_wallet)
+            sub_fields = dict(fields)
+            db.update_agent_subscription_fields(agent_id, creator_wallet, **sub_fields)
         return {"ok": True, "draft": updated}
 
     def set_notification_channel(**kwargs):
@@ -468,6 +477,9 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
                  "If you got this, notifications are working.",
         )
         db.update_custom_agent_fields(agent_id, notify_test_sent_ok=bool(result.get("ok")))
+        creator_wallet = draft.get("creator_wallet")
+        if creator_wallet:
+            db.update_agent_subscription_fields(agent_id, creator_wallet, notify_test_sent_ok=bool(result.get("ok")))
         return result
 
     def confirm_notification_received(**_kwargs):
@@ -476,6 +488,9 @@ def _builder_tools(agent_id: str) -> dict[str, Any]:
             return {"error": "draft not found"}
         if "error" in updated:
             return updated
+        creator_wallet = updated.get("creator_wallet")
+        if creator_wallet:
+            db.mark_subscription_notification_verified(agent_id, creator_wallet)
         return {"ok": True, "draft": updated}
 
     def create_price_watch(**kwargs):
