@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Bell } from "lucide-react";
 import { CustomAgentChat } from "@/components/agents/CustomAgentChat";
+import { SubscribeSection } from "@/components/agents/SubscribeSection";
 import type { LaunchedAgentRecord } from "@/lib/launchpadBuilderClient";
 import { proxyGetLaunchedAgent } from "@/server/agentsApiProxy";
 
@@ -43,6 +44,10 @@ export default async function CustomAgentDetailPage({
           {agent.category ?? "Uncategorized"}
         </p>
         <p className="mt-3 max-w-xl text-sm text-muted-foreground">{agent.description}</p>
+      </div>
+
+      <div className="mb-6">
+        <SubscribeSection agent={agent} />
       </div>
 
       <CustomAgentChat agent={agent} />

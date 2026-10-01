@@ -183,6 +183,75 @@ export function confirmAgentNotify(agentId: string, authToken: string) {
   return postNotify(agentId, "confirm", authToken);
 }
 
+export type AgentSubscription = {
+  id?: string;
+  agent_id?: string;
+  subscriber_wallet?: string;
+  notify_channel: "email" | "telegram" | null;
+  notify_destination: string | null;
+  notify_verified_at: string | null;
+  notify_test_sent_ok?: boolean;
+  subscribed?: false;
+};
+
+export async function fetchAgentSubscription(
+  agentId: string,
+  authToken: string
+): Promise<AgentSubscription | null> {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/subscription`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  if (!res.ok) return null;
+  return (await res.json()) as AgentSubscription;
+}
+
+async function postSubscribe(agentId: string, path: string, authToken: string, body?: unknown) {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/subscribe/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${authToken}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { ok: res.ok, data: await res.json().catch(() => ({})) };
+}
+
+export function startSubscriptionTelegram(agentId: string, authToken: string) {
+  return postSubscribe(agentId, "telegram/start", authToken);
+}
+
+export async function getSubscriptionTelegramStatus(agentId: string, authToken: string) {
+  const res = await fetch(`/api/agents/launchpad/agents/${agentId}/subscribe/telegram/status`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  return (await res.json()) as { linked: boolean };
+}
+
+export function testSubscriptionNotify(agentId: string, authToken: string) {
+  return postSubscribe(agentId, "test", authToken);
+}
+
+export function confirmSubscriptionNotify(agentId: string, authToken: string) {
+  return postSubscribe(agentId, "confirm", authToken);
+}
+
+export type MySubscription = AgentSubscription & {
+  agent_name: string | null;
+  agent_category: string | null;
+  agent_description: string | null;
+  agent_creator_wallet: string;
+};
+
+export async function fetchMySubscriptions(authToken: string): Promise<MySubscription[]> {
+  const res = await fetch("/api/agents/launchpad/agents/mine/subscriptions", {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${authToken}` },
+  });
+  const data = await res.json().catch(() => ({ subscriptions: [] }));
+  if (!res.ok) return [];
+  return (data.subscriptions ?? []) as MySubscription[];
+}
+
 export async function updateLaunchedAgent(
   agentId: string,
   updates: { description?: string; threshold_pct?: number },
