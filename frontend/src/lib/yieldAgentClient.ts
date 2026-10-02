@@ -23,6 +23,7 @@ export type YieldVenue = {
   apy?: number | null;
   tvl_usd?: number | null;
   executable?: boolean;
+  yield_type?: string;
   kind?: string;
   project?: string;
 };
@@ -41,6 +42,7 @@ export type YieldPosition = {
 export type YieldDashboard = {
   yields?: {
     executable_venues?: YieldVenue[];
+    markets?: YieldVenue[];
     lending_compare?: YieldVenue[];
     best_executable?: YieldVenue | null;
     note?: string;
@@ -91,7 +93,7 @@ export type YieldInvestResult = {
 
 export async function investYieldCapital(
   authToken: string,
-  body: { asset: string; capital: number; duration_days: number }
+  body: { asset: string; capital: number; duration_days: number; yield_type: string }
 ): Promise<YieldInvestResult> {
   const res = await fetch("/api/agents/yield/invest", {
     method: "POST",
@@ -138,9 +140,28 @@ export function mapYieldActions(actions: YieldChatResponse["actions"]): AgentAct
   return mapApiActions(actions);
 }
 
+export const YIELD_TYPES = [
+  { id: "any", label: "Any" },
+  { id: "lending", label: "Lending" },
+  { id: "liquidity_vault", label: "Liquidity vault" },
+  { id: "jlp", label: "JLP" },
+  { id: "insurance", label: "Insurance fund" },
+] as const;
+
+export const YIELD_TYPE_HELP: Record<(typeof YIELD_TYPES)[number]["id"], string> = {
+  any: "Any ranks Kamino, Jupiter, MarginFi, Drift, and Save. The agent buys JLP only when that is the winner. A lending, vault, or insurance winner is reported and the balance stays idle.",
+  lending:
+    "Lending looks at Kamino, MarginFi, Drift, and Save markets in your asset and names the best APY. Those positions are deposits on the protocol, so the agent does not send a swap.",
+  liquidity_vault:
+    "Liquidity vault looks only at Kamino vaults that include your asset. Short durations avoid pairs with impermanent loss. Vault shares are not bought with a swap.",
+  jlp: "JLP sends the deposited asset from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token.",
+  insurance:
+    "Insurance looks only at Drift's insurance fund. If the feed has no rate, the balance stays idle.",
+};
+
 export const YIELD_EXAMPLE_PROMPTS = [
-  "Compare Solana yield protocols",
-  "Invest 0.1 SOL for 30 days in the best protocol",
-  "Rebalance if something pays more",
+  "Compare lending yields for USDC",
+  "Invest 0.1 SOL in Jupiter JLP for 30 days",
+  "Find the best Kamino liquidity vault for 90 days",
   "Unwind my position back to SOL",
 ] as const;

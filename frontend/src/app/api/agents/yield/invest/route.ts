@@ -11,12 +11,14 @@ export async function POST(request: NextRequest) {
       asset?: string;
       capital?: number;
       duration_days?: number;
+      yield_type?: string;
     };
     const res = await proxyYieldInvest(
       {
         asset: String(body.asset || "SOL"),
         capital: Number(body.capital),
         duration_days: Number(body.duration_days || 30),
+        yield_type: String(body.yield_type || "any"),
       },
       authToken
     );

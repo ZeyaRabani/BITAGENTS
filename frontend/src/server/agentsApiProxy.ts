@@ -368,7 +368,7 @@ export async function proxyYieldWithdraw(
 }
 
 export async function proxyYieldInvest(
-  body: { asset: string; capital: number; duration_days: number },
+  body: { asset: string; capital: number; duration_days: number; yield_type?: string },
   authToken: string
 ): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/yield/invest`, {

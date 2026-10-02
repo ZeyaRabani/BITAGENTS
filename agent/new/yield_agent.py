@@ -19,10 +19,12 @@ from yield_ledger import (
 )
 from yield_protocols import (
     SOL_MINT,
+    YIELD_TYPES,
     best_executable_venue,
     compare_for_requirements,
     compare_solana_yields,
     get_executable_venue,
+    normalize_yield_type,
 )
 
 YIELD_MODEL = (
@@ -45,16 +47,23 @@ _scheduler_thread: Optional[threading.Thread] = None
 
 SYSTEM_PROMPT = """You are the BIT Agents Yield Agent for Solana.
 
-You hold the user's assets in their Circle yield wallet and invest them with Jupiter.
+You hold the user's assets in their Circle yield wallet. Supported protocols:
+- Kamino Finance: lending markets and liquidity vaults
+- Jupiter: JLP liquidity provision
+- MarginFi: lending markets
+- Drift Protocol: lending markets and the insurance fund
+- Save Finance: lending markets
 
-When the user gives an asset, capital, and duration:
-1. Call invest with those requirements. It compares Solana pools, picks the best protocol, and stakes through Jupiter when that venue is executable.
-2. If lending pays clearly more than any Jupiter-executable venue, report the comparison and do not pretend a stake happened.
-3. Rebalance when another executable venue is better by the mandate threshold.
-4. Unwind back to idle SOL so the user can withdraw.
+When the user gives an asset, capital, duration, or a yield type, call invest.
+Yield types are any, lending, liquidity_vault, jlp, and insurance.
+- any: rank every supported market. Stake only if the winner is Jupiter JLP.
+- lending: rank Kamino, MarginFi, Drift, and Save for that asset. Report the best market. Do not send a swap.
+- liquidity_vault: rank Kamino vaults that include the asset. Report the best vault. Do not send a swap.
+- jlp: swap the deposited asset into JLP through Jupiter.
+- insurance: look only at Drift's insurance fund. If no rate is published, leave funds idle.
 
 Rules:
-- Use invest for requirement-based deposits (asset, capital, duration). Use allocate only for a plain SOL amount.
+- Say which yield type you used.
 - Never invent APYs, signatures, or balances.
 - Not financial advice. Keep replies concise.
 """
@@ -126,8 +135,11 @@ def _out_amount(swap: dict[str, Any], fallback: float) -> float:
     return fallback
 
 
-def tool_compare_yields(limit: int = 12, **_ctx) -> dict[str, Any]:
-    return compare_solana_yields(limit=int(limit or 12))
+def tool_compare_yields(limit: int = 12, yield_type: str = "any", **_ctx) -> dict[str, Any]:
+    try:
+        return compare_solana_yields(limit=int(limit or 12), yield_type=yield_type or "any")
+    except ValueError as exc:
+        return {"error": str(exc)}
 
 
 def tool_get_portfolio(user_wallet: Optional[str] = None, **_ctx) -> dict[str, Any]:
@@ -267,8 +279,9 @@ def invest_for_requirements(
     asset: str,
     capital: float,
     duration_days: int,
+    yield_type: str = "any",
 ) -> dict[str, Any]:
-    """Compare venues for the user's asset, capital, and duration, then stake via Jupiter."""
+    """Compare the supported protocols, then buy JLP when that is the selected venue."""
     from db import insert_yield_position, insert_yield_rebalance, upsert_yield_mandate
     from dca_agent import resolve_token
 
@@ -276,6 +289,10 @@ def invest_for_requirements(
     asset_norm = (asset or "SOL").strip().upper()
     if asset_norm not in ("SOL", "USDC", "USDT"):
         return {"error": "Asset must be SOL, USDC, or USDT."}
+    try:
+        ytype = normalize_yield_type(yield_type)
+    except ValueError as exc:
+        return {"error": str(exc)}
     try:
         amount = round(float(capital), 9)
         duration = int(duration_days)
@@ -289,11 +306,15 @@ def invest_for_requirements(
     if amount < minimum:
         return {"error": f"Minimum invest for {asset_norm} is {minimum}."}
 
-    comparison = compare_for_requirements(
-        asset=asset_norm,
-        capital=amount,
-        duration_days=duration,
-    )
+    try:
+        comparison = compare_for_requirements(
+            asset=asset_norm,
+            capital=amount,
+            duration_days=duration,
+            yield_type=ytype,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
     mandate = upsert_yield_mandate(
         wallet,
         {
@@ -301,23 +322,17 @@ def invest_for_requirements(
             "asset": asset_norm,
             "capital": amount,
             "duration_days": duration,
+            "yield_type": ytype,
             "status": "active",
         },
     )
     venue = comparison.get("best_to_execute") or {}
     if not venue.get("mint"):
-        best = comparison.get("best_overall") or {}
-        name = best.get("protocol_name") or best.get("project") or "no pool"
-        apy = best.get("apy")
         return {
             "status": "compared",
             "mandate": mandate,
             "comparison": comparison,
-            "message": (
-                f"Best match for {amount} {asset_norm} over {duration} days is {name}"
-                + (f" at {apy}% APY" if apy is not None else "")
-                + ". That venue is not a Jupiter liquid-staking swap, so nothing was staked."
-            ),
+            "message": _compared_message(comparison, amount, asset_norm, duration, ytype),
         }
 
     spend = check_yield_can_spend(wallet, amount, token=asset_norm)
@@ -399,29 +414,46 @@ def invest_for_requirements(
         "signature": signature,
         "explorer_url": explorer,
         "mandate": mandate,
-            "message": (
-                f"Invested {amount} {asset_norm} for {duration} days into "
-                f'{venue.get("protocol_name") or venue.get("symbol")}'
-                + (f' at {venue.get("apy")}% APY' if venue.get("apy") is not None else "")
-                + " via Jupiter."
-                + _better_non_executable_note(comparison, venue)
-            ),
+        "message": (
+            f"Invested {amount} {asset_norm} for {duration} days into Jupiter JLP"
+            + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
+            + " via Jupiter. This yield type is liquidity provision."
+        ),
     }
 
 
-def _better_non_executable_note(comparison: dict[str, Any], venue: dict[str, Any]) -> str:
+def _compared_message(
+    comparison: dict[str, Any],
+    amount: float,
+    asset: str,
+    duration: int,
+    yield_type: str,
+) -> str:
+    label = YIELD_TYPES.get(yield_type, yield_type)
     best = comparison.get("best_overall") or {}
-    try:
-        best_apy = float(best.get("apy"))
-        used_apy = float(venue.get("apy"))
-    except (TypeError, ValueError):
-        return ""
-    if best.get("executable") or best_apy <= used_apy + 0.5:
-        return ""
-    name = best.get("protocol_name") or best.get("project") or "Another pool"
+    if not best:
+        return (
+            f"No live {label} market matched {amount} {asset} over {duration} days. "
+            "The balance stays idle in the Circle wallet."
+        )
+    name = best.get("protocol_name") or best.get("project") or "the best market"
+    symbol = best.get("symbol") or ""
+    apy = best.get("apy")
+    quiet = [
+        str(row.get("protocol_name"))
+        for row in comparison.get("coverage") or []
+        if row.get("note") and row.get("yield_type") == (yield_type if yield_type != "any" else row.get("yield_type"))
+    ]
+    extra = ""
+    if yield_type == "lending":
+        missing = sorted({name for name in quiet})
+        if missing:
+            extra = " " + ", ".join(missing) + " had no live pool in the feed."
     return (
-        f" {name} shows {best_apy}% APY, but it is not a Jupiter liquid-staking swap, "
-        "so the agent used the best venue it can stake."
+        f"Best {label} match for {amount} {asset} over {duration} days is {name} {symbol}"
+        + (f" at {apy}% APY" if apy is not None else "")
+        + ". That position is opened on the protocol, so the agent did not send a Jupiter swap."
+        + extra
     )
 
 
@@ -519,6 +551,14 @@ def rebalance_positions(user_wallet: str, force: bool = False) -> dict[str, Any]
         current_id = str(pos.get("protocol_id") or "")
         current_apy = float(pos.get("entry_apy") or 0)
         target_apy = float(best.get("apy") or 0)
+        if current_id != "jlp":
+            skipped.append(
+                {
+                    "position_id": pos["id"],
+                    "reason": "Only Jupiter JLP is moved with a swap. Lending and vault positions stay where they were opened.",
+                }
+            )
+            continue
         if current_id == best.get("protocol_id"):
             skipped.append({"position_id": pos["id"], "reason": "already in best venue"})
             continue
@@ -604,13 +644,14 @@ def tool_invest(
     asset: str = "SOL",
     capital: float = 0,
     duration_days: int = 30,
+    yield_type: str = "any",
     user_wallet: Optional[str] = None,
     **_ctx,
 ) -> dict[str, Any]:
     wallet = (user_wallet or "").strip()
     if not wallet:
         return {"error": "Connect a wallet first."}
-    return invest_for_requirements(wallet, asset, capital, duration_days)
+    return invest_for_requirements(wallet, asset, capital, duration_days, yield_type)
 
 
 def tool_allocate(
@@ -648,11 +689,15 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "compare_yields",
-            "description": "Compare live Solana yield venues (LSTs executable, lending for comparison).",
+            "description": "Compare Kamino, Jupiter JLP, MarginFi, Drift, and Save. Optional yield_type limits the search.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "Max lending rows to include (default 12)"},
+                    "limit": {"type": "integer", "description": "Max markets to include (default 12)"},
+                    "yield_type": {
+                        "type": "string",
+                        "description": "any | lending | liquidity_vault | jlp | insurance",
+                    },
                 },
             },
         },
@@ -688,8 +733,8 @@ TOOLS = [
         "function": {
             "name": "invest",
             "description": (
-                "Compare yields for the user's asset, capital, and duration, then stake the "
-                "best Jupiter-executable protocol from their Circle yield wallet."
+                "Compare Kamino, Jupiter, MarginFi, Drift, and Save for the user's asset, "
+                "capital, duration, and yield type. Buy JLP through Jupiter when that type is selected."
             ),
             "parameters": {
                 "type": "object",
@@ -697,6 +742,10 @@ TOOLS = [
                     "asset": {"type": "string", "description": "SOL, USDC, or USDT"},
                     "capital": {"type": "number", "description": "Amount already deposited in the Circle wallet"},
                     "duration_days": {"type": "integer", "description": "How long the user wants the position"},
+                    "yield_type": {
+                        "type": "string",
+                        "description": "any | lending | liquidity_vault | jlp | insurance",
+                    },
                 },
                 "required": ["asset", "capital", "duration_days"],
             },
@@ -706,14 +755,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "allocate",
-            "description": "Deploy idle SOL into a yield venue via Jupiter (best executable LST if protocol_id omitted).",
+            "description": "Buy Jupiter JLP with idle SOL. This is the liquidity-provision yield type.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "amount_sol": {"type": "number"},
                     "protocol_id": {
                         "type": "string",
-                        "description": "jito | marinade | sanctum | blaze | jupsol. Omit to pick the best APY.",
+                        "description": "jlp. Omit to buy JLP.",
                     },
                 },
                 "required": ["amount_sol"],

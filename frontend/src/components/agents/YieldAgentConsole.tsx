@@ -12,6 +12,8 @@ import {
   mapYieldActions,
   sendYieldAgentMessage,
   YIELD_EXAMPLE_PROMPTS,
+  YIELD_TYPE_HELP,
+  YIELD_TYPES,
   type YieldDashboard,
   type YieldHealth,
 } from "@/lib/yieldAgentClient";
@@ -43,6 +45,7 @@ export function YieldAgentConsole() {
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [asset, setAsset] = useState("SOL");
+  const [yieldType, setYieldType] = useState<(typeof YIELD_TYPES)[number]["id"]>("any");
   const [capital, setCapital] = useState("");
   const [durationDays, setDurationDays] = useState("30");
   const [investBusy, setInvestBusy] = useState(false);
@@ -111,6 +114,7 @@ export function YieldAgentConsole() {
         asset,
         capital: amount,
         duration_days: Math.round(days),
+        yield_type: yieldType,
       });
       setInvestNote(result.message ?? "Requirements saved.");
       const dash = await fetchYieldDashboard(token);
@@ -131,16 +135,18 @@ export function YieldAgentConsole() {
   }
 
   const online = health?.status === "ok";
-  const venues = dashboard?.yields?.executable_venues ?? [];
+  const venues = dashboard?.yields?.markets ?? dashboard?.yields?.executable_venues ?? [];
   const positions = dashboard?.positions ?? [];
 
   return (
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Send SOL, USDC, or USDT to your Circle yield wallet. The agent compares protocols for
-          your asset, capital, and duration, then stakes the best Jupiter-executable venue. It
-          moves the position when another protocol pays more. Not financial advice.
+          Send SOL, USDC, or USDT to your Circle yield wallet. Pick a yield type and the agent
+          ranks Kamino, Jupiter JLP, MarginFi, Drift, and Save for your asset, capital, and
+          duration. JLP is bought through Jupiter. Lending, Kamino vaults, and the Drift insurance
+          fund are named when they win, and the balance stays idle because those are protocol
+          deposits. Not financial advice.
         </p>
       </div>
 
@@ -177,11 +183,25 @@ export function YieldAgentConsole() {
       <YieldAgentDeposit cluster={health ? "mainnet" : undefined} authToken={token} />
 
       <Panel title="Requirements">
-        <p className="text-sm text-muted-foreground">
-          Deposit the asset first. Then the agent ranks venues for this capital and duration and
-          invests through Jupiter when the best protocol can be staked.
-        </p>
+        <p className="text-sm text-muted-foreground">{YIELD_TYPE_HELP[yieldType]}</p>
         <form onSubmit={(e) => void onInvest(e)} className="mt-4 flex flex-wrap items-end gap-2">
+          <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+            Yield type
+            <select
+              value={yieldType}
+              onChange={(e) =>
+                setYieldType(e.target.value as (typeof YIELD_TYPES)[number]["id"])
+              }
+              disabled={investBusy}
+              className="border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground disabled:opacity-50"
+            >
+              {YIELD_TYPES.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             Asset
             <select
@@ -302,13 +322,14 @@ export function YieldAgentConsole() {
               <p className="text-sm text-muted-foreground">Sign in to load ranked APYs.</p>
             ) : (
               <div className="space-y-2">
-                {venues.slice(0, 6).map((venue) => (
+                {venues.slice(0, 6).map((venue, index) => (
                   <div
-                    key={venue.protocol_id ?? venue.symbol}
+                    key={`${venue.protocol_id ?? venue.symbol}-${venue.symbol}-${index}`}
                     className="flex items-baseline justify-between gap-2 border border-grid bg-surface/30 px-3 py-2"
                   >
                     <span className="font-mono text-xs text-foreground">
                       {venue.protocol_name ?? venue.symbol}
+                      {venue.yield_type ? ` · ${venue.yield_type.split("_").join(" ")}` : ""}
                     </span>
                     <span className="font-mono text-[11px] tabular-nums text-signal">
                       {venue.apy != null ? `${venue.apy.toFixed(2)}%` : "—"}

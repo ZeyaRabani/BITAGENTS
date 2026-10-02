@@ -635,6 +635,7 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS asset VARCHAR(32) NOT NULL DEFAULT 'SOL'",
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS capital DOUBLE PRECISION",
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS duration_days INTEGER",
+    "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS yield_type VARCHAR(32) NOT NULL DEFAULT 'any'",
 ]
 
 
@@ -2548,15 +2549,16 @@ def upsert_yield_mandate(user_wallet: str, fields: dict[str, Any]) -> dict[str, 
     asset = str(fields.get("asset") or existing.get("asset") or "SOL").upper()
     capital = fields["capital"] if "capital" in fields else existing.get("capital")
     duration_days = fields["duration_days"] if "duration_days" in fields else existing.get("duration_days")
+    yield_type = str(fields.get("yield_type") or existing.get("yield_type") or "any").lower()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO yield_mandates (
                     user_wallet, auto_rebalance, min_apy_gain, idle_reserve_sol, status,
-                    asset, capital, duration_days, updated_at
+                    asset, capital, duration_days, yield_type, updated_at
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (user_wallet) DO UPDATE SET
                     auto_rebalance = EXCLUDED.auto_rebalance,
                     min_apy_gain = EXCLUDED.min_apy_gain,
@@ -2565,10 +2567,21 @@ def upsert_yield_mandate(user_wallet: str, fields: dict[str, Any]) -> dict[str, 
                     asset = EXCLUDED.asset,
                     capital = EXCLUDED.capital,
                     duration_days = EXCLUDED.duration_days,
+                    yield_type = EXCLUDED.yield_type,
                     updated_at = NOW()
                 RETURNING *
                 """,
-                (wallet, auto_rebalance, min_apy_gain, idle_reserve, status, asset, capital, duration_days),
+                (
+                    wallet,
+                    auto_rebalance,
+                    min_apy_gain,
+                    idle_reserve,
+                    status,
+                    asset,
+                    capital,
+                    duration_days,
+                    yield_type,
+                ),
             )
             row = cur.fetchone()
     return dict(row) if row else {}

@@ -1458,7 +1458,7 @@ def yield_health() -> dict[str, Any]:
         "auth_required": True,
         "cluster": SOLANA_CLUSTER,
         "pricing": "free · wallet sign-in required",
-        "live_routing": "liquid_staking",
+        "live_routing": "jlp",
         "scheduler": yield_scheduler_status(),
     }
 
@@ -1518,6 +1518,7 @@ class YieldInvestRequest(BaseModel):
     asset: str = "SOL"
     capital: float
     duration_days: int = 30
+    yield_type: str = "any"
 
 
 @app.post("/yield/invest")
@@ -1530,6 +1531,7 @@ def yield_invest(
         body.asset,
         body.capital,
         body.duration_days,
+        body.yield_type,
     )
     if result.get("error") and result.get("status") not in ("compared", "needs_deposit"):
         raise HTTPException(status_code=400, detail=result["error"])
