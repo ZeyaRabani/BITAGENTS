@@ -11,11 +11,13 @@ import {
   deleteLaunchedAgent,
   fetchAgentPriceWatch,
   fetchMyLaunchedAgents,
+  fetchMySubscriptions,
   getAgentNotifyTelegramStatus,
   startAgentNotifyTelegram,
   testAgentNotify,
   updateLaunchedAgent,
   type LaunchedAgentRecord,
+  type MySubscription,
   type PriceWatch,
 } from "@/lib/launchpadBuilderClient";
 
@@ -338,10 +340,56 @@ function AgentRow({
   );
 }
 
+function SubscribedAgentRow({ sub }: { sub: MySubscription }) {
+  return (
+    <Link href={`/agents/custom/${sub.agent_id}`} className="block">
+      <article className="border border-grid bg-surface/40 p-5 transition hover:border-signal/60">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-display text-lg font-bold">{sub.agent_name ?? "Untitled agent"}</h3>
+            <p className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {sub.agent_category ?? "Uncategorized"}
+            </p>
+          </div>
+          <span
+            className={`font-mono text-[10px] uppercase tracking-[0.14em] ${
+              sub.notify_verified_at ? "text-signal" : "text-warn"
+            }`}
+          >
+            {sub.notify_verified_at ? "Active" : "Needs verification"}
+          </span>
+        </div>
+        {sub.agent_description && (
+          <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{sub.agent_description}</p>
+        )}
+        <div className="mt-4 border-t border-grid pt-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+            Notifications
+          </div>
+          {sub.notify_channel && sub.notify_destination ? (
+            <p className="mt-1 text-sm">
+              Telegram → {sub.notify_destination}{" "}
+              {sub.notify_verified_at ? (
+                <span className="text-signal">· verified</span>
+              ) : (
+                <span className="text-destructive">· not yet verified</span>
+              )}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-muted-foreground">No notification channel set.</p>
+          )}
+        </div>
+      </article>
+    </Link>
+  );
+}
+
 export default function MyAgentsPage() {
   const { publicKey } = useWallet();
   const { token, busy: authBusy, isAuthenticated } = useDcaWalletAuth();
+  const [tab, setTab] = useState<"created" | "subscribed">("created");
   const [agents, setAgents] = useState<LaunchedAgentRecord[]>([]);
+  const [subscriptions, setSubscriptions] = useState<MySubscription[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -349,8 +397,11 @@ export default function MyAgentsPage() {
     if (!token) return;
     setLoading(true);
     setError(null);
-    fetchMyLaunchedAgents(token)
-      .then(setAgents)
+    Promise.all([fetchMyLaunchedAgents(token), fetchMySubscriptions(token)])
+      .then(([myAgents, mySubs]) => {
+        setAgents(myAgents);
+        setSubscriptions(mySubs);
+      })
       .catch(() => setError("Could not load your agents."))
       .finally(() => setLoading(false));
   }, [token]);
@@ -360,10 +411,26 @@ export default function MyAgentsPage() {
       <div className="mb-8 border-b border-grid pb-6">
         <h1 className="font-display text-3xl font-bold leading-tight md:text-4xl">My agents</h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Every agent you've launched, whatever its status — this is the only place to find one
-          again once the chat that created it has ended.
+          Agents you've launched, and agents you've adopted from someone else — this is the only
+          place to find either again once the chat that created it has ended.
         </p>
       </div>
+
+      {publicKey && isAuthenticated && !authBusy && (
+        <div className="mb-6 flex gap-2">
+          {(["created", "subscribed"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] ${
+                tab === t ? "border-signal text-signal" : "border-grid text-muted-foreground"
+              }`}
+            >
+              {t === "created" ? `Created (${agents.length})` : `Subscribed (${subscriptions.length})`}
+            </button>
+          ))}
+        </div>
+      )}
 
       {!publicKey ? (
         <div className="border border-grid bg-surface/40 p-5">
@@ -382,28 +449,48 @@ export default function MyAgentsPage() {
         </div>
       ) : error ? (
         <div className="border border-grid bg-surface/40 p-5 text-sm text-destructive">{error}</div>
-      ) : agents.length === 0 ? (
+      ) : tab === "created" ? (
+        agents.length === 0 ? (
+          <div className="border border-grid bg-surface/40 p-5">
+            <p className="text-sm text-muted-foreground">You haven't launched an agent yet.</p>
+            <Link
+              href="/launch/create"
+              className="mt-4 inline-flex items-center gap-2 bg-signal px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90"
+            >
+              Launch an agent
+            </Link>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {agents.map((agent) => (
+              <AgentRow
+                key={agent.id}
+                agent={agent}
+                token={token!}
+                onUpdated={(updated) =>
+                  setAgents((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)))
+                }
+                onDeleted={(id) => setAgents((prev) => prev.filter((a) => a.id !== id))}
+              />
+            ))}
+          </div>
+        )
+      ) : subscriptions.length === 0 ? (
         <div className="border border-grid bg-surface/40 p-5">
-          <p className="text-sm text-muted-foreground">You haven't launched an agent yet.</p>
+          <p className="text-sm text-muted-foreground">
+            You haven't adopted anyone else's agent yet — browse the marketplace and subscribe to one.
+          </p>
           <Link
-            href="/launch/create"
+            href="/agents"
             className="mt-4 inline-flex items-center gap-2 bg-signal px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90"
           >
-            Launch an agent
+            Browse marketplace
           </Link>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {agents.map((agent) => (
-            <AgentRow
-              key={agent.id}
-              agent={agent}
-              token={token!}
-              onUpdated={(updated) =>
-                setAgents((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)))
-              }
-              onDeleted={(id) => setAgents((prev) => prev.filter((a) => a.id !== id))}
-            />
+          {subscriptions.map((sub) => (
+            <SubscribedAgentRow key={sub.agent_id} sub={sub} />
           ))}
         </div>
       )}
