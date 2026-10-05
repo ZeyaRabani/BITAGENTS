@@ -169,21 +169,16 @@ def _matches_asset(pool: dict[str, Any], spec: dict[str, Any], asset: str) -> bo
 
 
 def _capital_usd(asset: str, capital: float) -> float:
-    asset = asset.upper()
-    if asset in ("USDC", "USDT"):
-        return float(capital)
-    if asset == "SOL":
-        try:
-            from dca_agent import get_token_price
+    try:
+        from dca_agent import get_token_price
 
-            quote = get_token_price("SOL")
-            px = float((quote or {}).get("price_usd") or 0)
-            if px > 0:
-                return float(capital) * px
-        except Exception:
-            pass
-        return float(capital) * 150.0
-    return float(capital)
+        quote = get_token_price("SOL")
+        px = float((quote or {}).get("price_usd") or 0)
+        if px > 0:
+            return float(capital) * px
+    except Exception:
+        pass
+    return float(capital) * 150.0
 
 
 def _coverage(rows: list[dict[str, Any]], yield_type: str = "any") -> list[dict[str, Any]]:
@@ -210,7 +205,11 @@ def _coverage(rows: list[dict[str, Any]], yield_type: str = "any") -> list[dict[
             "yield_type": kind,
             "markets": markets,
         }
-        if markets == 0 and protocol_id != "jlp":
+        if markets == 0 and protocol_id == "marginfi":
+            item["note"] = "No REST yield API. Docs: https://docs.marginfi.com/ts-sdk"
+        elif markets == 0 and protocol_id in ("drift", "drift-insurance"):
+            item["note"] = "No deposit API. Docs: https://docs.drift.trade/developers/data-api"
+        elif markets == 0 and protocol_id != "jlp":
             item["note"] = "No live pool in the yield feed right now."
         out.append(item)
     return out
@@ -242,8 +241,25 @@ def _row_from_pool(pool: dict[str, Any], spec: dict[str, Any], apy: float, durat
     }
 
 
+def _with_protocol_apis(rows: list[dict[str, Any]], yield_type: str) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Prefer Kamino and Save API rows over DefiLlama for the same protocol."""
+    from yield_protocol_apis import fetch_protocol_markets
+
+    payload = fetch_protocol_markets()
+    api_rows = []
+    for row in payload.get("markets") or []:
+        if yield_type != "any" and row.get("yield_type") != yield_type:
+            continue
+        api_rows.append(row)
+    replaced = {str(row.get("protocol_id")) for row in api_rows}
+    kept = [row for row in rows if str(row.get("protocol_id")) not in replaced]
+    merged = api_rows + kept
+    merged.sort(key=lambda row: float(row.get("score") or row.get("apy") or 0), reverse=True)
+    return merged, payload
+
+
 def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str, Any]:
-    """Rank the supported protocols. Only Jupiter JLP is bought with a swap."""
+    """Rank the supported protocols. Kamino deposits use its API. JLP uses Jupiter."""
     ytype = normalize_yield_type(yield_type)
     markets: list[dict[str, Any]] = []
     jlp_apy = None
@@ -263,6 +279,7 @@ def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str,
             jlp_apy = apy_f if jlp_apy is None else max(jlp_apy, apy_f)
         markets.append(_row_from_pool(pool, spec, apy_f, 30))
     markets.sort(key=lambda row: float(row.get("score") or 0), reverse=True)
+    markets, api_payload = _with_protocol_apis(markets, ytype)
     jlp = {**JLP_VENUE, "apy": round(jlp_apy, 3) if jlp_apy is not None else None}
     return {
         "yield_type": ytype,
@@ -271,12 +288,14 @@ def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str,
         "executable_venues": [jlp],
         "best_executable": jlp,
         "coverage": _coverage(markets, ytype),
+        "protocol_apis": (api_payload or {}).get("status"),
+        "protocol_api_errors": (api_payload or {}).get("errors") or {},
         "note": (
-            "Supported protocols: Kamino Finance (lending and liquidity vaults), Jupiter (JLP), "
-            "MarginFi (lending), Drift (lending and insurance fund), and Save Finance (lending). "
-            "A chosen yield type limits the search to that kind of market. "
-            "Only JLP is entered with a Jupiter swap from the Circle wallet. "
-            "Lending, vault, and insurance picks are reported, not faked as a swap."
+            "Kamino lending and liquidity vaults deposit through https://api.kamino.finance. "
+            "Save rates come from https://api.save.finance. "
+            "Jupiter JLP is still a Jupiter swap. "
+            "MarginFi has no REST API (https://docs.marginfi.com/ts-sdk). "
+            "Drift's data API does not build deposits (https://docs.drift.trade/developers/data-api)."
         ),
     }
 
@@ -307,6 +326,8 @@ def compare_for_requirements(
 ) -> dict[str, Any]:
     """Rank supported markets for an asset, capital, duration, and optional yield type."""
     asset = (asset or "SOL").strip().upper()
+    if asset != "SOL":
+        raise ValueError("The Yield Agent accepts SOL only.")
     ytype = normalize_yield_type(yield_type)
     capital = float(capital or 0)
     duration = max(1, int(duration_days or 30))
@@ -336,6 +357,7 @@ def compare_for_requirements(
         ranked.append(_row_from_pool(pool, spec, apy_f, duration))
 
     ranked.sort(key=lambda row: float(row.get("score") or 0), reverse=True)
+    ranked, api_payload = _with_protocol_apis(ranked, ytype)
     best_overall = next((row for row in ranked if row.get("apy") is not None), None)
     jlp = {**JLP_VENUE, "apy": round(jlp_apy, 3) if jlp_apy is not None else None, "score": jlp_apy or 0}
     execute = None
@@ -343,6 +365,9 @@ def compare_for_requirements(
     if ytype == "jlp":
         execute = jlp
         route = "jupiter_swap_to_jlp"
+    elif best_overall and best_overall.get("deposit_route"):
+        execute = best_overall
+        route = str(best_overall.get("deposit_route"))
     elif ytype == "any" and best_overall and best_overall.get("executable") and best_overall.get("mint"):
         execute = best_overall
         route = "jupiter_swap_to_jlp"
@@ -360,5 +385,7 @@ def compare_for_requirements(
         "best_to_execute": execute,
         "execution_route": route,
         "coverage": _coverage(ranked, ytype),
+        "protocol_apis": (api_payload or {}).get("status"),
+        "protocol_api_errors": (api_payload or {}).get("errors") or {},
         "note": compare_solana_yields(limit=1, yield_type=ytype).get("note"),
     }

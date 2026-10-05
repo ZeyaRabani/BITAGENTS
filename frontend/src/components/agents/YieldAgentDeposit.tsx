@@ -1,12 +1,6 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import {
-  createAssociatedTokenAccountInstruction,
-  createTransferInstruction,
-  getAccount,
-  getAssociatedTokenAddress,
-} from "@solana/spl-token";
 import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { useCallback, useEffect, useState } from "react";
 import { Panel } from "@/components/AppShell";
@@ -21,12 +15,6 @@ import {
 } from "@/lib/yieldWalletClient";
 
 const PENDING_DEPOSIT_KEY = "yield_pending_deposit_signature";
-const DEPOSIT_ASSETS = ["SOL", "USDC", "USDT"] as const;
-const DEPOSIT_MINTS: Record<string, string> = {
-  USDC: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-  USDT: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-};
-const DEPOSIT_DECIMALS: Record<string, number> = { USDC: 6, USDT: 6 };
 
 export function YieldAgentDeposit({
   cluster,
@@ -42,7 +30,6 @@ export function YieldAgentDeposit({
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
   const [balances, setBalances] = useState<YieldTokenBalanceRow[]>([]);
   const [amount, setAmount] = useState("");
-  const [asset, setAsset] = useState<(typeof DEPOSIT_ASSETS)[number]>("SOL");
   const [busy, setBusy] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,35 +81,20 @@ export function YieldAgentDeposit({
     }
     const parsed = Number(amount);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      setError(`Enter a ${asset} amount greater than 0.`);
+      setError("Enter a SOL amount greater than 0.");
       return;
     }
     setBusy(true);
     try {
       const dest = new PublicKey(agentWallet);
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-      const tx = new Transaction();
-      if (asset === "SOL") {
-        tx.add(
-          SystemProgram.transfer({
-            fromPubkey: publicKey,
-            toPubkey: dest,
-            lamports: Math.round(parsed * LAMPORTS_PER_SOL),
-          })
-        );
-      } else {
-        const mint = new PublicKey(DEPOSIT_MINTS[asset]);
-        const decimals = DEPOSIT_DECIMALS[asset] ?? 6;
-        const rawAmount = BigInt(Math.round(parsed * 10 ** decimals));
-        const userAta = await getAssociatedTokenAddress(mint, publicKey);
-        const agentAta = await getAssociatedTokenAddress(mint, dest);
-        try {
-          await getAccount(connection, agentAta);
-        } catch {
-          tx.add(createAssociatedTokenAccountInstruction(publicKey, agentAta, dest, mint));
-        }
-        tx.add(createTransferInstruction(userAta, agentAta, publicKey, rawAmount));
-      }
+      const tx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: publicKey,
+          toPubkey: dest,
+          lamports: Math.round(parsed * LAMPORTS_PER_SOL),
+        })
+      );
       tx.recentBlockhash = blockhash;
       tx.feePayer = publicKey;
       const signature = await sendTransaction(tx, connection);
@@ -163,8 +135,8 @@ export function YieldAgentDeposit({
     }
     setWithdrawBusy(true);
     try {
-      const result = await withdrawYieldTokens(asset, parsed, authToken);
-      setSuccess(`Idle ${asset} sent back to your wallet.`);
+      const result = await withdrawYieldTokens("SOL", parsed, authToken);
+      setSuccess("Idle SOL sent back to your wallet.");
       if (result.signature) setLastTx(result.signature);
       await refreshBalances();
       setWithdrawAmount("");
@@ -175,13 +147,13 @@ export function YieldAgentDeposit({
     }
   }
 
-  const idle = balances.find((row) => row.token === asset);
+  const idle = balances.find((row) => row.token === "SOL");
 
   return (
     <Panel title="Capital">
       <p className="text-sm text-muted-foreground">
-        Send {asset} to your Yield Agent Circle wallet. The agent uses that balance when it stakes
-        the best protocol for your requirements.
+        Send SOL to your Yield Agent Circle wallet. The agent uses that balance when it stakes the
+        best protocol for your requirements.
       </p>
       {agentWallet && (
         <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
@@ -192,7 +164,7 @@ export function YieldAgentDeposit({
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="border border-grid bg-surface/30 px-3 py-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            Idle {asset}
+            Idle SOL
           </div>
           <div className="mt-1 font-display text-2xl font-bold tabular-nums text-signal">
             {idle?.available ?? 0}
@@ -209,25 +181,13 @@ export function YieldAgentDeposit({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <select
-          value={asset}
-          onChange={(e) => setAsset(e.target.value as (typeof DEPOSIT_ASSETS)[number])}
-          disabled={busy || withdrawBusy}
-          className="border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground disabled:opacity-50"
-        >
-          {DEPOSIT_ASSETS.map((token) => (
-            <option key={token} value={token}>
-              {token}
-            </option>
-          ))}
-        </select>
         <input
           type="number"
           min="0"
           step="0.01"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
-          placeholder={`Deposit ${asset}`}
+          placeholder="Deposit SOL"
           disabled={busy}
           className="w-36 border border-grid bg-background px-3 py-2 font-mono text-sm disabled:opacity-50"
         />
@@ -248,7 +208,7 @@ export function YieldAgentDeposit({
           step="0.01"
           value={withdrawAmount}
           onChange={(e) => setWithdrawAmount(e.target.value)}
-          placeholder={`Withdraw idle ${asset}`}
+          placeholder="Withdraw idle SOL"
           disabled={withdrawBusy}
           className="w-36 border border-grid bg-background px-3 py-2 font-mono text-sm disabled:opacity-50"
         />

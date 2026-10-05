@@ -1,4 +1,4 @@
-"""Yield Agent: compare Solana venues, deploy idle SOL into LSTs, rebalance on better APY."""
+"""Yield Agent: compare Solana venues and deploy idle SOL through Kamino or Jupiter."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ _scheduler_thread: Optional[threading.Thread] = None
 
 SYSTEM_PROMPT = """You are the BIT Agents Yield Agent for Solana.
 
-You hold the user's assets in their Circle yield wallet. Supported protocols:
+You hold the user's SOL in their Circle yield wallet. Supported protocols:
 - Kamino Finance: lending markets and liquidity vaults
 - Jupiter: JLP liquidity provision
 - MarginFi: lending markets
@@ -56,11 +56,11 @@ You hold the user's assets in their Circle yield wallet. Supported protocols:
 
 When the user gives an asset, capital, duration, or a yield type, call invest.
 Yield types are any, lending, liquidity_vault, jlp, and insurance.
-- any: rank every supported market. Stake only if the winner is Jupiter JLP.
-- lending: rank Kamino, MarginFi, Drift, and Save for that asset. Report the best market. Do not send a swap.
-- liquidity_vault: rank Kamino vaults that include the asset. Report the best vault. Do not send a swap.
-- jlp: swap the deposited asset into JLP through Jupiter.
-- insurance: look only at Drift's insurance fund. If no rate is published, leave funds idle.
+- any: rank every supported SOL market. Deposit into Kamino when it wins, or swap into JLP when JLP wins.
+- lending: rank Kamino, Save, MarginFi, and Drift for SOL. Deposit into Kamino through its API when Kamino wins. Save is ranked only. MarginFi and Drift have no deposit API.
+- liquidity_vault: deposit into the best Kamino SOL vault through the Kamino API.
+- jlp: swap deposited SOL into JLP through Jupiter.
+- insurance: Drift insurance-fund staking has no deposit API. Leave funds idle and say so.
 
 Rules:
 - Say which yield type you used.
@@ -281,14 +281,14 @@ def invest_for_requirements(
     duration_days: int,
     yield_type: str = "any",
 ) -> dict[str, Any]:
-    """Compare the supported protocols, then buy JLP when that is the selected venue."""
+    """Compare the supported protocols, then deposit into Kamino or buy JLP when that venue can be entered."""
     from db import insert_yield_position, insert_yield_rebalance, upsert_yield_mandate
     from dca_agent import resolve_token
 
     wallet = (user_wallet or "").strip()
     asset_norm = (asset or "SOL").strip().upper()
-    if asset_norm not in ("SOL", "USDC", "USDT"):
-        return {"error": "Asset must be SOL, USDC, or USDT."}
+    if asset_norm != "SOL":
+        return {"error": "The Yield Agent accepts SOL only."}
     try:
         ytype = normalize_yield_type(yield_type)
     except ValueError as exc:
@@ -302,7 +302,7 @@ def invest_for_requirements(
         return {"error": "Capital must be greater than 0."}
     if duration < 1:
         return {"error": "Duration must be at least 1 day."}
-    minimum = MIN_ALLOCATE_SOL if asset_norm == "SOL" else 1.0
+    minimum = MIN_ALLOCATE_SOL
     if amount < minimum:
         return {"error": f"Minimum invest for {asset_norm} is {minimum}."}
 
@@ -327,6 +327,16 @@ def invest_for_requirements(
         },
     )
     venue = comparison.get("best_to_execute") or {}
+    if venue.get("deposit_route"):
+        return _invest_kamino_api(
+            wallet,
+            amount,
+            asset_norm,
+            duration,
+            venue,
+            mandate,
+            comparison,
+        )
     if not venue.get("mint"):
         return {
             "status": "compared",
@@ -422,6 +432,89 @@ def invest_for_requirements(
     }
 
 
+def _invest_kamino_api(
+    wallet: str,
+    amount: float,
+    asset_norm: str,
+    duration: int,
+    venue: dict[str, Any],
+    mandate: dict[str, Any],
+    comparison: dict[str, Any],
+) -> dict[str, Any]:
+    from db import insert_yield_position, insert_yield_rebalance
+    from yield_ledger import get_yield_wallet_pubkey
+    from yield_protocol_apis import build_kamino_deposit, submit_protocol_transaction
+
+    agent_wallet = get_yield_wallet_pubkey(wallet)
+    if not agent_wallet:
+        return {"error": "Yield agent wallet is not configured (Circle).", "comparison": comparison}
+    built = build_kamino_deposit(agent_wallet=agent_wallet, amount=amount, venue=venue)
+    if built.get("error"):
+        return {**built, "comparison": comparison, "status": "compared"}
+    sent = submit_protocol_transaction(wallet, str(built["transaction"]))
+    if sent.get("error") or sent.get("status") in ("failed", "error"):
+        return {"error": sent.get("error") or "Kamino deposit failed.", "comparison": comparison}
+    signature = sent.get("signature")
+    explorer = sent.get("explorer_url")
+    pos_id = uuid.uuid4().hex[:16]
+    record_yield_spend(
+        wallet,
+        amount,
+        token=asset_norm,
+        reference_id=pos_id,
+        signature=signature,
+        explorer_url=explorer,
+    )
+    kind = "vault" if venue.get("deposit_route") == "kamino_vault" else "lending"
+    position = insert_yield_position(
+        {
+            "id": pos_id,
+            "user_wallet": wallet,
+            "protocol_id": venue.get("protocol_id") or "kamino",
+            "protocol_name": venue.get("protocol_name") or "Kamino Finance",
+            "mint": str(venue.get("reserve") or venue.get("kvault") or SOL_MINT),
+            "symbol": "SOL",
+            "amount": amount,
+            "entry_apy": venue.get("apy"),
+            "status": "active",
+            "last_signature": signature,
+            "explorer_url": explorer,
+        }
+    )
+    insert_yield_rebalance(
+        {
+            "id": uuid.uuid4().hex[:16],
+            "user_wallet": wallet,
+            "position_id": pos_id,
+            "from_protocol": "idle_sol",
+            "to_protocol": venue.get("protocol_id") or "kamino",
+            "amount": amount,
+            "from_apy": 0,
+            "to_apy": venue.get("apy"),
+            "signature": signature,
+            "explorer_url": explorer,
+            "status": "confirmed",
+        }
+    )
+    return {
+        "status": "invested",
+        "position": position,
+        "spent": amount,
+        "asset": asset_norm,
+        "duration_days": duration,
+        "venue": venue,
+        "route": venue.get("deposit_route"),
+        "signature": signature,
+        "explorer_url": explorer,
+        "mandate": mandate,
+        "message": (
+            f"Deposited {amount} SOL for {duration} days into Kamino Finance {kind}"
+            + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
+            + " through the Kamino API."
+        ),
+    }
+
+
 def _compared_message(
     comparison: dict[str, Any],
     amount: float,
@@ -439,22 +532,81 @@ def _compared_message(
     name = best.get("protocol_name") or best.get("project") or "the best market"
     symbol = best.get("symbol") or ""
     apy = best.get("apy")
-    quiet = [
-        str(row.get("protocol_name"))
-        for row in comparison.get("coverage") or []
-        if row.get("note") and row.get("yield_type") == (yield_type if yield_type != "any" else row.get("yield_type"))
-    ]
-    extra = ""
-    if yield_type == "lending":
-        missing = sorted({name for name in quiet})
-        if missing:
-            extra = " " + ", ".join(missing) + " had no live pool in the feed."
-    return (
-        f"Best {label} match for {amount} {asset} over {duration} days is {name} {symbol}"
-        + (f" at {apy}% APY" if apy is not None else "")
-        + ". That position is opened on the protocol, so the agent did not send a Jupiter swap."
-        + extra
+    rate = f" at {apy}% APY" if apy is not None else ""
+    lead = f"Best {label} match for {amount} {asset} over {duration} days is {name} {symbol}{rate}."
+    if best.get("protocol_id") == "save" or best.get("source") == "save_api":
+        return (
+            lead
+            + " Save's API published this rate, but it does not build a deposit. "
+            "Docs: https://docs.save.finance/developers/introduction. The SOL stays idle."
+        )
+    if best.get("protocol_id") in ("marginfi", "drift", "drift-insurance"):
+        docs = best.get("docs_url") or "https://docs.drift.trade/developers/data-api"
+        return lead + f" This protocol has no deposit API. Docs: {docs}. The SOL stays idle."
+    return lead + " This market has no deposit route, so the SOL stays idle."
+
+
+def _unwind_kamino(wallet: str, pos: dict[str, Any]) -> dict[str, Any]:
+    from db import insert_yield_rebalance, update_yield_position
+    from yield_ledger import get_yield_wallet_pubkey
+    from yield_protocol_apis import build_kamino_withdraw, submit_protocol_transaction
+
+    amount = float(pos.get("amount") or 0)
+    if amount <= 0:
+        return {"error": "This position has no SOL to withdraw."}
+    agent_wallet = get_yield_wallet_pubkey(wallet)
+    if not agent_wallet:
+        return {"error": "Yield agent wallet is not configured (Circle)."}
+    if str(pos.get("protocol_id")) == "kamino-vault":
+        venue = {"deposit_route": "kamino_vault", "kvault": pos.get("mint")}
+    else:
+        venue = {"deposit_route": "kamino_lend", "reserve": pos.get("mint")}
+    built = build_kamino_withdraw(agent_wallet=agent_wallet, amount=amount, venue=venue)
+    if built.get("error"):
+        return built
+    sent = submit_protocol_transaction(wallet, str(built["transaction"]))
+    if sent.get("error") or sent.get("status") in ("failed", "error"):
+        return {"error": sent.get("error") or "Kamino withdraw failed."}
+    signature = sent.get("signature")
+    explorer = sent.get("explorer_url")
+    record_yield_credit(
+        wallet,
+        amount,
+        reference_id=str(pos["id"]),
+        signature=signature,
+        explorer_url=explorer,
     )
+    update_yield_position(
+        pos["id"],
+        {
+            "status": "closed",
+            "amount": 0,
+            "last_signature": signature,
+            "explorer_url": explorer,
+        },
+    )
+    insert_yield_rebalance(
+        {
+            "id": uuid.uuid4().hex[:16],
+            "user_wallet": wallet,
+            "position_id": pos["id"],
+            "from_protocol": pos.get("protocol_id"),
+            "to_protocol": "idle_sol",
+            "amount": amount,
+            "from_apy": pos.get("entry_apy"),
+            "to_apy": 0,
+            "signature": signature,
+            "explorer_url": explorer,
+            "status": "confirmed",
+        }
+    )
+    return {
+        "status": "unwound",
+        "sol_returned": amount,
+        "signature": signature,
+        "explorer_url": explorer,
+        "message": f"Withdrew {amount} SOL from Kamino through its API. It is idle in the Circle wallet.",
+    }
 
 
 def unwind_position(user_wallet: str, position_id: Optional[str] = None) -> dict[str, Any]:
@@ -471,6 +623,9 @@ def unwind_position(user_wallet: str, position_id: Optional[str] = None) -> dict
         pos = positions[0]
     if not pos:
         return {"error": "Position not found."}
+
+    if str(pos.get("protocol_id") or "") in {"kamino", "kamino-vault"}:
+        return _unwind_kamino(wallet, pos)
 
     amount = float(pos.get("amount") or 0)
     swap = _execute_swap(
@@ -555,7 +710,7 @@ def rebalance_positions(user_wallet: str, force: bool = False) -> dict[str, Any]
             skipped.append(
                 {
                     "position_id": pos["id"],
-                    "reason": "Only Jupiter JLP is moved with a swap. Lending and vault positions stay where they were opened.",
+                    "reason": "Kamino positions stay put until you unwind them. Unwind uses the Kamino withdraw API.",
                 }
             )
             continue
@@ -733,13 +888,14 @@ TOOLS = [
         "function": {
             "name": "invest",
             "description": (
-                "Compare Kamino, Jupiter, MarginFi, Drift, and Save for the user's asset, "
-                "capital, duration, and yield type. Buy JLP through Jupiter when that type is selected."
+                "Compare Kamino, Jupiter, MarginFi, Drift, and Save for the user's SOL, "
+                "capital, duration, and yield type. Deposit into Kamino through its API when Kamino wins. "
+                "Buy JLP through Jupiter when JLP is selected or wins."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "asset": {"type": "string", "description": "SOL, USDC, or USDT"},
+                    "asset": {"type": "string", "description": "SOL"},
                     "capital": {"type": "number", "description": "Amount already deposited in the Circle wallet"},
                     "duration_days": {"type": "integer", "description": "How long the user wants the position"},
                     "yield_type": {
@@ -773,7 +929,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "rebalance",
-            "description": "Move existing LST positions to a better executable venue if APY gain clears the mandate.",
+            "description": "Move an existing JLP position to a better JLP venue if the APY gain clears the mandate. Kamino positions are left in place until unwind.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -786,7 +942,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "unwind",
-            "description": "Swap a yield position back to idle SOL so it can be withdrawn.",
+            "description": "Swap a JLP position back to idle SOL, or withdraw a Kamino position through the Kamino API.",
             "parameters": {
                 "type": "object",
                 "properties": {

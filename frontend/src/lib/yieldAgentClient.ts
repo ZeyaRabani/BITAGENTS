@@ -149,18 +149,18 @@ export const YIELD_TYPES = [
 ] as const;
 
 export const YIELD_TYPE_HELP: Record<(typeof YIELD_TYPES)[number]["id"], string> = {
-  any: "Any ranks Kamino, Jupiter, MarginFi, Drift, and Save. The agent buys JLP only when that is the winner. A lending, vault, or insurance winner is reported and the balance stays idle.",
+  any: "Any ranks Kamino, Jupiter, MarginFi, Drift, and Save. If Kamino wins, the agent deposits through the Kamino API. If JLP wins, it swaps through Jupiter. Save is ranked only. MarginFi and Drift have no deposit API, so those winners stay idle.",
   lending:
-    "Lending looks at Kamino, MarginFi, Drift, and Save markets in your asset and names the best APY. Those positions are deposits on the protocol, so the agent does not send a swap.",
+    "Lending ranks Kamino, Save, MarginFi, and Drift SOL markets. A Kamino winner is deposited through https://api.kamino.finance. Save is ranked from its public API and is not deposited. MarginFi and Drift have no deposit API.",
   liquidity_vault:
-    "Liquidity vault looks only at Kamino vaults that include your asset. Short durations avoid pairs with impermanent loss. Vault shares are not bought with a swap.",
-  jlp: "JLP sends the deposited asset from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token.",
+    "Liquidity vault deposits SOL into the best Kamino vault through the Kamino API (https://api.kamino.finance).",
+  jlp: "JLP sends deposited SOL from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token.",
   insurance:
-    "Insurance looks only at Drift's insurance fund. If the feed has no rate, the balance stays idle.",
+    "Insurance looks at Drift's insurance fund. Drift does not publish a deposit API (https://docs.drift.trade/developers/data-api), so the balance stays idle.",
 };
 
 export const YIELD_EXAMPLE_PROMPTS = [
-  "Compare lending yields for USDC",
+  "Compare lending yields for SOL",
   "Invest 0.1 SOL in Jupiter JLP for 30 days",
   "Find the best Kamino liquidity vault for 90 days",
   "Unwind my position back to SOL",

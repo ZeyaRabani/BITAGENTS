@@ -203,6 +203,7 @@ from yield_ledger import (
     withdraw_yield_tokens,
 )
 from yield_protocols import compare_solana_yields
+from yield_protocol_apis import protocol_api_status
 from wallet_auth import (
     create_auth_challenge,
     get_session_info,
@@ -1458,7 +1459,8 @@ def yield_health() -> dict[str, Any]:
         "auth_required": True,
         "cluster": SOLANA_CLUSTER,
         "pricing": "free · wallet sign-in required",
-        "live_routing": "jlp",
+        "live_routing": "kamino_api_and_jlp",
+        "protocol_apis": protocol_api_status(),
         "scheduler": yield_scheduler_status(),
     }
 
