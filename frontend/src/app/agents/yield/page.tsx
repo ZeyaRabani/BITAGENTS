@@ -5,7 +5,7 @@ import { YieldAgentConsole } from "@/components/agents/YieldAgentConsole";
 export const metadata: Metadata = {
   title: "Yield Agent - BIT Agents",
   description:
-    "Deposit into Kamino, Jupiter JLP, MarginFi, Drift, or Save based on yield type.",
+    "Deposit SOL into Kamino through its API, or into Jupiter JLP. Save is ranked. MarginFi and Drift need their SDKs.",
 };
 
 export default function YieldAgentPage() {

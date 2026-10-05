@@ -44,7 +44,6 @@ export function YieldAgentConsole() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
-  const [asset, setAsset] = useState("SOL");
   const [yieldType, setYieldType] = useState<(typeof YIELD_TYPES)[number]["id"]>("any");
   const [capital, setCapital] = useState("");
   const [durationDays, setDurationDays] = useState("30");
@@ -111,7 +110,7 @@ export function YieldAgentConsole() {
     setInvestNote(null);
     try {
       const result = await investYieldCapital(token, {
-        asset,
+        asset: "SOL",
         capital: amount,
         duration_days: Math.round(days),
         yield_type: yieldType,
@@ -142,11 +141,10 @@ export function YieldAgentConsole() {
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Send SOL, USDC, or USDT to your Circle yield wallet. Pick a yield type and the agent
-          ranks Kamino, Jupiter JLP, MarginFi, Drift, and Save for your asset, capital, and
-          duration. JLP is bought through Jupiter. Lending, Kamino vaults, and the Drift insurance
-          fund are named when they win, and the balance stays idle because those are protocol
-          deposits. Not financial advice.
+          Send SOL to your Circle yield wallet. Pick a yield type and the agent ranks Kamino,
+          Jupiter JLP, MarginFi, Drift, and Save. Kamino lending and vaults are deposited through
+          the Kamino API. JLP is bought through Jupiter. Save is ranked from its API. MarginFi
+          and Drift have no deposit API, so those winners stay idle. Not financial advice.
         </p>
       </div>
 
@@ -203,19 +201,6 @@ export function YieldAgentConsole() {
             </select>
           </label>
           <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            Asset
-            <select
-              value={asset}
-              onChange={(e) => setAsset(e.target.value)}
-              disabled={investBusy}
-              className="border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground disabled:opacity-50"
-            >
-              <option value="SOL">SOL</option>
-              <option value="USDC">USDC</option>
-              <option value="USDT">USDT</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             Capital
             <input
               type="number"
@@ -256,7 +241,7 @@ export function YieldAgentConsole() {
           <div className="flex max-h-105 flex-col gap-4 overflow-y-auto pr-1">
             {messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Try a prompt below, or set asset, capital, and duration and invest.
+                Try a prompt below, or set capital, duration, and yield type, then invest.
               </p>
             )}
             {messages.map((msg) => (

@@ -9,8 +9,8 @@ from typing import Any, Optional
 from db import insert_ledger_entry, load_ledger_for_user
 from dca_agent import SOL_ADDRESS_FULL, resolve_token, sol_rpc
 
-ALLOWED_DEPOSIT_TOKENS = {"SOL", "USDC", "USDT"}
-ALLOWED_WITHDRAW_TOKENS = {"SOL", "USDC", "USDT"}
+ALLOWED_DEPOSIT_TOKENS = {"SOL"}
+ALLOWED_WITHDRAW_TOKENS = {"SOL"}
 AGENT_TYPE = "yield"
 
 
@@ -50,7 +50,7 @@ def get_yield_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, 
         "allowed_tokens": sorted(ALLOWED_DEPOSIT_TOKENS),
         "allowed_withdraw_tokens": sorted(ALLOWED_WITHDRAW_TOKENS),
         "sol_mint": SOL_ADDRESS_FULL,
-        "live_routing": "liquid_staking",
+        "live_routing": "kamino_api_and_jlp",
     }
     if circle_error:
         result["circle_error"] = circle_error
@@ -285,7 +285,7 @@ def verify_and_record_yield_deposit(signature: str, user_wallet: str) -> dict[st
         inbound = _parse_verified_user_deposits(tx, user_wallet, agent_wallet)
         if not inbound:
             return {
-                "error": "No verifiable SOL, USDC, or USDT deposit from your wallet to the Yield Agent wallet was found.",
+                "error": "No verifiable SOL deposit from your wallet to the Yield Agent wallet was found.",
                 "status": "rejected",
             }
 
@@ -297,7 +297,7 @@ def verify_and_record_yield_deposit(signature: str, user_wallet: str) -> dict[st
                 continue
             token = str(tok.get("symbol") or "").upper()
             if token not in ALLOWED_DEPOSIT_TOKENS:
-                return {"error": f"Deposits must be SOL, USDC, or USDT (got {token}).", "status": "rejected"}
+                return {"error": f"Deposits must be SOL (got {token}).", "status": "rejected"}
             record = {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
@@ -332,7 +332,7 @@ def withdraw_yield_tokens(user_wallet: str, token: str, amount: float) -> dict[s
     user_wallet = user_wallet.strip()
     token = token.strip().upper()
     if token not in ALLOWED_WITHDRAW_TOKENS:
-        return {"error": "Only idle SOL, USDC, or USDT can be withdrawn."}
+        return {"error": "Only idle SOL can be withdrawn."}
     tok = resolve_token(token)
     if "error" in tok:
         return tok
