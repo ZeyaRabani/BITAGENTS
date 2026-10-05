@@ -107,7 +107,9 @@ def _fetch_pools() -> list[dict[str, Any]]:
     if _cache["pools"] and now - float(_cache["ts"] or 0) < CACHE_TTL_SECONDS:
         return _cache["pools"]
     try:
-        res = requests.get(DEFILLAMA_POOLS_URL, timeout=20)
+        # The installed brotli build can't decode DefiLlama's br-compressed
+        # response (streaming decode error) -- request gzip/deflate instead.
+        res = requests.get(DEFILLAMA_POOLS_URL, timeout=20, headers={"Accept-Encoding": "gzip, deflate"})
         res.raise_for_status()
         data = res.json()
         pools = data.get("data") if isinstance(data, dict) else data
