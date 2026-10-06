@@ -195,9 +195,11 @@ def allocate_to_venue(
     if amount < MIN_ALLOCATE_SOL:
         return {"error": f"Minimum allocate is {MIN_ALLOCATE_SOL} SOL."}
 
-    venue = get_executable_venue(protocol_id) if protocol_id else best_executable_venue()
-    if not venue:
-        venue = best_executable_venue()
+    # This tool only ever builds a Jupiter swap, so it needs a mint -- always JLP,
+    # regardless of what best_executable_venue() picks overall (which may now be
+    # a Kamino deposit route with no mint). invest_for_requirements is the path
+    # that picks the real best venue across swap and deposit routes.
+    venue = get_executable_venue(protocol_id) if protocol_id else get_executable_venue("jlp")
     if not venue or not venue.get("mint"):
         return {"error": "No executable yield venue is available right now."}
 

@@ -283,12 +283,19 @@ def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str,
     markets.sort(key=lambda row: float(row.get("score") or 0), reverse=True)
     markets, api_payload = _with_protocol_apis(markets, ytype)
     jlp = {**JLP_VENUE, "apy": round(jlp_apy, 3) if jlp_apy is not None else None}
+    executable_rows = [row for row in markets if row.get("executable")]
+    executable_venues = executable_rows + [jlp]
+    best_executable = max(
+        executable_venues,
+        key=lambda row: float(row.get("score") or row.get("apy") or 0),
+        default=jlp,
+    )
     return {
         "yield_type": ytype,
         "yield_types": [{"id": key, "label": label} for key, label in YIELD_TYPES.items()],
         "markets": markets[:limit],
-        "executable_venues": [jlp],
-        "best_executable": jlp,
+        "executable_venues": executable_venues,
+        "best_executable": best_executable,
         "coverage": _coverage(markets, ytype),
         "protocol_apis": (api_payload or {}).get("status"),
         "protocol_api_errors": (api_payload or {}).get("errors") or {},
