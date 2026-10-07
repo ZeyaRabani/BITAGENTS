@@ -7,7 +7,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function constructMetadata({
-  title = 'BIT Agents',
+  title = 'BITAGENTS',
   description = 'The on-chain marketplace for autonomous AI agents.',
   // image = '/assets/thumbnails/thumbnail.png',
   icons = '/bit-agents-logo-transparent.png',

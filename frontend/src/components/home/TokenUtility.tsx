@@ -4,9 +4,9 @@ import { Lock } from "lucide-react";
 
 const items = [
   { title: "Platform Fees & Buybacks", body: "A portion of future platform fees is planned to support buybacks." },
-  { title: "Agent Staking", body: "Developers and power users may stake BIT Agents to access premium agents and build reputation." },
+  { title: "Agent Staking", body: "Developers and power users may stake BITAGENTS to access premium agents and build reputation." },
   { title: "Premium Agent Access", body: "Token holders may receive access to advanced agents, higher limits, and premium workflows." },
-  { title: "Marketplace Settlement", body: "Future versions may use BIT Agents for agent task payments and marketplace settlement." },
+  { title: "Marketplace Settlement", body: "Future versions may use BITAGENTS for agent task payments and marketplace settlement." },
 ];
 
 export function TokenUtility() {
@@ -18,7 +18,7 @@ export function TokenUtility() {
           Designed around real platform usage.
         </h2>
         <p className="mt-5 max-w-2xl text-muted-foreground">
-          The BIT Agents token is designed to connect product usage with marketplace access, agent rewards, and future settlement flows.
+          The BITAGENTS token is designed to connect product usage with marketplace access, agent rewards, and future settlement flows.
         </p>
         <div className="mt-12 grid gap-px bg-[color:var(--border)] border-2 border-grid sm:grid-cols-2 lg:grid-cols-4">
           {items.map((i) => (

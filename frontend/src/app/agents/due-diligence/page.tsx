@@ -6,7 +6,7 @@ import { RESEARCH_AGENTS } from "@/lib/researchAgentsConfig";
 const config = RESEARCH_AGENTS["due-diligence"];
 
 export const metadata: Metadata = {
-  title: "Due Diligence Agent - BIT Agents",
+  title: "Due Diligence Agent - BITAGENTS",
   description: config.description,
 };
 

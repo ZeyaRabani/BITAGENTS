@@ -5,4 +5,4 @@ export const LEGAL_LINKS = {
 } as const;
 
 export const LEGAL_SIGN_IN_NOTICE =
-  "By connecting your wallet and signing in, you agree to the BIT Agents Terms of Service, Privacy Policy, and Risk Disclaimer.";
+  "By connecting your wallet and signing in, you agree to the BITAGENTS Terms of Service, Privacy Policy, and Risk Disclaimer.";

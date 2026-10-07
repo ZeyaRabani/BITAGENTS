@@ -6,7 +6,7 @@ import { RESEARCH_AGENTS } from "@/lib/researchAgentsConfig";
 const config = RESEARCH_AGENTS["token-research"];
 
 export const metadata: Metadata = {
-  title: "Token Research Agent - BIT Agents",
+  title: "Token Research Agent - BITAGENTS",
   description: config.description,
 };
 

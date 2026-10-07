@@ -21,7 +21,7 @@ export function HedgeFundPricingPage() {
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-signal">Fee schedule</p>
         <h2 className="mt-2 text-2xl font-semibold text-foreground">1/10 Model</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          BIT Agents Hedge Fund uses a simplified fee stack inspired by{" "}
+          BITAGENTS Hedge Fund uses a simplified fee stack inspired by{" "}
           <a
             href="https://github.com/asalsali/covenant-hedge-fund"
             target="_blank"

@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { MultiWalletDemo } from "@/components/agents/MultiWalletDemo";
 
 export const metadata: Metadata = {
-  title: "Operation Multi-wallet — BIT Agents",
+  title: "Operation Multi-wallet — BITAGENTS",
   description: "Demo: each user gets their own dedicated deposit wallet instead of one shared pool.",
 };
 

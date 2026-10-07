@@ -14,7 +14,7 @@ export function Compute() {
         <div className="mt-12 grid gap-px bg-[color:var(--border)] border-2 border-grid md:grid-cols-2">
           <div className="bg-background p-8">
             <p className="text-muted-foreground">
-              Useful agents need compute to monitor markets, process data, run research, and execute workflows. BIT Agents connects demand for agent tasks with supply from compute providers.
+              Useful agents need compute to monitor markets, process data, run research, and execute workflows. BITAGENTS connects demand for agent tasks with supply from compute providers.
             </p>
             <ul className="mt-6 grid grid-cols-2 gap-2 font-mono text-xs">
               {supply.map((s) => (

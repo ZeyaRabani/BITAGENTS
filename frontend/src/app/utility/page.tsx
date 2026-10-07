@@ -5,7 +5,7 @@ const utilities = [
   {
     title: "Platform fees and buybacks",
     icon: Repeat2,
-    text: "A future BIT Agents token can capture marketplace fees and route a portion toward transparent buyback mechanics."
+    text: "A future BITAGENTS token can capture marketplace fees and route a portion toward transparent buyback mechanics."
   },
   {
     title: "Compute provider staking",
@@ -39,7 +39,7 @@ export default function UtilityPage() {
     <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
       <div className="max-w-3xl">
         <p className="text-sm font-black uppercase text-ember">Token utility roadmap</p>
-        <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">BIT Agents token utility</h1>
+        <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">BITAGENTS token utility</h1>
         <p className="mt-4 text-lg leading-8 text-slate-300">
           The hackathon MVP settles with SOL on Solana devnet for speed and clarity. The code keeps settlement, provider identity, and task history explicit so token utility can be layered in without changing the core marketplace loop.
         </p>

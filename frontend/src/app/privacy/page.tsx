@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/LegalDocument";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy - BIT Agents",
-  description: "How BIT Agents collects, uses, and stores information.",
+  title: "Privacy Policy - BITAGENTS",
+  description: "How BITAGENTS collects, uses, and stores information.",
 };
 
 export default function PrivacyPage() {
   return (
     <LegalDocument
       title="Privacy Policy"
-      subtitle="What we collect when you use BIT Agents and how we use it."
+      subtitle="What we collect when you use BITAGENTS and how we use it."
       updated="June 18, 2026"
       sections={[
         {

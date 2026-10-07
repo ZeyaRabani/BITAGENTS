@@ -18,7 +18,7 @@ export function buildProviderMessage(params: {
     price: number;
 }) {
     return `
-BIT Agents Provider Listing
+BITAGENTS Provider Listing
 
 wallet: ${params.wallet.toBase58()}
 gpu: ${params.gpu}

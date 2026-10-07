@@ -83,7 +83,7 @@ export default function DemoPage() {
       <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <p className="text-sm font-black uppercase text-ember">Admin demo monitor</p>
-          <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">Full BIT Agents flow</h1>
+          <h1 className="mt-2 text-3xl font-black text-white sm:text-5xl">Full BITAGENTS flow</h1>
           <p className="mt-3 max-w-2xl text-slate-300">Watch providers, task statuses, devnet signatures, worker results, and payout settlement.</p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">

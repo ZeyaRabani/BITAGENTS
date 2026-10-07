@@ -5,7 +5,7 @@ export function Logo({ className = "h-16 w-auto" }: { className?: string }) {
   return (
     <Image
       src={logoAsset}
-      alt="BIT Agents"
+      alt="BITAGENTS"
       className={className}
       priority
     />

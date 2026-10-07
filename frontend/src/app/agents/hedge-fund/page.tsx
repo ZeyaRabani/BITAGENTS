@@ -4,7 +4,7 @@ import { HedgeFundConsole } from "@/components/agents/HedgeFundConsole";
 import { HEDGE_FUND } from "@/lib/hedgeFundConfig";
 
 export const metadata: Metadata = {
-  title: "Hedge Fund Agent - BIT Agents",
+  title: "Hedge Fund Agent - BITAGENTS",
   description: HEDGE_FUND.description,
   robots: { index: false, follow: false },
 };

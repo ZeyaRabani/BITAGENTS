@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/LegalDocument";
 
 export const metadata: Metadata = {
-  title: "Risk Disclaimer - BIT Agents",
-  description: "Important risks when using BIT Agents and automated trading tools.",
+  title: "Risk Disclaimer - BITAGENTS",
+  description: "Important risks when using BITAGENTS and automated trading tools.",
 };
 
 export default function RiskDisclaimerPage() {
@@ -16,7 +16,7 @@ export default function RiskDisclaimerPage() {
         {
           title: "Not financial advice",
           body: [
-            "BIT Agents, its agents, and all outputs are for informational and software automation purposes only. Nothing on this platform is investment, financial, tax, or legal advice.",
+            "BITAGENTS, its agents, and all outputs are for informational and software automation purposes only. Nothing on this platform is investment, financial, tax, or legal advice.",
             "DYOR - do your own research before allocating any capital.",
           ],
         },
@@ -51,7 +51,7 @@ export default function RiskDisclaimerPage() {
         {
           title: "Beta software",
           body: [
-            "BIT Agents may be experimental or in beta. Features may change, break, or be discontinued without notice.",
+            "BITAGENTS may be experimental or in beta. Features may change, break, or be discontinued without notice.",
             "By using the platform you accept these risks voluntarily.",
           ],
         },

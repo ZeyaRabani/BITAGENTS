@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { HedgeFundPricingPage } from "@/components/agents/HedgeFundPricingPage";
 
 export const metadata: Metadata = {
-  title: "Hedge Fund Pricing - BIT Agents",
+  title: "Hedge Fund Pricing - BITAGENTS",
   description: "1/10 fee model — 1% management and 10% performance vs traditional 2/20.",
   robots: { index: false, follow: false },
 };

@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { VolumeAgentSimpleConsole } from "@/components/agents/VolumeAgentSimpleConsole";
 
 export const metadata: Metadata = {
-  title: "BITAGENTS Volume - BIT Agents",
+  title: "BITAGENTS Volume - BITAGENTS",
   description: "Start a BITAGENTS volume campaign in one click — deposit SOL, pick a size, go.",
 };
 

@@ -4,7 +4,7 @@ import { DcaAgentConsole } from "@/components/agents/DcaAgentConsole";
 import { DCA_AGENT } from "@/lib/dcaAgentSimulation";
 
 export const metadata: Metadata = {
-  title: "DCA Agent - BIT Agents",
+  title: "DCA Agent - BITAGENTS",
   description: "Run the Solana DCA Agent - recurring buys, and plan management.",
 };
 

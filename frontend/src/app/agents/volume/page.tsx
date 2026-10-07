@@ -4,7 +4,7 @@ import { VolumeAgentConsole } from "@/components/agents/VolumeAgentConsole";
 import { VOLUME_AGENT } from "@/lib/volumeAgentSimulation";
 
 export const metadata: Metadata = {
-  title: "Volume Agent - BIT Agents",
+  title: "Volume Agent - BITAGENTS",
   description:
     "Run Meteora DLMM volume campaigns — pool infrastructure, scheduled buy/sell cycles, 0.25% per leg.",
 };

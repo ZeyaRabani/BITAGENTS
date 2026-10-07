@@ -6,7 +6,7 @@ import { RESEARCH_AGENTS } from "@/lib/researchAgentsConfig";
 const config = RESEARCH_AGENTS["wallet-monitoring"];
 
 export const metadata: Metadata = {
-  title: "Wallet Monitoring Agent - BIT Agents",
+  title: "Wallet Monitoring Agent - BITAGENTS",
   description: config.description,
 };
 

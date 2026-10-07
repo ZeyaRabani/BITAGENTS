@@ -16,7 +16,7 @@ const cards = [
   {
     icon: Bot,
     title: "Agent Marketplace",
-    body: "Discover and run BIT Agents from one catalog. Browse live agents today - third-party deployment is not open yet.",
+    body: "Discover and run BITAGENTS agents from one catalog. Browse live agents today - third-party deployment is not open yet.",
   },
   {
     icon: Clock,
@@ -36,7 +36,7 @@ export function Product() {
               Agents that run on-chain workflows.
             </h2>
             <p className="mt-6 max-w-md text-muted-foreground">
-              BIT Agents is an agent marketplace for running specialized automation - starting with DCA on Solana.
+              BITAGENTS is an agent marketplace for running specialized automation - starting with DCA on Solana.
               Users can discover agents, connect a wallet, and execute tasks from one place. Listing your own agent
               is not available yet.
             </p>

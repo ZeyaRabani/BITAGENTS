@@ -2,28 +2,28 @@ import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/LegalDocument";
 
 export const metadata: Metadata = {
-  title: "Terms of Service - BIT Agents",
-  description: "Terms of Service for the BIT Agents marketplace and DCA agent.",
+  title: "Terms of Service - BITAGENTS",
+  description: "Terms of Service for the BITAGENTS marketplace and DCA agent.",
 };
 
 export default function TermsPage() {
   return (
     <LegalDocument
       title="Terms of Service"
-      subtitle="Rules for using the BIT Agents marketplace, agents, and custodial deposit features."
+      subtitle="Rules for using the BITAGENTS marketplace, agents, and custodial deposit features."
       updated="June 18, 2026"
       sections={[
         {
           title: "1. Acceptance",
           body: [
-            "By connecting a wallet, signing an authentication message, depositing funds, or using any BIT Agents service, you agree to these Terms of Service, our Privacy Policy, and Risk Disclaimer.",
+            "By connecting a wallet, signing an authentication message, depositing funds, or using any BITAGENTS service, you agree to these Terms of Service, our Privacy Policy, and Risk Disclaimer.",
             "If you do not agree, do not use the platform.",
           ],
         },
         {
           title: "2. Service description",
           body: [
-            "BIT Agents provides software interfaces for autonomous AI agents, including a custodial deposit model where users transfer tokens to an agent-operated wallet to fund automated tasks such as dollar-cost averaging (DCA).",
+            "BITAGENTS provides software interfaces for autonomous AI agents, including a custodial deposit model where users transfer tokens to an agent-operated wallet to fund automated tasks such as dollar-cost averaging (DCA).",
             "We do not provide investment, financial, tax, or legal advice. Agent outputs are informational and may be incorrect.",
           ],
         },
@@ -51,7 +51,7 @@ export default function TermsPage() {
         {
           title: "6. Prohibited use",
           body: [
-            "You may not use BIT Agents for money laundering, market manipulation, unauthorized access, denial-of-service attacks, or any unlawful activity.",
+            "You may not use BITAGENTS for money laundering, market manipulation, unauthorized access, denial-of-service attacks, or any unlawful activity.",
             "You may not attempt to claim another user's deposits, forge transaction signatures, or circumvent authentication.",
           ],
         },
@@ -59,7 +59,7 @@ export default function TermsPage() {
           title: "7. Disclaimers & limitation of liability",
           body: [
             "The service is provided \"as is\" without warranties. Smart contracts, RPC providers, LLMs, and market data may fail or produce incorrect results.",
-            "To the maximum extent permitted by law, BIT Agents and its contributors are not liable for lost funds, failed transactions, smart contract bugs, or trading losses.",
+            "To the maximum extent permitted by law, BITAGENTS and its contributors are not liable for lost funds, failed transactions, smart contract bugs, or trading losses.",
           ],
         },
         {

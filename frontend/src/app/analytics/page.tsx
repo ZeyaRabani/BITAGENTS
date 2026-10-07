@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { AppShell, Panel, Stat } from "@/components/AppShell";
 
 export const metadata: Metadata = {
-    title: "Marketplace Analytics - BIT Agents",
+    title: "Marketplace Analytics - BITAGENTS",
     description:
-        "Live agent activity, task volume, deployments, and marketplace settlement across the BIT Agents protocol.",
+        "Live agent activity, task volume, deployments, and marketplace settlement across the BITAGENTS protocol.",
 };
 
 const taskVolume = [820, 940, 1100, 1280, 1450, 1620, 1780, 1950, 2100, 2280, 2410, 2640];

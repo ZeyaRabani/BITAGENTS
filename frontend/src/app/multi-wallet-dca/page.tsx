@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { MultiWalletDcaConsole } from "@/components/agents/MultiWalletDcaConsole";
 
 export const metadata: Metadata = {
-  title: "Multi-wallet DCA — BIT Agents",
+  title: "Multi-wallet DCA — BITAGENTS",
   description: "Real DCA deposits, plans, and withdrawals through your own dedicated wallet.",
 };
 
