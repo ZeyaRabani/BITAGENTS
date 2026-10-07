@@ -89,20 +89,23 @@ export function Nav({ children }: { children: React.ReactNode }) {
 }
 
 export function Wordmark({ compact = false }: { compact?: boolean }) {
-  const width = compact ? 200 : 390;
+  // Horizontal lockup is natively 1500x500 (3:1) -- very different shape
+  // from the old stacked two-line mark, so sizes are chosen fresh rather
+  // than carried over.
+  const width = compact ? 300 : 450;
 
   return (
     <img
-      src="/bit-agents-logo-transparent.png"
+      src="/bitagents-wordmark-horizontal.png"
       alt="BITAGENTS"
       width={width}
-      height={Math.round(width * 0.8)}
+      height={Math.round(width / 3)}
       className={
         compact
-          ? "block h-[7.875rem] w-auto object-contain object-left sm:h-[10.875rem] md:h-[15.75rem]"
+          ? "block h-[3.5rem] w-auto object-contain object-left sm:h-[4.5rem] md:h-[6rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
-      style={compact ? undefined : { width: "min(390px, 100%)" }}
+      style={compact ? undefined : { width: "min(450px, 100%)" }}
     />
   );
 }
