@@ -34,7 +34,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
       <header
         className={`sticky top-0 z-30 bg-background/80 backdrop-blur ${isPublicPage ? "" : "border-b-2 border-grid"}`}
       >
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-6 sm:gap-6 sm:px-8 sm:py-8">
           <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />
           </Link>
@@ -101,7 +101,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
       height={Math.round(width * 0.8)}
       className={
         compact
-          ? "block h-[10.5rem] w-auto object-contain object-left sm:h-[14.5rem] md:h-[21rem]"
+          ? "block h-[7.875rem] w-auto object-contain object-left sm:h-[10.875rem] md:h-[15.75rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
       style={compact ? undefined : { width: "min(390px, 100%)" }}

@@ -8,7 +8,7 @@ export function TrendingAgents() {
 
   return (
     <section id="trending">
-      <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
+      <div className="mx-auto max-w-7xl px-6 py-20 md:py-28">
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
           <div>
             <h2 className="font-display text-4xl font-bold leading-tight md:text-5xl">
@@ -23,7 +23,7 @@ export function TrendingAgents() {
           </Link>
         </div>
 
-        <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-14 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {trending.map((agent) => (
             <AgentCard key={agent.id} agent={agent} />
           ))}

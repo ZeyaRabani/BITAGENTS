@@ -6,7 +6,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="group flex flex-col gap-3 border-2 border-grid bg-surface/40 p-4 transition hover:border-signal hover:bg-surface"
+      className="group flex flex-col gap-3 border-2 border-grid bg-surface/40 p-6 transition hover:border-signal hover:bg-surface"
     >
       <div className="flex items-center gap-3">
         <AgentAvatar seed={agent.avatarSeed} />
