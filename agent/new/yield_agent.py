@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import uuid
 from typing import Any, Optional
 
-from agent_tool_runner import run_tool_agent
+from agent_tool_runner import _reply_from_tool_result, execute_tool, run_tool_agent
 from hosted_llm import CAPIX_MODEL, DEFAULT_LLM_MODEL, use_capix
 from yield_ledger import (
     AGENT_TYPE,
@@ -27,14 +28,42 @@ from yield_protocols import (
     normalize_yield_type,
 )
 
-YIELD_MODEL = (
-    CAPIX_MODEL
-    if use_capix()
-    else os.environ.get(
-        "YIELD_MODEL",
-        os.environ.get("DCA_MODEL", os.environ.get("OPEN_ROUTER_MODEL", DEFAULT_LLM_MODEL)),
+def _openrouter_model_id(value: str) -> bool:
+    """OpenRouter ids look like vendor/model. Ollama tags such as llama3.2:latest do not."""
+    return bool(value) and "/" in value and " " not in value
+
+
+def resolve_yield_llm() -> tuple[str, Optional[str]]:
+    """Return (model, provider override). Provider is None when the global order applies."""
+    provider = os.environ.get("YIELD_LLM_PROVIDER", "").strip().lower()
+    if provider in ("ollama", "hosted"):
+        provider = "hosted_ollama"
+    if provider not in ("openrouter", "capix", "hosted_ollama"):
+        provider = ""
+
+    if provider == "openrouter":
+        candidate = (
+            os.environ.get("YIELD_MODEL", "").strip()
+            or os.environ.get("OPEN_ROUTER_MODEL", "").strip()
+        )
+        model = candidate if _openrouter_model_id(candidate) else "meta-llama/llama-3.3-70b-instruct"
+        return model, "openrouter"
+    if provider == "capix" or (not provider and use_capix()):
+        return CAPIX_MODEL, provider or None
+    if provider == "hosted_ollama":
+        return os.environ.get("YIELD_MODEL", "").strip() or os.environ.get(
+            "HOSTED_OLLAMA_MODEL", DEFAULT_LLM_MODEL
+        ), "hosted_ollama"
+    return (
+        os.environ.get(
+            "YIELD_MODEL",
+            os.environ.get("DCA_MODEL", os.environ.get("OPEN_ROUTER_MODEL", DEFAULT_LLM_MODEL)),
+        ),
+        None,
     )
-)
+
+
+YIELD_MODEL, YIELD_LLM_PROVIDER = resolve_yield_llm()
 
 MIN_ALLOCATE_SOL = float(os.environ.get("YIELD_MIN_ALLOCATE_SOL", "0.05") or "0.05")
 SOL_FEE_RESERVE = float(os.environ.get("YIELD_SOL_RESERVE", "0.03") or "0.03")
@@ -280,6 +309,9 @@ def invest_for_requirements(
     capital: float,
     duration_days: int,
     yield_type: str = "any",
+    *,
+    skip_deposit_ledger: bool = False,
+    force_protocol: Optional[str] = None,
 ) -> dict[str, Any]:
     """Compare the supported protocols, then deposit into Kamino or buy JLP when that venue can be entered."""
     from db import insert_yield_position, insert_yield_rebalance, upsert_yield_mandate
@@ -327,6 +359,21 @@ def invest_for_requirements(
         },
     )
     venue = comparison.get("best_to_execute") or {}
+    if (force_protocol or "").strip().lower() == "kamino":
+        venue = next(
+            (
+                row
+                for row in (comparison.get("ranked") or [])
+                if row.get("deposit_route") == "kamino_lend" and row.get("reserve")
+            ),
+            None,
+        ) or {}
+        if not venue:
+            return {
+                "error": "No Kamino SOL lending market was available to deposit into.",
+                "comparison": comparison,
+                "status": "compared",
+            }
     if venue.get("deposit_route"):
         return _invest_kamino_api(
             wallet,
@@ -336,6 +383,7 @@ def invest_for_requirements(
             venue,
             mandate,
             comparison,
+            skip_deposit_ledger=skip_deposit_ledger,
         )
     if not venue.get("mint"):
         return {
@@ -432,6 +480,25 @@ def invest_for_requirements(
     }
 
 
+def _send_kamino_transaction(wallet: str, build) -> dict[str, Any]:
+    """Build, sign, and confirm a Kamino transaction. Rebuild when the blockhash expires."""
+    from yield_protocol_apis import submit_protocol_transaction
+
+    last: dict[str, Any] = {"status": "failed", "error": "Kamino transaction failed."}
+    for attempt in range(1, 4):
+        built = build()
+        if built.get("error"):
+            return {**built, "status": "failed"}
+        sent = submit_protocol_transaction(wallet, str(built["transaction"]))
+        if sent.get("status") == "success" and sent.get("signature"):
+            return sent
+        last = sent
+        if not sent.get("retryable") or attempt == 3:
+            return sent
+        print(f"  Kamino transaction did not land (attempt {attempt}/3). Requesting a fresh one.")
+    return last
+
+
 def _invest_kamino_api(
     wallet: str,
     amount: float,
@@ -440,20 +507,59 @@ def _invest_kamino_api(
     venue: dict[str, Any],
     mandate: dict[str, Any],
     comparison: dict[str, Any],
+    *,
+    skip_deposit_ledger: bool = False,
 ) -> dict[str, Any]:
     from db import insert_yield_position, insert_yield_rebalance
+    from dca_agent import sol_rpc
     from yield_ledger import get_yield_wallet_pubkey
-    from yield_protocol_apis import build_kamino_deposit, submit_protocol_transaction
+    from yield_protocol_apis import build_kamino_deposit
 
     agent_wallet = get_yield_wallet_pubkey(wallet)
     if not agent_wallet:
         return {"error": "Yield agent wallet is not configured (Circle).", "comparison": comparison}
-    built = build_kamino_deposit(agent_wallet=agent_wallet, amount=amount, venue=venue)
-    if built.get("error"):
-        return {**built, "comparison": comparison, "status": "compared"}
-    sent = submit_protocol_transaction(wallet, str(built["transaction"]))
+    if not skip_deposit_ledger:
+        spend = check_yield_can_spend(wallet, amount, token=asset_norm)
+        if spend.get("error"):
+            return {
+                "status": "needs_deposit",
+                "mandate": mandate,
+                "comparison": comparison,
+                "error": spend["error"],
+                "available": spend.get("available"),
+            }
+    try:
+        lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
+        sol_balance = lamports / 1e9
+        if sol_balance - amount < SOL_FEE_RESERVE - 1e-12:
+            return {
+                "error": (
+                    f"Deposit of {amount:.6f} SOL would leave only "
+                    f"{max(0.0, sol_balance - amount):.6f} SOL for fees. "
+                    f"Keep at least {SOL_FEE_RESERVE} SOL idle in the Circle wallet."
+                ),
+                "comparison": comparison,
+                "status": "compared",
+            }
+    except Exception as exc:
+        return {"error": f"Could not read the Circle wallet balance: {exc}", "comparison": comparison}
+
+    sent = _send_kamino_transaction(
+        wallet,
+        lambda: build_kamino_deposit(agent_wallet=agent_wallet, amount=amount, venue=venue),
+    )
     if sent.get("error") or sent.get("status") in ("failed", "error"):
-        return {"error": sent.get("error") or "Kamino deposit failed.", "comparison": comparison}
+        signature = sent.get("signature")
+        return {
+            "error": (
+                sent.get("error")
+                or "Kamino deposit failed. No SOL left the Circle wallet."
+            ),
+            "signature": signature,
+            "explorer_url": sent.get("explorer_url"),
+            "comparison": comparison,
+            "status": "failed",
+        }
     signature = sent.get("signature")
     explorer = sent.get("explorer_url")
     pos_id = uuid.uuid4().hex[:16]
@@ -510,7 +616,7 @@ def _invest_kamino_api(
         "message": (
             f"Deposited {amount} SOL for {duration} days into Kamino Finance {kind}"
             + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
-            + " through the Kamino API."
+            + f" through the Kamino API. Confirmed transaction: {explorer or signature}."
         ),
     }
 
@@ -549,7 +655,7 @@ def _compared_message(
 def _unwind_kamino(wallet: str, pos: dict[str, Any]) -> dict[str, Any]:
     from db import insert_yield_rebalance, update_yield_position
     from yield_ledger import get_yield_wallet_pubkey
-    from yield_protocol_apis import build_kamino_withdraw, submit_protocol_transaction
+    from yield_protocol_apis import build_kamino_withdraw
 
     amount = float(pos.get("amount") or 0)
     if amount <= 0:
@@ -561,12 +667,16 @@ def _unwind_kamino(wallet: str, pos: dict[str, Any]) -> dict[str, Any]:
         venue = {"deposit_route": "kamino_vault", "kvault": pos.get("mint")}
     else:
         venue = {"deposit_route": "kamino_lend", "reserve": pos.get("mint")}
-    built = build_kamino_withdraw(agent_wallet=agent_wallet, amount=amount, venue=venue)
-    if built.get("error"):
-        return built
-    sent = submit_protocol_transaction(wallet, str(built["transaction"]))
+    sent = _send_kamino_transaction(
+        wallet,
+        lambda: build_kamino_withdraw(agent_wallet=agent_wallet, amount=amount, venue=venue),
+    )
     if sent.get("error") or sent.get("status") in ("failed", "error"):
-        return {"error": sent.get("error") or "Kamino withdraw failed."}
+        return {
+            "error": sent.get("error") or "Kamino withdraw failed. SOL was not returned.",
+            "signature": sent.get("signature"),
+            "explorer_url": sent.get("explorer_url"),
+        }
     signature = sent.get("signature")
     explorer = sent.get("explorer_url")
     record_yield_credit(
@@ -964,13 +1074,77 @@ TOOL_REGISTRY = {
 }
 
 
+_GARBAGE_REPLY = re.compile(r"\\boxed\{|the final answer is", re.IGNORECASE)
+
+
+def _yield_type_from_text(text: str) -> str:
+    lower = text.lower()
+    if "vault" in lower:
+        return "liquidity_vault"
+    if "jlp" in lower or "jupiter" in lower:
+        return "jlp"
+    if "insurance" in lower:
+        return "insurance"
+    if any(word in lower for word in ("lending", "kamino", "save", "marginfi", "drift")):
+        return "lending"
+    return "any"
+
+
+def _direct_yield_call(text: str) -> Optional[tuple[str, dict[str, Any]]]:
+    """Run clear invest and compare requests without waiting for a tool-calling model."""
+    raw = (text or "").strip()
+    lower = raw.lower()
+    if not lower:
+        return None
+    amount = re.search(r"(\d+(?:\.\d+)?)\s*sol\b", lower)
+    days = re.search(r"(\d+)\s*days?\b", lower)
+    yield_type = _yield_type_from_text(lower)
+    wants_invest = bool(re.search(r"\binvest\b", lower))
+    wants_compare = bool(re.search(r"\b(compare|comparison|yields|apy|rates)\b", lower))
+
+    if wants_invest and amount:
+        return (
+            "invest",
+            {
+                "asset": "SOL",
+                "capital": float(amount.group(1)),
+                "duration_days": int(days.group(1)) if days else 30,
+                "yield_type": yield_type,
+            },
+        )
+    if wants_compare and not wants_invest:
+        return "compare_yields", {"yield_type": yield_type, "limit": 8}
+    if re.search(r"\b(portfolio|positions|balance)\b", lower):
+        return "get_portfolio", {}
+    if re.search(r"\bunwind\b", lower):
+        return "unwind", {}
+    if re.search(r"\brebalance\b", lower):
+        return "rebalance", {}
+    return None
+
+
 def run_yield_agent(
     user_input: str,
     conversation_history: list,
     user_wallet: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
-    return run_tool_agent(
+    direct = _direct_yield_call(user_input)
+    if direct:
+        name, args = direct
+        result = execute_tool(
+            name,
+            args,
+            TOOL_REGISTRY,
+            user_wallet=user_wallet,
+            session_id=session_id,
+        )
+        reply = _reply_from_tool_result([{"tool": name, "args": args, "result": result}])
+        conversation_history.append({"role": "user", "content": user_input.strip()})
+        conversation_history.append({"role": "assistant", "content": reply})
+        return reply, conversation_history, [{"tool": name, "args": args, "result": result}]
+
+    reply, conversation_history, actions = run_tool_agent(
         user_input,
         conversation_history,
         system_prompt=SYSTEM_PROMPT,
@@ -978,10 +1152,19 @@ def run_yield_agent(
         tool_registry=TOOL_REGISTRY,
         model=YIELD_MODEL,
         app_suffix="yield",
+        provider=YIELD_LLM_PROVIDER,
         user_wallet=user_wallet,
         session_id=session_id,
         max_rounds=8,
     )
+    if not actions and _GARBAGE_REPLY.search(reply or ""):
+        reply = (
+            "I could not run that. Ask to compare lending yields for SOL, "
+            "or invest an amount of SOL in Kamino for a number of days."
+        )
+        if conversation_history and conversation_history[-1].get("role") == "assistant":
+            conversation_history[-1]["content"] = reply
+    return reply, conversation_history, actions
 
 
 def get_yield_dashboard(user_wallet: str) -> dict[str, Any]:

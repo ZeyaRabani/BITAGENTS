@@ -92,6 +92,30 @@ export function YieldAgentConsole() {
     }
   }
 
+  async function onTestKamino() {
+    if (!token) return;
+    setInvestBusy(true);
+    setError(null);
+    setInvestNote(null);
+    try {
+      const result = await investYieldCapital(token, {
+        asset: "SOL",
+        capital: 0.05,
+        duration_days: 2,
+        yield_type: "lending",
+        skip_deposit_ledger: true,
+        force_protocol: "kamino",
+      });
+      setInvestNote(result.message ?? "Kamino test deposit sent.");
+      const dash = await fetchYieldDashboard(token);
+      if (dash) setDashboard(dash);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Kamino test failed");
+    } finally {
+      setInvestBusy(false);
+    }
+  }
+
   async function onInvest(e: FormEvent) {
     e.preventDefault();
     if (!token) return;
@@ -234,6 +258,20 @@ export function YieldAgentConsole() {
           </button>
         </form>
         {investNote && <p className="mt-3 font-mono text-[11px] text-signal">{investNote}</p>}
+        <div className="mt-4 border-t border-grid pt-4">
+          <button
+            type="button"
+            disabled={!token || investBusy}
+            onClick={() => void onTestKamino()}
+            className="border border-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
+          >
+            {investBusy ? "Sending…" : "Test Kamino yield · 0.05 SOL"}
+          </button>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Uses 0.05 SOL already in the Circle wallet for 2 days of Kamino lending. This does not
+            check a verified deposit.
+          </p>
+        </div>
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-3">

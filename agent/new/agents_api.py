@@ -187,6 +187,7 @@ from volume_ledger import (
     withdraw_volume_tokens,
 )
 from yield_agent import (
+    YIELD_LLM_PROVIDER,
     YIELD_MODEL,
     YIELD_SCHEDULER_POLL_SECONDS,
     get_yield_dashboard,
@@ -1454,7 +1455,7 @@ def yield_health() -> dict[str, Any]:
         "status": "ok",
         "agent": "Yield Agent",
         "model": YIELD_MODEL,
-        "llm": llm_provider(),
+        "llm": YIELD_LLM_PROVIDER or llm_provider(),
         "llm_configured": llm_configured(),
         "auth_required": True,
         "cluster": SOLANA_CLUSTER,
@@ -1521,6 +1522,8 @@ class YieldInvestRequest(BaseModel):
     capital: float
     duration_days: int = 30
     yield_type: str = "any"
+    skip_deposit_ledger: bool = False
+    force_protocol: Optional[str] = None
 
 
 @app.post("/yield/invest")
@@ -1534,6 +1537,8 @@ def yield_invest(
         body.capital,
         body.duration_days,
         body.yield_type,
+        skip_deposit_ledger=body.skip_deposit_ledger,
+        force_protocol=body.force_protocol,
     )
     if result.get("error") and result.get("status") not in ("compared", "needs_deposit"):
         raise HTTPException(status_code=400, detail=result["error"])

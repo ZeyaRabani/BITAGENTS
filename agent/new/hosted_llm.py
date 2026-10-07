@@ -736,9 +736,31 @@ def call_llm(
     tools: Optional[list] = None,
     temperature: float = 0.2,
     app_suffix: str = "",
+    provider: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Primary LLM entry: CapIX → hosted Ollama → OpenRouter."""
-    if use_capix():
+    """Primary LLM entry: CapIX → hosted Ollama → OpenRouter.
+
+    Pass provider to override that order for one agent (openrouter, capix, hosted_ollama).
+    """
+    selected = (provider or "").strip().lower()
+    if selected in ("ollama", "hosted"):
+        selected = "hosted_ollama"
+    if selected == "openrouter":
+        return call_openrouter(
+            messages,
+            model=model,
+            tools=tools,
+            temperature=temperature,
+            app_suffix=app_suffix,
+        )
+    if selected == "hosted_ollama":
+        return call_hosted_ollama(
+            messages,
+            model=model or HOSTED_OLLAMA_MODEL,
+            tools=tools,
+            temperature=temperature,
+        )
+    if selected == "capix" or (not selected and use_capix()):
         return call_capix(
             messages,
             model=resolve_capix_model(model),

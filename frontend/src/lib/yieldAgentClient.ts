@@ -93,7 +93,14 @@ export type YieldInvestResult = {
 
 export async function investYieldCapital(
   authToken: string,
-  body: { asset: string; capital: number; duration_days: number; yield_type: string }
+  body: {
+    asset: string;
+    capital: number;
+    duration_days: number;
+    yield_type: string;
+    skip_deposit_ledger?: boolean;
+    force_protocol?: string;
+  }
 ): Promise<YieldInvestResult> {
   const res = await fetch("/api/agents/yield/invest", {
     method: "POST",

@@ -443,35 +443,63 @@ def build_kamino_withdraw(
 
 
 def submit_protocol_transaction(user_wallet: str, tx_b64: str) -> dict[str, Any]:
-    """Sign a protocol-built transaction with the yield wallet and send it."""
+    """Sign a protocol-built transaction with the yield wallet, send it, and wait until it lands.
+
+    Kamino returns a transaction that already contains a blockhash. Circle signing can
+    outlast that blockhash. sendTransaction still returns a signature in that case, so
+    success is only reported after the signature is confirmed on-chain.
+    """
     from circle_dca_wallets import circle_sign_raw_transaction, resolve_agent_signing_context
-    from dca_agent import sol_rpc
+    from dca_agent import _confirm_transaction, _is_blockhash_error, sol_rpc
 
     signing = resolve_agent_signing_context(user_wallet, "yield")
     wallet_id = signing.get("wallet_id") if signing.get("mode") == "circle" else None
     keypair = signing.get("keypair") if signing.get("mode") == "local" else None
-    if wallet_id:
-        encoded = circle_sign_raw_transaction(str(wallet_id), tx_b64)
-    elif keypair:
-        encoded = _sign_local(tx_b64, keypair)
-    else:
-        return {"error": "Yield wallet is not configured (Circle)."}
-    signature = sol_rpc(
-        "sendTransaction",
-        [
-            encoded,
-            {
-                "encoding": "base64",
-                "skipPreflight": True,
-                "preflightCommitment": "confirmed",
-                "maxRetries": 5,
-            },
-        ],
-    )
+    try:
+        if wallet_id:
+            encoded = circle_sign_raw_transaction(str(wallet_id), tx_b64)
+        elif keypair:
+            encoded = _sign_local(tx_b64, keypair)
+        else:
+            return {"status": "failed", "error": "Yield wallet is not configured (Circle)."}
+        signature = sol_rpc(
+            "sendTransaction",
+            [
+                encoded,
+                {
+                    "encoding": "base64",
+                    "skipPreflight": True,
+                    "preflightCommitment": "confirmed",
+                    "maxRetries": 5,
+                },
+            ],
+        )
+    except Exception as exc:
+        text = str(exc)
+        return {
+            "status": "failed",
+            "error": text,
+            "retryable": _is_blockhash_error(text),
+        }
+
+    if not signature:
+        return {"status": "failed", "error": "RPC did not return a transaction signature.", "retryable": True}
+
+    confirm = _confirm_transaction(str(signature), timeout_s=75, encoded_tx=encoded)
+    explorer = f"https://solscan.io/tx/{signature}"
+    if not confirm.get("confirmed"):
+        err = confirm.get("error") or "Transaction did not confirm"
+        return {
+            "status": "failed",
+            "error": str(err),
+            "signature": signature,
+            "explorer_url": explorer,
+            "retryable": bool(confirm.get("retryable")) or _is_blockhash_error(err),
+        }
     return {
         "status": "success",
         "signature": signature,
-        "explorer_url": f"https://solscan.io/tx/{signature}",
+        "explorer_url": explorer,
     }
 
 

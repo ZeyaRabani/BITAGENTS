@@ -12,6 +12,8 @@ export async function POST(request: NextRequest) {
       capital?: number;
       duration_days?: number;
       yield_type?: string;
+      skip_deposit_ledger?: boolean;
+      force_protocol?: string;
     };
     const res = await proxyYieldInvest(
       {
@@ -19,6 +21,8 @@ export async function POST(request: NextRequest) {
         capital: Number(body.capital),
         duration_days: Number(body.duration_days || 30),
         yield_type: String(body.yield_type || "any"),
+        skip_deposit_ledger: Boolean(body.skip_deposit_ledger),
+        force_protocol: body.force_protocol ? String(body.force_protocol) : undefined,
       },
       authToken
     );
