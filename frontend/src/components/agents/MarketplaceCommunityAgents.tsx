@@ -12,8 +12,11 @@ import { fetchVisibleCustomAgents, type LaunchedAgentRecord } from "@/lib/launch
  * section header can show "N listed" without a second fetch.
  *
  * Launched agents store a free-text category (set by the builder LLM), not
- * the fixed AgentCategory enum Verified agents use, so the category filter
- * matches case-insensitively instead of requiring an exact enum match. */
+ * the fixed AgentCategory enum Verified agents use -- in practice the LLM
+ * writes variants like "Monitoring" for the enum value "Monitor", so the
+ * filter checks either string contains the other (case-insensitive)
+ * instead of requiring an exact match, which would silently hide agents
+ * with a plausible but non-identical category label. */
 export function MarketplaceCommunityAgents({
   category,
   onCount,
@@ -33,13 +36,14 @@ export function MarketplaceCommunityAgents({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const filtered = useMemo(
-    () =>
-      agents.filter(
-        (agent) => !category || agent.category?.toLowerCase() === category.toLowerCase()
-      ),
-    [agents, category]
-  );
+  const filtered = useMemo(() => {
+    if (!category) return agents;
+    const target = category.toLowerCase();
+    return agents.filter((agent) => {
+      const agentCategory = agent.category?.toLowerCase();
+      return !!agentCategory && (agentCategory.includes(target) || target.includes(agentCategory));
+    });
+  }, [agents, category]);
 
   useEffect(() => {
     if (loaded) onCount?.(filtered.length);

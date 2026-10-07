@@ -11,9 +11,9 @@ import type { LaunchedAgentRecord } from "@/lib/launchpadBuilderClient";
 export function LiveAgentCard({ agent }: { agent: LaunchedAgentRecord }) {
   return (
     <Link href={`/agents/custom/${agent.id}`} className="block h-full">
-      <article className="group flex h-full flex-col border border-grid bg-surface/40 p-5 transition hover:border-signal/60 hover:bg-surface/70">
+      <article className="group flex h-full flex-col border-2 border-grid bg-surface/40 p-5 transition hover:border-signal/60 hover:bg-surface/70">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex h-10 w-10 items-center justify-center border border-grid bg-background/80 text-signal">
+          <div className="flex h-10 w-10 items-center justify-center border-2 border-grid bg-background/80 text-signal">
             <Bell size={18} strokeWidth={1.75} />
           </div>
           {agent.status === "testing" && (
@@ -32,7 +32,7 @@ export function LiveAgentCard({ agent }: { agent: LaunchedAgentRecord }) {
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{agent.description}</p>
 
         <div className="mt-auto pt-5">
-          <span className="inline-flex w-full items-center justify-between border border-grid bg-background/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
+          <span className="inline-flex w-full items-center justify-between border-2 border-grid bg-background/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
             Configure agent
             <ArrowRight size={14} />
           </span>

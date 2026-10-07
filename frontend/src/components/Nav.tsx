@@ -17,7 +17,7 @@ const marketingLinks = [
 ];
 
 const navLinkBase =
-  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition border";
+  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition border-2";
 
 function appLinkClass(active: boolean) {
   return active
@@ -31,7 +31,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 border-b border-grid bg-background/80 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b-2 border-grid bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
           <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />

@@ -26,7 +26,7 @@ export function AgentMarketplace() {
         <button
           type="button"
           onClick={() => setCategory(null)}
-          className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+          className={`border-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
             category === null
               ? "border-signal bg-signal/10 text-signal"
               : "border-grid text-muted-foreground hover:border-signal/40 hover:text-foreground"
@@ -39,7 +39,7 @@ export function AgentMarketplace() {
             key={cat}
             type="button"
             onClick={() => setCategory(cat)}
-            className={`border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+            className={`border-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
               category === cat
                 ? "border-signal bg-signal/10 text-signal"
                 : "border-grid text-muted-foreground hover:border-signal/40 hover:text-foreground"

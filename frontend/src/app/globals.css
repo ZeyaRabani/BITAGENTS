@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800&family=Archivo+Black&display=swap");
 @import "tailwindcss";
 @source "../src";
 @import "tw-animate-css";
@@ -36,8 +36,8 @@
   --color-destructive: var(--destructive);
 
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-sans: "Inter", ui-sans-serif, system-ui;
-  --font-display: "Space Grotesk", "Inter", sans-serif;
+  --font-sans: "Archivo", ui-sans-serif, system-ui;
+  --font-display: "Archivo Black", "Archivo", sans-serif;
 }
 
 /* =========================================================
@@ -45,7 +45,7 @@
    ========================================================= */
 
 :root {
-  --radius: 0.25rem;
+  --radius: 0rem;
 
   --background: #0c0a09;
   --foreground: #f5efe6;
