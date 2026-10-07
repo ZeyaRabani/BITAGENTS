@@ -92,30 +92,6 @@ export function YieldAgentConsole() {
     }
   }
 
-  async function onTestKamino() {
-    if (!token) return;
-    setInvestBusy(true);
-    setError(null);
-    setInvestNote(null);
-    try {
-      const result = await investYieldCapital(token, {
-        asset: "SOL",
-        capital: 0.05,
-        duration_days: 2,
-        yield_type: "lending",
-        skip_deposit_ledger: true,
-        force_protocol: "kamino",
-      });
-      setInvestNote(result.message ?? "Kamino test deposit sent.");
-      const dash = await fetchYieldDashboard(token);
-      if (dash) setDashboard(dash);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Kamino test failed");
-    } finally {
-      setInvestBusy(false);
-    }
-  }
-
   async function onInvest(e: FormEvent) {
     e.preventDefault();
     if (!token) return;
@@ -165,10 +141,9 @@ export function YieldAgentConsole() {
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
-          Send SOL to your Circle yield wallet. Pick a yield type and the agent ranks Kamino,
-          Jupiter JLP, MarginFi, Drift, and Save. Kamino lending and vaults are deposited through
-          the Kamino API. JLP is bought through Jupiter. Save is ranked from its API. MarginFi
-          and Drift have no deposit API, so those winners stay idle. Not financial advice.
+          Send SOL to your Circle yield wallet, then ask in chat or use the form. The agent
+          deposits into Kamino, Jupiter JLP, or Save. Name a protocol to use that one, or
+          leave the yield type on Any and it deposits into the best match. Not financial advice.
         </p>
       </div>
 
@@ -258,20 +233,6 @@ export function YieldAgentConsole() {
           </button>
         </form>
         {investNote && <p className="mt-3 font-mono text-[11px] text-signal">{investNote}</p>}
-        <div className="mt-4 border-t border-grid pt-4">
-          <button
-            type="button"
-            disabled={!token || investBusy}
-            onClick={() => void onTestKamino()}
-            className="border border-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
-          >
-            {investBusy ? "Sending…" : "Test Kamino yield · 0.05 SOL"}
-          </button>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Uses 0.05 SOL already in the Circle wallet for 2 days of Kamino lending. This does not
-            check a verified deposit.
-          </p>
-        </div>
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-3">

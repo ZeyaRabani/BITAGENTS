@@ -1528,6 +1528,33 @@ def _is_confirmation_timeout(err: Any) -> bool:
     )
 
 
+def _simulation_error(encoded: str) -> Optional[str]:
+    """Return a program error from a local simulation, or None when the tx looks sendable."""
+    try:
+        result = sol_rpc(
+            "simulateTransaction",
+            [
+                encoded,
+                {
+                    "encoding": "base64",
+                    "sigVerify": False,
+                    "replaceRecentBlockhash": True,
+                    "commitment": "processed",
+                },
+            ],
+        )
+    except Exception:
+        return None
+    value = (result or {}).get("value") or {}
+    if not value.get("err"):
+        return None
+    logs = value.get("logs") or []
+    for line in reversed(logs):
+        if "Error" in line or "failed" in line:
+            return str(line)
+    return str(value.get("err"))
+
+
 def _send_signed_transaction(
     keypair: Optional["Keypair"],
     instructions: list,
@@ -1569,8 +1596,8 @@ def _send_signed_transaction(
 
     last_error: Any = None
     for attempt in range(1, max(1, int(retries)) + 1):
-        # Finalized lasts longer across Circle round-trips; confirmed is fine for local sign.
-        commitment = "finalized" if circle_wallet_id else "confirmed"
+        # Confirmed is newer than finalized, so more of the blockhash lifetime is left for Circle signing.
+        commitment = "confirmed"
         try:
             blockhash_resp = sol_rpc("getLatestBlockhash", [{"commitment": commitment}])
             value = blockhash_resp["value"]
@@ -1600,6 +1627,13 @@ def _send_signed_transaction(
                 continue
             return {"error": f"Transaction signing failed: {e}"}
 
+        sim_err = _simulation_error(encoded)
+        if sim_err:
+            return {
+                "status": "failed",
+                "error": f"The transaction would fail on chain, so nothing was sent. {sim_err}",
+            }
+
         send_opts: dict[str, Any] = {
             "encoding": "base64",
             # Preflight simulation often fails with "Blockhash not found" on lagging RPCs
@@ -1621,13 +1655,23 @@ def _send_signed_transaction(
                 continue
             return {"error": f"sendTransaction failed: {e}"}
 
-        confirm = _confirm_transaction(sig)
+        confirm = _confirm_transaction(sig, timeout_s=45, encoded_tx=encoded)
         if not confirm["confirmed"]:
             err = confirm.get("error", "unknown")
-            if _is_blockhash_error(err) and attempt < retries:
-                print(f"  ⚠️  Tx expired before confirm (attempt {attempt}/{retries}), retrying…")
+            retryable = (
+                bool(confirm.get("retryable"))
+                or _is_blockhash_error(err)
+                or _is_confirmation_timeout(err)
+            )
+            if retryable and attempt < retries:
+                print(f"  ⚠️  Tx did not land (attempt {attempt}/{retries}), signing a fresh one…")
                 time.sleep(0.35 * attempt)
                 continue
+            if _is_confirmation_timeout(err):
+                return {
+                    "status": "failed",
+                    "error": "The transaction never landed, so no SOL left the Circle wallet. Try again.",
+                }
             return {"status": "failed", "signature": sig, "error": err}
 
         explorer_cluster = "mainnet" if _is_mainnet() else "devnet"

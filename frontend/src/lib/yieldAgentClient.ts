@@ -91,6 +91,27 @@ export type YieldInvestResult = {
   duration_days?: number;
 };
 
+function readInvestError(data: { detail?: unknown; error?: unknown }): string {
+  const detail = data.detail;
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg: unknown }).msg);
+        }
+        return "";
+      })
+      .filter(Boolean);
+    if (parts.length) return parts.join("; ");
+  }
+  if (detail && typeof detail === "object") return JSON.stringify(detail);
+  if (typeof data.error === "string" && data.error.trim()) return data.error;
+  if (data.error) return JSON.stringify(data.error);
+  return "Invest failed";
+}
+
 export async function investYieldCapital(
   authToken: string,
   body: {
@@ -110,10 +131,9 @@ export async function investYieldCapital(
     },
     body: JSON.stringify(body),
   });
-  const data = (await res.json()) as YieldInvestResult & { detail?: string };
+  const data = (await res.json()) as YieldInvestResult & { detail?: unknown };
   if (!res.ok) {
-    const detail = typeof data.detail === "string" ? data.detail : data.error ?? "Invest failed";
-    throw new Error(detail);
+    throw new Error(readInvestError(data));
   }
   if (data.error) {
     throw new Error(data.error);
@@ -152,23 +172,20 @@ export const YIELD_TYPES = [
   { id: "lending", label: "Lending" },
   { id: "liquidity_vault", label: "Liquidity vault" },
   { id: "jlp", label: "JLP" },
-  { id: "insurance", label: "Insurance fund" },
 ] as const;
 
 export const YIELD_TYPE_HELP: Record<(typeof YIELD_TYPES)[number]["id"], string> = {
-  any: "Any ranks Kamino, Jupiter, MarginFi, Drift, and Save. If Kamino wins, the agent deposits through the Kamino API. If JLP wins, it swaps through Jupiter. Save is ranked only. MarginFi and Drift have no deposit API, so those winners stay idle.",
+  any: "Any ranks Kamino, Jupiter, and Save, then deposits into the best match. Kamino uses its API. Jupiter buys JLP. Save deposits into SOL lending.",
   lending:
-    "Lending ranks Kamino, Save, MarginFi, and Drift SOL markets. A Kamino winner is deposited through https://api.kamino.finance. Save is ranked from its public API and is not deposited. MarginFi and Drift have no deposit API.",
+    "Lending ranks Kamino and Save SOL markets and deposits into the one with the better rate.",
   liquidity_vault:
     "Liquidity vault deposits SOL into the best Kamino vault through the Kamino API (https://api.kamino.finance).",
   jlp: "JLP sends deposited SOL from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token.",
-  insurance:
-    "Insurance looks at Drift's insurance fund. Drift does not publish a deposit API (https://docs.drift.trade/developers/data-api), so the balance stays idle.",
 };
 
 export const YIELD_EXAMPLE_PROMPTS = [
   "Compare lending yields for SOL",
   "Invest 0.1 SOL in Jupiter JLP for 30 days",
+  "Invest 0.05 SOL in Save for 2 days",
   "Find the best Kamino liquidity vault for 90 days",
-  "Unwind my position back to SOL",
 ] as const;

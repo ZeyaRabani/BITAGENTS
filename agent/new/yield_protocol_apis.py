@@ -1,9 +1,8 @@
-"""Live yield APIs for Kamino, Save, Drift, and MarginFi.
+"""Live yield APIs for Kamino and Save.
 
 Jupiter JLP stays on the existing swap path. Kamino lending and vault deposits
 are built by the Kamino transaction API and signed by the Circle yield wallet.
-Save publishes reserve data we turn into a supply APY. MarginFi and Drift do
-not publish a deposit API, so they are reported with their docs URLs.
+Save SOL lending deposits are built in this agent and signed by Circle.
 """
 
 from __future__ import annotations
@@ -21,7 +20,6 @@ _USER_AGENT = "BITAGENTS-YieldAgent/1.0"
 
 KAMINO_API_URL = os.environ.get("KAMINO_API_URL", "https://api.kamino.finance").rstrip("/")
 SAVE_API_URL = os.environ.get("SAVE_API_URL", "https://api.save.finance").rstrip("/")
-DRIFT_DATA_API_URL = os.environ.get("DRIFT_DATA_API_URL", "https://data.velocity.exchange").rstrip("/")
 
 PROTOCOL_DOCS = {
     "kamino": {
@@ -42,28 +40,10 @@ PROTOCOL_DOCS = {
         "api_url": SAVE_API_URL,
         "signup_url": "https://dev.solend.fi/docs/api/",
         "key_required": False,
-        "note": "Public reserves API. It has rates, not a hosted deposit transaction.",
-    },
-    "drift": {
-        "name": "Drift Protocol",
-        "docs_url": "https://docs.drift.trade/developers/data-api",
-        "sdk_url": "https://docs.drift.trade/developers/drift-sdk",
-        "api_url": DRIFT_DATA_API_URL,
-        "signup_url": "https://docs.drift.trade/developers/data-api",
-        "key_required": False,
         "note": (
-            "The old host data.api.drift.trade no longer resolves. The data API is "
-            "https://data.velocity.exchange and does not build lending or insurance-fund deposits. "
-            "Those use the Drift SDK."
+            "SOL lending deposits are built in the Python agent and signed by the Circle wallet. "
+            "The rates API is https://api.save.finance."
         ),
-    },
-    "marginfi": {
-        "name": "MarginFi",
-        "docs_url": "https://docs.marginfi.com/ts-sdk",
-        "sdk_url": "https://docs.marginfi.com/sdks",
-        "signup_url": "https://docs.marginfi.com/ts-sdk",
-        "key_required": False,
-        "note": "MarginFi does not publish a REST yield or deposit API. Integration is the TypeScript SDK.",
     },
 }
 
@@ -100,17 +80,7 @@ def protocol_api_status() -> dict[str, Any]:
         "save": {
             **PROTOCOL_DOCS["save"],
             "configured": True,
-            "can_deposit": False,
-        },
-        "drift": {
-            **PROTOCOL_DOCS["drift"],
-            "configured": True,
-            "can_deposit": False,
-        },
-        "marginfi": {
-            **PROTOCOL_DOCS["marginfi"],
-            "configured": False,
-            "can_deposit": False,
+            "can_deposit": True,
         },
     }
 
@@ -300,7 +270,8 @@ def _save_rows() -> list[dict[str, Any]]:
                 "apy": round(apy, 3),
                 "score": round(apy, 3),
                 "tvl_usd": round((supplied + borrowed) * 150, 0),
-                "executable": False,
+                "executable": True,
+                "deposit_route": "save_lend",
                 "source": "save_api",
                 "docs_url": PROTOCOL_DOCS["save"]["docs_url"],
             }

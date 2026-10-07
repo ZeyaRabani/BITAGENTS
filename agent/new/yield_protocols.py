@@ -1,4 +1,4 @@
-"""Solana yield comparison for Kamino, Jupiter JLP, MarginFi, Drift, and Save."""
+"""Solana yield comparison for Kamino, Jupiter JLP, and Save."""
 
 from __future__ import annotations
 
@@ -12,8 +12,7 @@ JLP_MINT = "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4"
 DEFILLAMA_POOLS_URL = "https://yields.llama.fi/pools"
 CACHE_TTL_SECONDS = 120
 
-# Live Jupiter swap. Lending, Kamino vaults, and Drift insurance are ranked,
-# then left idle because those positions are protocol deposits, not a token swap.
+# Jupiter JLP is a swap. Kamino and Save are protocol deposits signed by Circle.
 JLP_VENUE = {
     "protocol_id": "jlp",
     "protocol_name": "Jupiter",
@@ -29,7 +28,6 @@ YIELD_TYPES = {
     "lending": "Lending markets",
     "liquidity_vault": "Kamino liquidity vaults",
     "jlp": "Jupiter JLP liquidity provision",
-    "insurance": "Drift insurance fund",
 }
 
 # project slug -> protocol. Exact slugs avoid liquid-staking lookalikes
@@ -46,24 +44,6 @@ PROTOCOL_BY_PROJECT = {
         "protocol_name": "Kamino Finance",
         "yield_type": "liquidity_vault",
         "kind": "liquidity_vault",
-    },
-    "marginfi": {
-        "protocol_id": "marginfi",
-        "protocol_name": "MarginFi",
-        "yield_type": "lending",
-        "kind": "lending",
-    },
-    "drift": {
-        "protocol_id": "drift",
-        "protocol_name": "Drift Protocol",
-        "yield_type": "lending",
-        "kind": "lending",
-    },
-    "drift-insurance": {
-        "protocol_id": "drift-insurance",
-        "protocol_name": "Drift Protocol",
-        "yield_type": "insurance",
-        "kind": "insurance",
     },
     "save": {
         "protocol_id": "save",
@@ -87,8 +67,6 @@ _YIELD_TYPE_ALIASES = {
     "jlp": "jlp",
     "jupiter": "jlp",
     "liquidity_provision": "jlp",
-    "insurance": "insurance",
-    "insurance_fund": "insurance",
 }
 
 _cache: dict[str, Any] = {"ts": 0.0, "pools": []}
@@ -134,8 +112,6 @@ def _match_protocol(pool: dict[str, Any]) -> Optional[dict[str, Any]]:
     project = str(pool.get("project") or "").strip().lower()
     if project in PROTOCOL_BY_PROJECT:
         return PROTOCOL_BY_PROJECT[project]
-    if project.startswith("marginfi"):
-        return PROTOCOL_BY_PROJECT["marginfi"]
     symbol = str(pool.get("symbol") or "").strip().upper().replace(" ", "").replace("-", "")
     if symbol == "JLP" and project.startswith("jupiter") and "staked" not in project and "lend" not in project:
         return {
@@ -189,9 +165,6 @@ def _coverage(rows: list[dict[str, Any]], yield_type: str = "any") -> list[dict[
         ("kamino", "Kamino Finance", "lending"),
         ("kamino-vault", "Kamino Finance", "liquidity_vault"),
         ("jlp", "Jupiter", "jlp"),
-        ("marginfi", "MarginFi", "lending"),
-        ("drift", "Drift Protocol", "lending"),
-        ("drift-insurance", "Drift Protocol", "insurance"),
         ("save", "Save Finance", "lending"),
     ]
     out = []
@@ -205,11 +178,7 @@ def _coverage(rows: list[dict[str, Any]], yield_type: str = "any") -> list[dict[
             "yield_type": kind,
             "markets": markets,
         }
-        if markets == 0 and protocol_id == "marginfi":
-            item["note"] = "No REST yield API. Docs: https://docs.marginfi.com/ts-sdk"
-        elif markets == 0 and protocol_id in ("drift", "drift-insurance"):
-            item["note"] = "No deposit API. Docs: https://docs.drift.trade/developers/data-api"
-        elif markets == 0 and protocol_id != "jlp":
+        if markets == 0 and protocol_id != "jlp":
             item["note"] = "No live pool in the yield feed right now."
         out.append(item)
     return out
@@ -259,7 +228,7 @@ def _with_protocol_apis(rows: list[dict[str, Any]], yield_type: str) -> tuple[li
 
 
 def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str, Any]:
-    """Rank the supported protocols. Kamino deposits use its API. JLP uses Jupiter."""
+    """Rank Kamino, Jupiter JLP, and Save. Deposits follow the winning route."""
     ytype = normalize_yield_type(yield_type)
     markets: list[dict[str, Any]] = []
     jlp_apy = None
@@ -292,10 +261,8 @@ def compare_solana_yields(limit: int = 12, yield_type: str = "any") -> dict[str,
         "protocol_api_errors": (api_payload or {}).get("errors") or {},
         "note": (
             "Kamino lending and liquidity vaults deposit through https://api.kamino.finance. "
-            "Save rates come from https://api.save.finance. "
-            "Jupiter JLP is still a Jupiter swap. "
-            "MarginFi has no REST API (https://docs.marginfi.com/ts-sdk). "
-            "Drift's data API does not build deposits (https://docs.drift.trade/developers/data-api)."
+            "Save SOL lending deposits are built in the agent and signed by Circle. "
+            "Jupiter JLP is a Jupiter swap."
         ),
     }
 

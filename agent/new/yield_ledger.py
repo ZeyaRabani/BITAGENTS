@@ -50,7 +50,7 @@ def get_yield_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, 
         "allowed_tokens": sorted(ALLOWED_DEPOSIT_TOKENS),
         "allowed_withdraw_tokens": sorted(ALLOWED_WITHDRAW_TOKENS),
         "sol_mint": SOL_ADDRESS_FULL,
-        "live_routing": "kamino_api_and_jlp",
+        "live_routing": "kamino_save_and_jlp",
     }
     if circle_error:
         result["circle_error"] = circle_error

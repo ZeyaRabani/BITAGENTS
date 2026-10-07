@@ -1460,7 +1460,7 @@ def yield_health() -> dict[str, Any]:
         "auth_required": True,
         "cluster": SOLANA_CLUSTER,
         "pricing": "free · wallet sign-in required",
-        "live_routing": "kamino_api_and_jlp",
+        "live_routing": "kamino_save_and_jlp",
         "protocol_apis": protocol_api_status(),
         "scheduler": yield_scheduler_status(),
     }

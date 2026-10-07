@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import threading
@@ -79,17 +80,15 @@ SYSTEM_PROMPT = """You are the BIT Agents Yield Agent for Solana.
 You hold the user's SOL in their Circle yield wallet. Supported protocols:
 - Kamino Finance: lending markets and liquidity vaults
 - Jupiter: JLP liquidity provision
-- MarginFi: lending markets
-- Drift Protocol: lending markets and the insurance fund
 - Save Finance: lending markets
 
 When the user gives an asset, capital, duration, or a yield type, call invest.
-Yield types are any, lending, liquidity_vault, jlp, and insurance.
-- any: rank every supported SOL market. Deposit into Kamino when it wins, or swap into JLP when JLP wins.
-- lending: rank Kamino, Save, MarginFi, and Drift for SOL. Deposit into Kamino through its API when Kamino wins. Save is ranked only. MarginFi and Drift have no deposit API.
+Yield types are any, lending, liquidity_vault, and jlp.
+- any: rank Kamino, Jupiter JLP, and Save. Deposit into whichever has the best fit.
+- lending: rank Kamino and Save SOL markets and deposit into the better one.
 - liquidity_vault: deposit into the best Kamino SOL vault through the Kamino API.
 - jlp: swap deposited SOL into JLP through Jupiter.
-- insurance: Drift insurance-fund staking has no deposit API. Leave funds idle and say so.
+If the user names Kamino, Jupiter, or Save, deposit into that protocol.
 
 Rules:
 - Say which yield type you used.
@@ -313,7 +312,7 @@ def invest_for_requirements(
     skip_deposit_ledger: bool = False,
     force_protocol: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Compare the supported protocols, then deposit into Kamino or buy JLP when that venue can be entered."""
+    """Compare Kamino, Jupiter, and Save, then deposit into the one that fits."""
     from db import insert_yield_position, insert_yield_rebalance, upsert_yield_mandate
     from dca_agent import resolve_token
 
@@ -337,6 +336,22 @@ def invest_for_requirements(
     minimum = MIN_ALLOCATE_SOL
     if amount < minimum:
         return {"error": f"Minimum invest for {asset_norm} is {minimum}."}
+    named = (force_protocol or "").strip().lower()
+    if named == "drift":
+        return {
+            "error": "Drift is not available right now. Ask for Kamino, Jupiter, or Save.",
+            "status": "failed",
+        }
+    if named in ("jlp", "jupiter"):
+        ytype = "jlp"
+    if named == "save":
+        return _invest_save_api(
+            wallet,
+            amount,
+            asset_norm,
+            duration,
+            skip_deposit_ledger=skip_deposit_ledger,
+        )
 
     try:
         comparison = compare_for_requirements(
@@ -374,6 +389,14 @@ def invest_for_requirements(
                 "comparison": comparison,
                 "status": "compared",
             }
+    if venue.get("deposit_route") == "save_lend" or venue.get("protocol_id") == "save":
+        return _invest_save_api(
+            wallet,
+            amount,
+            asset_norm,
+            duration,
+            skip_deposit_ledger=skip_deposit_ledger,
+        )
     if venue.get("deposit_route"):
         return _invest_kamino_api(
             wallet,
@@ -476,6 +499,152 @@ def invest_for_requirements(
             f"Invested {amount} {asset_norm} for {duration} days into Jupiter JLP"
             + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
             + " via Jupiter. This yield type is liquidity provision."
+        ),
+    }
+
+
+
+def _invest_save_api(
+    wallet: str,
+    amount: float,
+    asset_norm: str,
+    duration: int,
+    *,
+    skip_deposit_ledger: bool = False,
+) -> dict[str, Any]:
+    from circle_dca_wallets import resolve_agent_signing_context
+    from db import insert_yield_position, insert_yield_rebalance, upsert_yield_mandate
+    from dca_agent import _send_signed_transaction, sol_rpc
+    from save_deposit import prepare_save_sol_deposit
+    from yield_ledger import get_yield_wallet_pubkey
+
+    agent_wallet = get_yield_wallet_pubkey(wallet)
+    if not agent_wallet:
+        return {"error": "Yield agent wallet is not configured (Circle)."}
+    if not skip_deposit_ledger:
+        spend = check_yield_can_spend(wallet, amount, token=asset_norm)
+        if spend.get("error"):
+            return {
+                "status": "needs_deposit",
+                "error": spend["error"],
+                "available": spend.get("available"),
+            }
+    prepared = prepare_save_sol_deposit(agent_wallet, amount)
+    if prepared.get("error"):
+        return {**prepared, "status": "failed"}
+    rent_sol = int(prepared.get("extra_lamports") or 0) / 1e9
+    try:
+        lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
+        sol_balance = lamports / 1e9
+        if sol_balance - amount - rent_sol < SOL_FEE_RESERVE - 1e-9:
+            needed = amount + rent_sol + SOL_FEE_RESERVE
+            short = max(0.0, needed - sol_balance)
+            rent_note = (
+                f" plus {rent_sol:.6f} SOL to open the token accounts"
+                if rent_sol > 0
+                else ""
+            )
+            return {
+                "error": (
+                    f"The Circle wallet has {sol_balance:.6f} SOL. "
+                    f"This deposit needs {amount:.6f} SOL{rent_note}, "
+                    f"and {SOL_FEE_RESERVE} SOL must stay in the wallet for fees. "
+                    f"Send about {short:.6f} more SOL to the Circle wallet, then try again."
+                ),
+                "status": "failed",
+            }
+    except Exception as exc:
+        return {"error": f"Could not read the Circle wallet balance: {exc}"}
+
+    mandate = upsert_yield_mandate(
+        wallet,
+        {
+            "auto_rebalance": True,
+            "asset": asset_norm,
+            "capital": amount,
+            "duration_days": duration,
+            "yield_type": "lending",
+            "status": "active",
+        },
+    )
+    signing = resolve_agent_signing_context(wallet, AGENT_TYPE)
+    if signing.get("pubkey") and signing.get("pubkey") != agent_wallet:
+        return {"error": "Yield wallet address does not match the Circle signer.", "mandate": mandate}
+    sent = _send_signed_transaction(
+        signing.get("keypair") if signing.get("mode") == "local" else None,
+        prepared["instructions"],
+        circle_wallet_id=signing.get("wallet_id") if signing.get("mode") == "circle" else None,
+        retries=3,
+    )
+    if sent.get("error") or sent.get("status") in ("failed", "error"):
+        err = sent.get("error") or "Save deposit failed. No SOL left the Circle wallet."
+        if not isinstance(err, str):
+            err = json.dumps(err)
+        signature = sent.get("signature")
+        if signature and signature not in err:
+            err = f"{err} Transaction: {signature}"
+        return {
+            "error": err,
+            "signature": signature,
+            "explorer_url": sent.get("explorer_url"),
+            "mandate": mandate,
+            "status": "failed",
+        }
+
+    signature = sent.get("signature")
+    explorer = sent.get("explorer_url")
+    pos_id = uuid.uuid4().hex[:16]
+    record_yield_spend(
+        wallet,
+        amount,
+        token=asset_norm,
+        reference_id=pos_id,
+        signature=signature,
+        explorer_url=explorer,
+    )
+    position = insert_yield_position(
+        {
+            "id": pos_id,
+            "user_wallet": wallet,
+            "protocol_id": "save",
+            "protocol_name": "Save Finance",
+            "mint": str(prepared.get("collateral_mint") or SOL_MINT),
+            "symbol": "SOL",
+            "amount": amount,
+            "entry_apy": None,
+            "status": "active",
+            "last_signature": signature,
+            "explorer_url": explorer,
+        }
+    )
+    insert_yield_rebalance(
+        {
+            "id": uuid.uuid4().hex[:16],
+            "user_wallet": wallet,
+            "position_id": pos_id,
+            "from_protocol": "idle_sol",
+            "to_protocol": "save",
+            "amount": amount,
+            "from_apy": 0,
+            "to_apy": None,
+            "signature": signature,
+            "explorer_url": explorer,
+            "status": "confirmed",
+        }
+    )
+    return {
+        "status": "invested",
+        "position": position,
+        "spent": amount,
+        "asset": asset_norm,
+        "duration_days": duration,
+        "route": "save_lend",
+        "signature": signature,
+        "explorer_url": explorer,
+        "mandate": mandate,
+        "message": (
+            f"Deposited {amount} SOL for {duration} days into Save Finance SOL lending. "
+            f"Confirmed transaction: {explorer or signature}."
         ),
     }
 
@@ -640,15 +809,6 @@ def _compared_message(
     apy = best.get("apy")
     rate = f" at {apy}% APY" if apy is not None else ""
     lead = f"Best {label} match for {amount} {asset} over {duration} days is {name} {symbol}{rate}."
-    if best.get("protocol_id") == "save" or best.get("source") == "save_api":
-        return (
-            lead
-            + " Save's API published this rate, but it does not build a deposit. "
-            "Docs: https://docs.save.finance/developers/introduction. The SOL stays idle."
-        )
-    if best.get("protocol_id") in ("marginfi", "drift", "drift-insurance"):
-        docs = best.get("docs_url") or "https://docs.drift.trade/developers/data-api"
-        return lead + f" This protocol has no deposit API. Docs: {docs}. The SOL stays idle."
     return lead + " This market has no deposit route, so the SOL stays idle."
 
 
@@ -733,6 +893,15 @@ def unwind_position(user_wallet: str, position_id: Optional[str] = None) -> dict
         pos = positions[0]
     if not pos:
         return {"error": "Position not found."}
+
+    if str(pos.get("protocol_id") or "") == "drift":
+        return {
+            "error": "Drift withdrawals are not wired yet. The SOL stays in the Drift account."
+        }
+    if str(pos.get("protocol_id") or "") == "save":
+        return {
+            "error": "Save withdrawals are not wired yet. The SOL stays in the Save reserve."
+        }
 
     if str(pos.get("protocol_id") or "") in {"kamino", "kamino-vault"}:
         return _unwind_kamino(wallet, pos)
@@ -910,13 +1079,21 @@ def tool_invest(
     capital: float = 0,
     duration_days: int = 30,
     yield_type: str = "any",
+    protocol: Optional[str] = None,
     user_wallet: Optional[str] = None,
     **_ctx,
 ) -> dict[str, Any]:
     wallet = (user_wallet or "").strip()
     if not wallet:
         return {"error": "Connect a wallet first."}
-    return invest_for_requirements(wallet, asset, capital, duration_days, yield_type)
+    return invest_for_requirements(
+        wallet,
+        asset,
+        capital,
+        duration_days,
+        yield_type,
+        force_protocol=protocol,
+    )
 
 
 def tool_allocate(
@@ -954,14 +1131,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "compare_yields",
-            "description": "Compare Kamino, Jupiter JLP, MarginFi, Drift, and Save. Optional yield_type limits the search.",
+            "description": "Compare Kamino, Jupiter JLP, and Save. Optional yield_type limits the search.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "limit": {"type": "integer", "description": "Max markets to include (default 12)"},
                     "yield_type": {
                         "type": "string",
-                        "description": "any | lending | liquidity_vault | jlp | insurance",
+                        "description": "any | lending | liquidity_vault | jlp",
                     },
                 },
             },
@@ -998,9 +1175,9 @@ TOOLS = [
         "function": {
             "name": "invest",
             "description": (
-                "Compare Kamino, Jupiter, MarginFi, Drift, and Save for the user's SOL, "
-                "capital, duration, and yield type. Deposit into Kamino through its API when Kamino wins. "
-                "Buy JLP through Jupiter when JLP is selected or wins."
+                "Deposit the user's SOL into Kamino, Jupiter JLP, or Save. "
+                "Name protocol when the user asks for one protocol. "
+                "Otherwise compare and deposit into the best match."
             ),
             "parameters": {
                 "type": "object",
@@ -1010,7 +1187,11 @@ TOOLS = [
                     "duration_days": {"type": "integer", "description": "How long the user wants the position"},
                     "yield_type": {
                         "type": "string",
-                        "description": "any | lending | liquidity_vault | jlp | insurance",
+                        "description": "any | lending | liquidity_vault | jlp",
+                    },
+                    "protocol": {
+                        "type": "string",
+                        "description": "kamino, save, or jlp when the user names one protocol. Omit to pick the best.",
                     },
                 },
                 "required": ["asset", "capital", "duration_days"],
@@ -1077,15 +1258,26 @@ TOOL_REGISTRY = {
 _GARBAGE_REPLY = re.compile(r"\\boxed\{|the final answer is", re.IGNORECASE)
 
 
+def _named_protocol(text: str) -> Optional[str]:
+    lower = text.lower()
+    if "drift" in lower or "insurance" in lower:
+        return "drift"
+    if "kamino" in lower and "vault" not in lower:
+        return "kamino"
+    if "save" in lower:
+        return "save"
+    if "jlp" in lower or "jupiter" in lower:
+        return "jlp"
+    return None
+
+
 def _yield_type_from_text(text: str) -> str:
     lower = text.lower()
     if "vault" in lower:
         return "liquidity_vault"
     if "jlp" in lower or "jupiter" in lower:
         return "jlp"
-    if "insurance" in lower:
-        return "insurance"
-    if any(word in lower for word in ("lending", "kamino", "save", "marginfi", "drift")):
+    if any(word in lower for word in ("lending", "kamino", "save")):
         return "lending"
     return "any"
 
@@ -1103,15 +1295,16 @@ def _direct_yield_call(text: str) -> Optional[tuple[str, dict[str, Any]]]:
     wants_compare = bool(re.search(r"\b(compare|comparison|yields|apy|rates)\b", lower))
 
     if wants_invest and amount:
-        return (
-            "invest",
-            {
-                "asset": "SOL",
-                "capital": float(amount.group(1)),
-                "duration_days": int(days.group(1)) if days else 30,
-                "yield_type": yield_type,
-            },
-        )
+        args: dict[str, Any] = {
+            "asset": "SOL",
+            "capital": float(amount.group(1)),
+            "duration_days": int(days.group(1)) if days else 30,
+            "yield_type": yield_type,
+        }
+        protocol = _named_protocol(lower)
+        if protocol:
+            args["protocol"] = protocol
+        return "invest", args
     if wants_compare and not wants_invest:
         return "compare_yields", {"yield_type": yield_type, "limit": 8}
     if re.search(r"\b(portfolio|positions|balance)\b", lower):
@@ -1129,6 +1322,12 @@ def run_yield_agent(
     user_wallet: Optional[str] = None,
     session_id: Optional[str] = None,
 ) -> tuple[str, list, list[dict[str, Any]]]:
+    if re.search(r"\b(drift|insurance)\b", (user_input or "").lower()):
+        reply = "Drift is not available right now. Ask for Kamino, Jupiter, or Save."
+        conversation_history.append({"role": "user", "content": user_input.strip()})
+        conversation_history.append({"role": "assistant", "content": reply})
+        return reply, conversation_history, []
+
     direct = _direct_yield_call(user_input)
     if direct:
         name, args = direct
