@@ -397,15 +397,10 @@ export function DcaAgentDeposit({
     <Panel title="AI Agent wallet · deposit & withdraw">
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Deposit any SPL token to the AI Agent wallet on{" "}
-            <span className="text-foreground">{cluster ?? "Solana"}</span>. After you send
-            funds, your deposit is verified automatically and credited to your balance. You can
-            also paste a transaction signature below if verification was missed.
-          </p>
-
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
-            <span className="uppercase tracking-[0.16em] text-signal">Agent wallet</span>
+            <span className="uppercase tracking-[0.16em] text-signal">
+              Agent wallet · {cluster ?? "Solana"}
+            </span>
             <div className="mt-1 break-all text-foreground">
               {agentWallet ?? "Not configured on server"}
             </div>
@@ -506,15 +501,10 @@ export function DcaAgentDeposit({
             </a>
           )}
 
-          <div className="border-t-2 border-grid pt-4">
+          <div className="pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Already sent a deposit? Paste your transaction hash to credit your balance. Each
-              signature can only be used once and must be a transfer you signed to the agent
-              wallet.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input
                 type="text"
@@ -535,14 +525,10 @@ export function DcaAgentDeposit({
             </div>
           </div>
 
-          <div className="border-t-2 border-grid pt-4">
+          <div className="pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Withdraw unused deposits and tokens bought by your DCA plans. Amounts reserved for
-              active plans cannot be withdrawn.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
               <select
                 value={withdrawToken}
@@ -620,7 +606,7 @@ export function DcaAgentDeposit({
           ) : (
             <div className="mt-3 space-y-2">
               {balances.map((row) => (
-                <div key={row.token} className="border-2 border-grid bg-background/60 px-3 py-2.5">
+                <div key={row.token} className="bg-surface-2 px-3 py-2.5">
                   <div className="flex items-center justify-between font-display text-base font-bold">
                     <span>{row.token}</span>
                     <span className="text-signal tabular-nums">{row.available} avail</span>

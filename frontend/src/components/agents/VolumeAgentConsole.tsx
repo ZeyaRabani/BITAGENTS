@@ -69,7 +69,7 @@ function TxLink({ tx, cluster }: { tx: ParsedTransaction; cluster?: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-surface/40 px-3 py-2 transition hover:border-signal"
+      className="flex flex-wrap items-center justify-between gap-2 bg-surface/40 px-3 py-2 transition hover:bg-surface hover:text-signal"
     >
       <span className="font-mono text-[11px] text-foreground">{short}</span>
       <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]">
@@ -117,13 +117,13 @@ function ActionCard({
       </div>
 
       {isError && act.error && (
-        <div className="mt-2 border border-warn/30 bg-warn/10 px-3 py-2 font-mono text-[11px] leading-relaxed text-warn">
+        <div className="mt-2 bg-warn/10 px-3 py-2 font-mono text-[11px] leading-relaxed text-warn">
           {act.error}
         </div>
       )}
 
       {act.transactions.length > 0 && (
-        <div className="mt-2 space-y-2 border-t-2 border-grid pt-2">
+        <div className="mt-2 space-y-2 pt-2">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             Transaction{act.transactions.length > 1 ? "s" : ""}
           </div>
@@ -134,7 +134,7 @@ function ActionCard({
       )}
 
       {act.result && (
-        <pre className="mt-2 max-h-40 overflow-auto border-t-2 border-grid pt-2 text-[10px] leading-relaxed text-foreground/80">
+        <pre className="mt-2 max-h-40 overflow-auto pt-2 text-[10px] leading-relaxed text-foreground/80">
           {act.result}
         </pre>
       )}
@@ -339,27 +339,18 @@ export function VolumeAgentConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          {VOLUME_AGENT.description} Connect your wallet, deposit SOL + token, then schedule Meteora DLMM
-          buy/sell volume cycles. Existing pools are reused automatically; new pairs may require ~{poolCost}{" "}
-          SOL pool creation. Platform fee is{" "}
-          <strong className="text-foreground">{VOLUME_AGENT.platformFeeLabel}</strong>.
-        </p>
-      </div>
-
       {error && (
-        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
+        <div className="bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
       )}
 
       {authError && (
-        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
+        <div className="bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
           Wallet sign-in: {authError}
         </div>
       )}
 
       {publicKey && authBusy && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to authenticate. The message includes acceptance of our Terms,
           Privacy Policy, and Risk Disclaimer.
         </div>
@@ -374,13 +365,13 @@ export function VolumeAgentConsole() {
       />
 
       {!publicKey && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
-          Connect your wallet above to deposit and run volume campaigns tied to your balance.
+        <div className="bg-surface-2 px-4 py-3 font-mono text-xs text-muted-foreground">
+          Connect wallet to continue.
         </div>
       )}
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to use the Volume Agent.
         </div>
       )}
@@ -435,7 +426,7 @@ export function VolumeAgentConsole() {
                 )}
 
                 {msg.transactions && msg.transactions.length > 0 && (
-                  <div className="mt-3 space-y-2 border-t-2 border-grid pt-3">
+                  <div className="mt-3 space-y-2 pt-3">
                     <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                       Transaction{msg.transactions.length > 1 ? "s" : ""}
                     </div>
@@ -454,7 +445,7 @@ export function VolumeAgentConsole() {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 pt-4">
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 value={input}
@@ -480,7 +471,7 @@ export function VolumeAgentConsole() {
                 type="button"
                 disabled={busy || !token}
                 onClick={() => void runCommand(prompt)}
-                className="border-2 border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
+                className="px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-foreground disabled:opacity-40"
               >
                 {prompt}
               </button>
@@ -546,7 +537,7 @@ export function VolumeAgentConsole() {
               type="button"
               onClick={() => void checkMeteoraPool()}
               disabled={poolCheckBusy || !baseToken.trim()}
-              className="border-2 border-grid px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:border-signal disabled:opacity-50"
+              className="px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:bg-surface hover:text-signal disabled:opacity-50"
             >
               {poolCheckBusy ? "Checking Meteora…" : "Check on Meteora"}
             </button>

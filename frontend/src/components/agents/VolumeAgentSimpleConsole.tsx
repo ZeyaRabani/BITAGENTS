@@ -121,7 +121,7 @@ export function VolumeAgentSimpleConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
+      <div className="bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Buy and sell volume for the <strong className="text-foreground">BITAGENTS token</strong>, paid for
           in SOL. Deposit SOL below, then press one button to start. Platform fee is{" "}
@@ -130,13 +130,13 @@ export function VolumeAgentSimpleConsole() {
       </div>
 
       {authError && (
-        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
+        <div className="bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
           Wallet sign-in: {authError}
         </div>
       )}
 
       {publicKey && authBusy && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to authenticate.
         </div>
       )}
@@ -149,19 +149,19 @@ export function VolumeAgentSimpleConsole() {
       />
 
       {!publicKey && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet above, deposit SOL, then start a campaign below.
         </div>
       )}
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to continue.
         </div>
       )}
 
       {userBalances && userBalances.balances.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 border-2 border-grid bg-surface/40 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-surface/40 px-4 py-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             <span className="text-foreground">
               {userBalances.user_wallet.slice(0, 4)}…{userBalances.user_wallet.slice(-4)}
@@ -172,7 +172,7 @@ export function VolumeAgentSimpleConsole() {
             type="button"
             disabled={withdrawBusy || !userBalances.balances.some((row) => (row.withdrawable ?? row.available) > 0)}
             onClick={() => void withdrawAll()}
-            className="border border-signal px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
+            className="px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {withdrawBusy ? "Withdrawing…" : "Withdraw all to my wallet"}
           </button>
@@ -196,7 +196,7 @@ export function VolumeAgentSimpleConsole() {
                 type="button"
                 disabled={!isAuthenticated || busyKey !== null}
                 onClick={() => void startCampaign(preset)}
-                className="flex flex-col gap-2 border-2 border-grid bg-background/60 px-4 py-4 text-left transition hover:border-signal disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex flex-col gap-2 bg-background/60 px-4 py-4 text-left transition hover:bg-surface hover:text-signal disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <span className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-signal">
                   {preset.label}

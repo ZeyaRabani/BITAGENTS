@@ -142,7 +142,7 @@ export function SubscribeSection({ agent }: { agent: LaunchedAgentRecord }) {
         <button
           onClick={connectTelegram}
           disabled={busy}
-          className="border-2 border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+          className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
         >
           {telegramLink ? "Re-generate link" : "Connect Telegram"}
         </button>
@@ -158,14 +158,14 @@ export function SubscribeSection({ agent }: { agent: LaunchedAgentRecord }) {
           <button
             onClick={sendTest}
             disabled={busy}
-            className="border-2 border-grid px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+            className="px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
           >
             Send Test
           </button>
           <button
             onClick={confirmReceived}
             disabled={busy || !testSent}
-            className="border border-signal bg-signal/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-signal disabled:opacity-40"
+            className="bg-signal/10 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-signal disabled:opacity-40"
           >
             I received it — Confirm
           </button>

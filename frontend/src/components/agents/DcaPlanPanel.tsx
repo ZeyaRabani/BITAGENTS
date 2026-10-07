@@ -289,7 +289,7 @@ function PlanRow({
   }
 
   return (
-    <div className="border-2 border-grid bg-background/60 p-3">
+    <div className="bg-background/60 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">{plan.name}</div>
@@ -421,7 +421,7 @@ function PlanRow({
               setEditing(true);
               setActionError(null);
             }}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal disabled:opacity-40"
           >
             Edit
           </button>
@@ -432,7 +432,7 @@ function PlanRow({
               type="button"
               disabled={busy || actionBusy}
               onClick={() => void runSave()}
-              className="border border-signal px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
+              className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
             >
               {actionBusy ? "Saving…" : "Save"}
             </button>
@@ -448,7 +448,7 @@ function PlanRow({
                 setSlippageBps(String(plan.slippage_bps ?? 100));
                 setActionError(null);
               }}
-              className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+              className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground bg-surface-2 transition hover:text-foreground disabled:opacity-40"
             >
               Cancel edit
             </button>
@@ -459,7 +459,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("pause")}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-warn/10 hover:text-warn hover:text-warn disabled:opacity-40"
           >
             Pause
           </button>
@@ -469,7 +469,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("resume")}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal disabled:opacity-40"
           >
             Resume
           </button>
@@ -479,7 +479,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("cancel")}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-warn/10 hover:text-warn hover:text-warn disabled:opacity-40"
           >
             Remove plan
           </button>
@@ -489,7 +489,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy}
             onClick={() => setHistoryOpen(true)}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal disabled:opacity-40"
           >
             Tx history
           </button>
@@ -548,7 +548,7 @@ function HistoryPlanRow({
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
-    <div className="border-2 border-grid bg-background/40 px-3 py-2">
+    <div className="bg-background/40 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-foreground">{plan.name}</span>
         <span className={`font-mono text-[10px] uppercase ${statusClass(plan.status)}`}>
@@ -565,7 +565,7 @@ function HistoryPlanRow({
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal"
           >
             Tx history
           </button>
@@ -597,7 +597,7 @@ function ExecutionRow({
   const ok = row.status === "success" && !row.error;
 
   return (
-    <div className="border-2 border-grid bg-background/40 px-3 py-2">
+    <div className="bg-background/40 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-foreground">
           {compact && index != null ? `Buy #${index}` : row.pair}
@@ -637,7 +637,7 @@ function LedgerRow({ entry, cluster }: { entry: LedgerEntry; cluster?: string })
   const signed = entry.direction === "deposit" || entry.direction === "acquire" ? "+" : "−";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-background/40 px-3 py-2">
+    <div className="flex flex-wrap items-center justify-between gap-2 bg-background/40 px-3 py-2">
       <div>
         <div className="font-mono text-[11px] text-foreground">
           {ledgerDirectionLabel(entry.direction)} · {signed}
@@ -741,9 +741,7 @@ export function DcaPlanPanel({
   if (!authToken) {
     return (
       <CollapsibleSection title="Your DCA plans" defaultOpen>
-        <p className="font-mono text-xs text-muted-foreground">
-          Sign in with your wallet to view plans and swap history here - no need to ask the agent to list them.
-        </p>
+        <p className="font-mono text-xs text-muted-foreground">Sign in to view plans.</p>
       </CollapsibleSection>
     );
   }
@@ -767,12 +765,6 @@ export function DcaPlanPanel({
       >
         {error && <p className="mb-3 font-mono text-[11px] text-warn">{error}</p>}
 
-        <p className="mb-3 text-sm text-muted-foreground">
-          Active and paused plans can be <strong className="text-foreground">edited</strong>,{" "}
-          <strong className="text-foreground">paused/resumed</strong>, or{" "}
-          <strong className="text-foreground">removed</strong> anytime. View per-plan swap history with{" "}
-          <strong className="text-foreground">Tx history</strong>.
-        </p>
 
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
           <input

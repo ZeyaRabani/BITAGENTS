@@ -160,11 +160,9 @@ export function VolumeAgentDeposit({
   return (
     <Panel title="Volume Agent wallet · deposit">
       <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Deposit your <strong className="text-foreground">token + SOL</strong> to the Volume Agent wallet on{" "}
-          {cluster ?? "Solana"}. If no Meteora DLMM pool exists, reserve ~{poolCreationCostSol} SOL for pool
-          creation plus trade budget. Platform fee is <strong className="text-foreground">0.25% per swap leg</strong>.
-        </p>
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal">
+          {cluster ?? "Solana"} · 0.25% per swap leg · ~{poolCreationCostSol} SOL pool reserve if needed
+        </div>
 
         {!connected && <WalletMultiButton className="!w-full !justify-center" />}
         {connected && !authToken && <LegalSignInNotice />}
@@ -181,7 +179,7 @@ export function VolumeAgentDeposit({
               <label className="space-y-1 font-mono text-[11px]">
                 <span className="text-muted-foreground">Token</span>
                 <select
-                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
+                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                   value={token}
                   onChange={(e) => setToken(e.target.value as typeof token)}
                 >
@@ -197,7 +195,7 @@ export function VolumeAgentDeposit({
                 <label className="space-y-1 font-mono text-[11px] sm:col-span-2">
                   <span className="text-muted-foreground">Mint address</span>
                   <input
-                    className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
+                    className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                     value={customMint}
                     onChange={(e) => setCustomMint(e.target.value)}
                     placeholder="Token mint for your pair"
@@ -212,7 +210,7 @@ export function VolumeAgentDeposit({
               <label className="space-y-1 font-mono text-[11px]">
                 <span className="text-muted-foreground">Amount</span>
                 <input
-                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
+                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.0"
@@ -225,13 +223,13 @@ export function VolumeAgentDeposit({
               type="button"
               onClick={() => void handleDeposit()}
               disabled={busy || !agentWallet}
-              className="w-full border border-signal bg-signal/10 px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-signal disabled:opacity-50"
+              className="w-full bg-signal/10 px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-signal disabled:opacity-50"
             >
               {busy ? "Sending…" : "Deposit to Volume Agent"}
             </button>
 
             {balances.length > 0 && (
-              <div className="space-y-2 border-2 border-grid p-3">
+              <div className="space-y-2 p-3">
                 <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Balances</p>
                 {balances.map((row) => (
                   <div key={row.token} className="flex justify-between font-mono text-[11px]">

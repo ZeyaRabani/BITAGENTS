@@ -102,12 +102,12 @@ export function CustomAgentChat({ agent }: { agent: LaunchedAgentRecord }) {
           </div>
 
           {error && (
-            <div className="mt-4 border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
+            <div className="mt-4 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
               {error}
             </div>
           )}
 
-          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 pt-4">
             <div className="flex gap-2">
               <textarea
                 value={input}
@@ -121,12 +121,12 @@ export function CustomAgentChat({ agent }: { agent: LaunchedAgentRecord }) {
                 placeholder="Message this agent… (Shift+Enter for a new line)"
                 disabled={busy}
                 rows={1}
-                className="max-h-40 min-h-[42px] flex-1 resize-y border-2 border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+                className="max-h-40 min-h-[42px] flex-1 resize-y bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
               />
               <button
                 type="submit"
                 disabled={busy || !input.trim()}
-                className="self-start border border-signal bg-signal/10 px-4 py-2 font-mono text-xs uppercase tracking-wider text-signal disabled:opacity-40"
+                className="self-start bg-signal/10 px-4 py-2 font-mono text-xs uppercase tracking-wider text-signal disabled:opacity-40"
               >
                 Send
               </button>

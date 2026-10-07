@@ -12,7 +12,7 @@ export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
   const inner = (
     <article className="group flex h-full flex-col bg-card p-5 transition hover:bg-surface-2">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center bg-surface-2 text-signal">
+        <div className="flex h-10 w-10 items-center justify-center text-signal">
           <Icon size={18} strokeWidth={1.75} />
         </div>
       </div>

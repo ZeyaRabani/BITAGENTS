@@ -17,7 +17,7 @@ export function HedgeFundPricingPage() {
 
   return (
     <div className="space-y-8">
-      <div className="border-2 border-grid bg-surface/40 px-6 py-6">
+      <div className="bg-surface/40 px-6 py-6">
         <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-signal">Fee schedule</p>
         <h2 className="mt-2 text-2xl font-semibold text-foreground">1/10 Model</h2>
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted-foreground">
@@ -67,19 +67,19 @@ export function HedgeFundPricingPage() {
       {ex && (
         <Panel title="Example — $100,000 AUM, $15,000 profit (12 months)">
           <dl className="grid gap-3 font-mono text-sm md:grid-cols-2">
-            <div className="flex justify-between border-b-2 border-grid py-2">
+            <div className="flex justify-between py-2">
               <dt className="text-muted-foreground">Management (1%)</dt>
               <dd className="tabular-nums">${ex.management_fee_usd.toLocaleString()}</dd>
             </div>
-            <div className="flex justify-between border-b-2 border-grid py-2">
+            <div className="flex justify-between py-2">
               <dt className="text-muted-foreground">Performance (10%)</dt>
               <dd className="tabular-nums">${ex.performance_fee_usd.toLocaleString()}</dd>
             </div>
-            <div className="flex justify-between border-b-2 border-grid py-2">
+            <div className="flex justify-between py-2">
               <dt className="text-muted-foreground">Total fees</dt>
               <dd className="tabular-nums text-warn">${ex.total_fees_usd.toLocaleString()}</dd>
             </div>
-            <div className="flex justify-between border-b-2 border-grid py-2">
+            <div className="flex justify-between py-2">
               <dt className="text-muted-foreground">Net profit after fees</dt>
               <dd className="tabular-nums text-signal">${ex.net_profit_after_fees_usd.toLocaleString()}</dd>
             </div>

@@ -345,7 +345,7 @@ export function EasyaTradingDeposit({
           <LegalSignInNotice />
 
           <div className="grid gap-3 sm:grid-cols-[80px_1fr_auto]">
-            <div className="flex items-center border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm text-foreground">
+            <div className="flex items-center bg-background px-3 py-2.5 font-mono text-sm text-foreground">
               SOL
             </div>
             <input
@@ -369,13 +369,13 @@ export function EasyaTradingDeposit({
           </div>
 
           {success && (
-            <div className="border border-signal/40 bg-signal/10 px-3 py-2 font-mono text-xs text-signal">
+            <div className="bg-signal/10 px-3 py-2 font-mono text-xs text-signal">
               {success}
             </div>
           )}
 
           {error && (
-            <div className="border border-warn/40 bg-warn/10 px-3 py-2 font-mono text-xs text-warn">
+            <div className="bg-warn/10 px-3 py-2 font-mono text-xs text-warn">
               {error}
             </div>
           )}
@@ -391,7 +391,7 @@ export function EasyaTradingDeposit({
             </a>
           )}
 
-          <div className="border-t-2 border-grid pt-4">
+          <div className="pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
@@ -413,14 +413,14 @@ export function EasyaTradingDeposit({
                 type="button"
                 onClick={() => void runDepositVerification(manualSignature, { clearManualInput: true })}
                 disabled={verifyBusy || !connected || !authToken || !manualSignature.trim()}
-                className="border border-signal px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {verifyBusy ? "Verifying…" : "Verify tx"}
               </button>
             </div>
           </div>
 
-          <div className="border-t-2 border-grid pt-4">
+          <div className="pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
@@ -466,7 +466,7 @@ export function EasyaTradingDeposit({
                   !withdrawAmount ||
                   withdrawableAmount <= 0
                 }
-                className="border border-signal px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {withdrawBusy ? "Sending…" : "Withdraw"}
               </button>
@@ -507,7 +507,7 @@ export function EasyaTradingDeposit({
           ) : (
             <div className="mt-3 space-y-2">
               {balances.map((row) => (
-                <div key={row.token} className="border-2 border-grid bg-background/60 px-3 py-2.5">
+                <div key={row.token} className="bg-background/60 px-3 py-2.5">
                   <div className="flex items-center justify-between font-display text-base font-bold">
                     <span>{row.token}</span>
                     <span className="text-signal tabular-nums">{row.available} avail</span>

@@ -37,7 +37,7 @@ export function LegalDocument({
         ))}
       </div>
 
-      <div className="mt-12 flex flex-wrap gap-4 border-t-2 border-grid pt-6 font-mono text-[11px] uppercase tracking-[0.14em]">
+      <div className="mt-12 flex flex-wrap gap-4 pt-6 font-mono text-[11px] uppercase tracking-[0.14em]">
         <Link href={LEGAL_LINKS.terms} className="text-muted-foreground transition hover:text-signal">
           Terms
         </Link>

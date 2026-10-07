@@ -184,7 +184,7 @@ function OrderExecutionsDialog({
             const href = orderExplorerUrl(row.signature, cluster);
             const ok = row.status === "success";
             return (
-              <div key={row.id ?? `${row.signature ?? "row"}-${index}`} className="border-2 border-grid bg-background/60 p-3">
+              <div key={row.id ?? `${row.signature ?? "row"}-${index}`} className="bg-background/60 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-mono text-[11px] text-foreground">
                     Buy #{executions.length - index}
@@ -324,7 +324,7 @@ function LimitOrderRow({
             setEditing(true);
             setActionError(null);
           }}
-          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+          className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal disabled:opacity-40"
         >
           Edit
         </button>
@@ -335,7 +335,7 @@ function LimitOrderRow({
             type="button"
             disabled={busy || actionBusy}
             onClick={() => void runSave()}
-            className="border border-signal px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
           >
             {actionBusy ? "Saving…" : "Save"}
           </button>
@@ -351,7 +351,7 @@ function LimitOrderRow({
               setSlippageBps(String(order.slippage_bps ?? 100));
               setActionError(null);
             }}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground bg-surface-2 transition hover:text-foreground disabled:opacity-40"
           >
             Cancel edit
           </button>
@@ -362,7 +362,7 @@ function LimitOrderRow({
           type="button"
           disabled={busy || actionBusy}
           onClick={() => setConfirmCancel(true)}
-          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+          className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-warn/10 hover:text-warn hover:text-warn disabled:opacity-40"
         >
           {removeLabel}
         </button>
@@ -372,7 +372,7 @@ function LimitOrderRow({
           type="button"
           disabled={busy || actionBusy}
           onClick={() => setHistoryOpen(true)}
-          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+          className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal disabled:opacity-40"
         >
           Tx history
         </button>
@@ -462,7 +462,7 @@ function LimitOrderRow({
       : null;
 
   return (
-    <div className="border-2 border-grid bg-background/60 p-3">
+    <div className="bg-background/60 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">{orderTitle(order)}</div>
@@ -476,7 +476,7 @@ function LimitOrderRow({
       </div>
 
       {(canEdit || canCancel || hasOrderHistory(order)) && (
-        <div className="mt-3 border-b-2 border-grid pb-3">{actionButtons}</div>
+        <div className="mt-3 pb-3">{actionButtons}</div>
       )}
 
       {!editing ? (
@@ -686,7 +686,7 @@ function MarketOrderRow({
   const ok = order.status === "filled" && !order.error_message;
 
   return (
-    <div className="border-2 border-grid bg-background/40 px-3 py-3">
+    <div className="bg-background/40 px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">Market buy · {order.output_token}</div>
@@ -747,7 +747,7 @@ function MarketOrderRow({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10"
           >
             Explorer ↗
           </a>
@@ -756,7 +756,7 @@ function MarketOrderRow({
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
-            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
+            className="px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:bg-surface hover:text-signal hover:text-signal"
           >
             Tx history
           </button>

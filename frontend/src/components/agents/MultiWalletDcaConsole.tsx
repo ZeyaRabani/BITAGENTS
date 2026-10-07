@@ -209,12 +209,12 @@ export function MultiWalletDcaConsole() {
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                   Your unique deposit address
                 </div>
-                <div className="rounded-lg border-2 border-grid bg-black/20 px-3 py-2 font-mono text-xs break-all">
+                <div className="rounded-lg bg-black/20 px-3 py-2 font-mono text-xs break-all">
                   {balance.deposit_address}
                 </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border-2 border-grid px-3 py-2">
+              <div className="flex items-center justify-between rounded-lg px-3 py-2">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">SOL Balance</div>
                   <div className="font-mono text-sm">{solBalance?.balance ?? 0} SOL</div>
@@ -231,13 +231,13 @@ export function MultiWalletDcaConsole() {
               </div>
 
               {balance.balances.slice(1).map((b) => (
-                <div key={b.mint} className="flex items-center justify-between rounded-lg border-2 border-grid px-3 py-2">
+                <div key={b.mint} className="flex items-center justify-between rounded-lg px-3 py-2">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{b.token}</div>
                   <div className="font-mono text-sm">{b.balance}</div>
                 </div>
               ))}
 
-              <div className="border-t-2 border-grid pt-3">
+              <div className="pt-3">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">
                   Deposit SOL (sends directly to your address above, from this wallet)
                 </div>
@@ -245,13 +245,13 @@ export function MultiWalletDcaConsole() {
                   <input
                     value={depositAmount}
                     onChange={(e) => setDepositAmount(e.target.value)}
-                    className="flex-1 rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+                    className="flex-1 rounded bg-black/20 px-2 py-1 font-mono text-xs"
                   />
                   <button
                     type="button"
                     disabled={depositing}
                     onClick={deposit}
-                    className="rounded border-2 border-grid px-3 py-1 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
+                    className="rounded px-3 py-1 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
                   >
                     {depositing ? "…" : "Deposit"}
                   </button>
@@ -264,7 +264,7 @@ export function MultiWalletDcaConsole() {
           <button
             type="button"
             onClick={() => setRefreshTick((n) => n + 1)}
-            className="w-full rounded-lg border-2 border-grid px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-surface/60"
+            className="w-full rounded-lg px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-surface/60"
           >
             Refresh
           </button>
@@ -281,7 +281,7 @@ export function MultiWalletDcaConsole() {
             <input
               value={outputToken}
               onChange={(e) => setOutputToken(e.target.value)}
-              className="mt-1 w-full rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+              className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="block text-xs">
@@ -289,7 +289,7 @@ export function MultiWalletDcaConsole() {
             <input
               value={amountPerBuy}
               onChange={(e) => setAmountPerBuy(e.target.value)}
-              className="mt-1 w-full rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+              className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="block text-xs">
@@ -298,7 +298,7 @@ export function MultiWalletDcaConsole() {
               value={interval}
               onChange={(e) => setIntervalStr(e.target.value)}
               placeholder="e.g. 1 hour, 30 minutes"
-              className="mt-1 w-full rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+              className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono text-xs"
             />
           </label>
           <label className="block text-xs">
@@ -306,14 +306,14 @@ export function MultiWalletDcaConsole() {
             <input
               value={maxExecutions}
               onChange={(e) => setMaxExecutions(e.target.value)}
-              className="mt-1 w-full rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+              className="mt-1 w-full rounded bg-black/20 px-2 py-1 font-mono text-xs"
             />
           </label>
           <button
             type="button"
             disabled={creating}
             onClick={createPlan}
-            className="w-full rounded-lg border-2 border-grid px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
+            className="w-full rounded-lg px-3 py-1.5 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
           >
             {creating ? "Creating…" : "Create Plan"}
           </button>
@@ -323,7 +323,7 @@ export function MultiWalletDcaConsole() {
             <div className="mt-4 space-y-2">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Your plans</div>
               {plans.map((p) => (
-                <div key={p.id} className="rounded border-2 border-grid px-2 py-1 font-mono text-[11px]">
+                <div key={p.id} className="rounded px-2 py-1 font-mono text-[11px]">
                   {p.id} · {p.input_token}→{p.output_token} · {p.amount_per_buy}/buy · {p.status} ·{" "}
                   {p.executions_count}/{p.max_executions ?? "∞"}
                 </div>
@@ -331,25 +331,25 @@ export function MultiWalletDcaConsole() {
             </div>
           )}
 
-          <div className="mt-6 border-t-2 border-grid pt-4">
+          <div className="mt-6 pt-4">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Withdraw</div>
             <div className="flex gap-2">
               <input
                 value={withdrawToken}
                 onChange={(e) => setWithdrawToken(e.target.value)}
-                className="w-20 rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+                className="w-20 rounded bg-black/20 px-2 py-1 font-mono text-xs"
               />
               <input
                 value={withdrawAmount}
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 placeholder="amount"
-                className="flex-1 rounded border-2 border-grid bg-black/20 px-2 py-1 font-mono text-xs"
+                className="flex-1 rounded bg-black/20 px-2 py-1 font-mono text-xs"
               />
               <button
                 type="button"
                 disabled={withdrawing}
                 onClick={withdraw}
-                className="rounded border-2 border-grid px-3 py-1 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
+                className="rounded px-3 py-1 text-xs uppercase tracking-wider hover:bg-surface/60 disabled:opacity-50"
               >
                 {withdrawing ? "…" : "Withdraw"}
               </button>

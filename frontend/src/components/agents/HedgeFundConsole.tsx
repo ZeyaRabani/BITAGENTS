@@ -78,7 +78,7 @@ export function HedgeFundConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
+      <div className="bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">{HEDGE_FUND.description}</p>
         <p className="mt-2 font-mono text-xs text-signal">
           Fee model: {HEDGE_FUND.managementFeePct}% management + {HEDGE_FUND.performanceFeePct}% performance ·{" "}
@@ -100,10 +100,10 @@ export function HedgeFundConsole() {
       </div>
 
       {error && (
-        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
+        <div className="bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
       )}
       {authError && (
-        <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
+        <div className="bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
           Wallet sign-in: {authError}
         </div>
       )}
@@ -136,7 +136,7 @@ export function HedgeFundConsole() {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 pt-4">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -144,12 +144,12 @@ export function HedgeFundConsole() {
                 onChange={(e) => setInput(e.target.value)}
                 placeholder={isAuthenticated ? "e.g. Analyze SOL JUP BITAGENTS with $10,000" : "Connect wallet to chat"}
                 disabled={!token || busy}
-                className="flex-1 border-2 border-grid bg-background px-3 py-2 font-mono text-sm disabled:opacity-50"
+                className="flex-1 bg-background px-3 py-2 font-mono text-sm disabled:opacity-50"
               />
               <button
                 type="submit"
                 disabled={!token || busy || !input.trim()}
-                className="border border-signal bg-signal/10 px-4 py-2 font-mono text-xs uppercase text-signal disabled:opacity-40"
+                className="bg-signal/10 px-4 py-2 font-mono text-xs uppercase text-signal disabled:opacity-40"
               >
                 Send
               </button>
@@ -166,7 +166,7 @@ export function HedgeFundConsole() {
                   type="button"
                   disabled={!token || busy}
                   onClick={() => void runCommand(prompt)}
-                  className="border-2 border-grid bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground hover:border-signal/40 disabled:opacity-40"
+                  className="bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground hover:bg-surface hover:text-signal disabled:opacity-40"
                 >
                   {prompt}
                 </button>
@@ -178,7 +178,7 @@ export function HedgeFundConsole() {
             <Panel title="Analyst signals">
               <div className="max-h-80 space-y-3 overflow-y-auto font-mono text-[11px]">
                 {actions.map((action, idx) => (
-                  <div key={`${action.tool}-${idx}`} className="border-2 border-grid bg-surface/30 p-3">
+                  <div key={`${action.tool}-${idx}`} className="bg-surface/30 p-3">
                     <div className="mb-1 text-signal">{action.tool}</div>
                     <pre className="whitespace-pre-wrap break-all text-muted-foreground">{action.result}</pre>
                   </div>
@@ -190,7 +190,7 @@ export function HedgeFundConsole() {
       </div>
 
       {!publicKey && (
-        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet to sign in.
         </div>
       )}
