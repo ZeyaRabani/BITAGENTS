@@ -33,7 +33,7 @@ function ConfirmDetailsView({ details }: { details?: ConfirmationDetails }) {
 
   if (details.action === "create_dca_plan") {
     return (
-      <dl className="mt-3 space-y-2 border-t border-grid pt-3 font-mono text-[11px]">
+      <dl className="mt-3 space-y-2 border-t-2 border-grid pt-3 font-mono text-[11px]">
         <div className="grid grid-cols-[100px_1fr] gap-1">
           <dt className="text-muted-foreground">From</dt>
           <dd>
@@ -91,7 +91,7 @@ function ConfirmDetailsView({ details }: { details?: ConfirmationDetails }) {
 
   if (details.action === "execute_swap_buy" || details.action === "withdraw_user_tokens") {
     return (
-      <dl className="mt-3 space-y-2 border-t border-grid pt-3 font-mono text-[11px]">
+      <dl className="mt-3 space-y-2 border-t-2 border-grid pt-3 font-mono text-[11px]">
         <div className="grid grid-cols-[100px_1fr] gap-1">
           <dt className="text-muted-foreground">Token</dt>
           <dd>
@@ -159,7 +159,7 @@ function TxLink({ tx, cluster }: { tx: ParsedTransaction; cluster?: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex flex-wrap items-center justify-between gap-2 border border-grid bg-surface/40 px-3 py-2 transition hover:border-signal"
+      className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-surface/40 px-3 py-2 transition hover:border-signal"
     >
       <span className="font-mono text-[11px] text-foreground">{short}</span>
       <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]">
@@ -213,7 +213,7 @@ function ActionCard({
       )}
 
       {act.transactions.length > 0 && (
-        <div className="mt-2 space-y-2 border-t border-grid pt-2">
+        <div className="mt-2 space-y-2 border-t-2 border-grid pt-2">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             Transaction{act.transactions.length > 1 ? "s" : ""}
           </div>
@@ -227,7 +227,7 @@ function ActionCard({
         {JSON.stringify(act.args, null, 2)}
       </pre>
       {act.result && (
-        <pre className="mt-2 max-h-40 overflow-auto border-t border-grid pt-2 text-[10px] leading-relaxed text-foreground/80">
+        <pre className="mt-2 max-h-40 overflow-auto border-t-2 border-grid pt-2 text-[10px] leading-relaxed text-foreground/80">
           {act.result}
         </pre>
       )}
@@ -388,7 +388,7 @@ export function DcaAgentConsole() {
       )}
 
       {publicKey && authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to authenticate. The message includes acceptance of our Terms,
           Privacy Policy, and Risk Disclaimer.
         </div>
@@ -402,13 +402,13 @@ export function DcaAgentConsole() {
       />
 
       {!publicKey && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet above to deposit and run DCA plans tied to your balance.
         </div>
       )}
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to use the DCA agent.
         </div>
       )}
@@ -462,7 +462,7 @@ export function DcaAgentConsole() {
                 )}
 
                 {msg.transactions && msg.transactions.length > 0 && (
-                  <div className="mt-3 space-y-2 border-t border-grid pt-3">
+                  <div className="mt-3 space-y-2 border-t-2 border-grid pt-3">
                     <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                       Transaction{msg.transactions.length > 1 ? "s" : ""}
                     </div>
@@ -481,7 +481,7 @@ export function DcaAgentConsole() {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
             <label htmlFor="dca-command" className="sr-only">
               Command
             </label>
@@ -492,7 +492,7 @@ export function DcaAgentConsole() {
                 onChange={(e) => setInput(e.target.value)}
                 disabled={busy || !token}
                 placeholder={token ? "e.g. Check my wallet status" : "Sign in with wallet to chat"}
-                className="flex-1 border border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
+                className="flex-1 border-2 border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -511,7 +511,7 @@ export function DcaAgentConsole() {
                 type="button"
                 disabled={busy || !token}
                 onClick={() => void runCommand(prompt)}
-                className="border border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
+                className="border-2 border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
               >
                 {prompt}
               </button>

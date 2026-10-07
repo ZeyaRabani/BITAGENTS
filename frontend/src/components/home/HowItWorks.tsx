@@ -21,7 +21,7 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how" className="border-b border-grid">
+    <section id="how" className="border-b-2 border-grid">
       <div className="mx-auto max-w-7xl px-6 py-20 md:py-28">
         <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
           <div className="max-w-2xl">
@@ -41,7 +41,7 @@ export function HowItWorks() {
               <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Step {s.n}</div>
               <h3 className="mt-4 font-display text-lg font-bold">{s.title}</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{s.body}</p>
-              <div className="mt-5 border border-grid bg-background p-3 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
+              <div className="mt-5 border-2 border-grid bg-background p-3 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
                 {s.code.map((line, i) => (
                   <div key={i} className={line.startsWith("✓") ? "text-signal" : line.startsWith("→") ? "text-warn" : ""}>
                     {line}

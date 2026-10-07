@@ -17,7 +17,7 @@ export function AgentAvatar({ seed, size = 44 }: { seed: string; size?: number }
   const initials = seed.slice(0, 2).toUpperCase();
   return (
     <div
-      className="flex shrink-0 items-center justify-center border border-grid font-display font-bold text-[#0c0a09]"
+      className="flex shrink-0 items-center justify-center border-2 border-grid font-display font-bold text-[#0c0a09]"
       style={{
         width: size,
         height: size,

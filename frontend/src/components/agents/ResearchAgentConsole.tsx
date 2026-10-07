@@ -95,7 +95,7 @@ export function ResearchAgentConsole({ config }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
+      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           {config.description} Connect your wallet (free) to chat with the agent.
         </p>
@@ -125,13 +125,13 @@ export function ResearchAgentConsole({ config }: Props) {
       )}
 
       {publicKey && authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to use {config.name} (free).
         </div>
       )}
 
       {!publicKey && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet to sign in and chat.
         </div>
       )}
@@ -165,7 +165,7 @@ export function ResearchAgentConsole({ config }: Props) {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -175,7 +175,7 @@ export function ResearchAgentConsole({ config }: Props) {
                   isAuthenticated ? "Ask the agent…" : "Connect wallet and sign in to chat"
                 }
                 disabled={!token || busy}
-                className="flex-1 border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+                className="flex-1 border-2 border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -197,7 +197,7 @@ export function ResearchAgentConsole({ config }: Props) {
                   type="button"
                   disabled={!token || busy}
                   onClick={() => void runCommand(prompt)}
-                  className="border border-grid bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground transition hover:border-signal/40 hover:text-foreground disabled:opacity-40"
+                  className="border-2 border-grid bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground transition hover:border-signal/40 hover:text-foreground disabled:opacity-40"
                 >
                   {prompt}
                 </button>
@@ -209,7 +209,7 @@ export function ResearchAgentConsole({ config }: Props) {
             <Panel title="Tool results">
               <div className="max-h-80 space-y-3 overflow-y-auto font-mono text-[11px]">
                 {actions.map((action, idx) => (
-                  <div key={`${action.tool}-${idx}`} className="border border-grid bg-surface/30 p-3">
+                  <div key={`${action.tool}-${idx}`} className="border-2 border-grid bg-surface/30 p-3">
                     <div className="mb-1 text-signal">{action.tool}</div>
                     <pre className="whitespace-pre-wrap break-all text-muted-foreground">
                       {action.result}
@@ -224,7 +224,7 @@ export function ResearchAgentConsole({ config }: Props) {
       </div>
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to start chatting.
         </div>
       )}

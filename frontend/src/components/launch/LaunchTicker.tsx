@@ -8,7 +8,7 @@ const EVENTS = [
 export function LaunchTicker() {
   const row = [...EVENTS, ...EVENTS];
   return (
-    <div className="border-b border-grid bg-surface/40">
+    <div className="border-b-2 border-grid bg-surface/40">
       <div className="ticker-mask overflow-hidden">
         <div className="flex w-max animate-ticker gap-8 px-6 py-2.5 font-mono text-xs">
           {row.map((e, i) => (

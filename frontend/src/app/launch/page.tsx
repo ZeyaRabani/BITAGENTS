@@ -52,7 +52,7 @@ export default function LaunchPage() {
 
   return (
     <div className="min-h-screen">
-      <section className="border-b border-grid">
+      <section className="border-b-2 border-grid">
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-14">
           <h1 className="font-display text-4xl font-bold leading-[1.02] tracking-tight md:text-5xl">
             Launch your <span className="text-signal">AI agent</span>.
@@ -72,13 +72,13 @@ export default function LaunchPage() {
             </Link>
             <a
               href="#feed"
-              className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal"
+              className="inline-flex items-center gap-2 border-2 border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal"
             >
               Browse Agents
             </a>
             <Link
               href="/launch/mine"
-              className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal"
+              className="inline-flex items-center gap-2 border-2 border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal"
             >
               My Agents
             </Link>
@@ -89,8 +89,8 @@ export default function LaunchPage() {
       <LaunchTicker />
 
       <section id="feed" className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-        <div className="flex flex-col gap-4 border-b border-grid pb-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-2 border border-grid bg-surface/40 px-3 py-2 sm:w-80">
+        <div className="flex flex-col gap-4 border-b-2 border-grid pb-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 border-2 border-grid bg-surface/40 px-3 py-2 sm:w-80">
             <Search size={14} className="shrink-0 text-muted-foreground" />
             <input
               value={query}
@@ -116,7 +116,7 @@ export default function LaunchPage() {
                 </button>
               ))}
             </div>
-            <div className="ml-2 flex gap-1.5 border-l border-grid pl-2">
+            <div className="ml-2 flex gap-1.5 border-l-2 border-grid pl-2">
               {SORTS.map((s) => (
                 <button
                   key={s.key}

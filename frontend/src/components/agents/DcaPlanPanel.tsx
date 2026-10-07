@@ -289,7 +289,7 @@ function PlanRow({
   }
 
   return (
-    <div className="border border-grid bg-background/60 p-3">
+    <div className="border-2 border-grid bg-background/60 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">{plan.name}</div>
@@ -354,7 +354,7 @@ function PlanRow({
               value={amountPerBuy}
               onChange={(e) => setAmountPerBuy(e.target.value)}
               disabled={actionBusy}
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -365,7 +365,7 @@ function PlanRow({
               onChange={(e) => setInterval(e.target.value)}
               disabled={actionBusy}
               placeholder="e.g. daily, every 4 hours"
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -378,7 +378,7 @@ function PlanRow({
               onChange={(e) => setMaxExecutions(e.target.value)}
               disabled={actionBusy}
               placeholder="optional"
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -391,7 +391,7 @@ function PlanRow({
               onChange={(e) => setTotalBudget(e.target.value)}
               disabled={actionBusy}
               placeholder="optional"
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -404,7 +404,7 @@ function PlanRow({
               value={slippageBps}
               onChange={(e) => setSlippageBps(e.target.value)}
               disabled={actionBusy}
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
         </div>
@@ -421,7 +421,7 @@ function PlanRow({
               setEditing(true);
               setActionError(null);
             }}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
           >
             Edit
           </button>
@@ -448,7 +448,7 @@ function PlanRow({
                 setSlippageBps(String(plan.slippage_bps ?? 100));
                 setActionError(null);
               }}
-              className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+              className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
             >
               Cancel edit
             </button>
@@ -459,7 +459,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("pause")}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
           >
             Pause
           </button>
@@ -469,7 +469,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("resume")}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
           >
             Resume
           </button>
@@ -479,7 +479,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy || editing}
             onClick={() => setConfirmAction("cancel")}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
           >
             Remove plan
           </button>
@@ -489,7 +489,7 @@ function PlanRow({
             type="button"
             disabled={busy || actionBusy}
             onClick={() => setHistoryOpen(true)}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
           >
             Tx history
           </button>
@@ -548,7 +548,7 @@ function HistoryPlanRow({
   const [historyOpen, setHistoryOpen] = useState(false);
 
   return (
-    <div className="border border-grid bg-background/40 px-3 py-2">
+    <div className="border-2 border-grid bg-background/40 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-foreground">{plan.name}</span>
         <span className={`font-mono text-[10px] uppercase ${statusClass(plan.status)}`}>
@@ -565,7 +565,7 @@ function HistoryPlanRow({
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
           >
             Tx history
           </button>
@@ -597,7 +597,7 @@ function ExecutionRow({
   const ok = row.status === "success" && !row.error;
 
   return (
-    <div className="border border-grid bg-background/40 px-3 py-2">
+    <div className="border-2 border-grid bg-background/40 px-3 py-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="font-mono text-[11px] text-foreground">
           {compact && index != null ? `Buy #${index}` : row.pair}
@@ -637,7 +637,7 @@ function LedgerRow({ entry, cluster }: { entry: LedgerEntry; cluster?: string })
   const signed = entry.direction === "deposit" || entry.direction === "acquire" ? "+" : "−";
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 border border-grid bg-background/40 px-3 py-2">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-background/40 px-3 py-2">
       <div>
         <div className="font-mono text-[11px] text-foreground">
           {ledgerDirectionLabel(entry.direction)} · {signed}
@@ -779,12 +779,12 @@ export function DcaPlanPanel({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search name, pair, id, mint…"
-            className="flex-1 border border-grid bg-background px-3 py-2 font-mono text-[11px] text-foreground outline-none focus:border-signal"
+            className="flex-1 border-2 border-grid bg-background px-3 py-2 font-mono text-[11px] text-foreground outline-none focus:border-signal"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as PlanStatusFilter)}
-            className="border border-grid bg-background px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground outline-none focus:border-signal"
+            className="border-2 border-grid bg-background px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground outline-none focus:border-signal"
           >
             <option value="all">All statuses</option>
             <option value="active">Active</option>

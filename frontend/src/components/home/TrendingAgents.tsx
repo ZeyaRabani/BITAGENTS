@@ -7,7 +7,7 @@ export function TrendingAgents() {
   const trending = [...LAUNCHED_AGENTS].sort((a, b) => b.volumeUsd - a.volumeUsd).slice(0, 6);
 
   return (
-    <section id="trending" className="border-b border-grid">
+    <section id="trending" className="border-b-2 border-grid">
       <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
           <div>
@@ -21,7 +21,7 @@ export function TrendingAgents() {
           </div>
           <Link
             href="/launch"
-            className="inline-flex shrink-0 items-center gap-2 border border-grid bg-surface/40 px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] transition hover:border-signal hover:text-signal"
+            className="inline-flex shrink-0 items-center gap-2 border-2 border-grid bg-surface/40 px-4 py-2.5 font-mono text-xs font-semibold uppercase tracking-[0.14em] transition hover:border-signal hover:text-signal"
           >
             See Full Launchpad <ArrowUpRight size={14} />
           </Link>

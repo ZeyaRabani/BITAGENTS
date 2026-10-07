@@ -26,9 +26,9 @@ export default async function CustomAgentDetailPage({
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <div className="mb-8 border-b border-grid pb-6">
+      <div className="mb-8 border-b-2 border-grid pb-6">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex h-12 w-12 items-center justify-center border border-grid bg-surface/40 text-signal">
+          <div className="flex h-12 w-12 items-center justify-center border-2 border-grid bg-surface/40 text-signal">
             <Bell size={22} strokeWidth={1.75} />
           </div>
           {agent.status === "testing" && (

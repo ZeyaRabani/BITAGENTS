@@ -78,7 +78,7 @@ export function Footer() {
             ))}
           </div>
         </div>
-        <div className="mt-14 border-t border-grid pt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="mt-14 border-t-2 border-grid pt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
           <span>© 2026 BIT Agents · All rights reserved</span>
         </div>
       </div>

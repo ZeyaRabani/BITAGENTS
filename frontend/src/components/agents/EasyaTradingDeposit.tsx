@@ -345,7 +345,7 @@ export function EasyaTradingDeposit({
           <LegalSignInNotice />
 
           <div className="grid gap-3 sm:grid-cols-[80px_1fr_auto]">
-            <div className="flex items-center border border-grid bg-background px-3 py-2.5 font-mono text-sm text-foreground">
+            <div className="flex items-center border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm text-foreground">
               SOL
             </div>
             <input
@@ -356,7 +356,7 @@ export function EasyaTradingDeposit({
               onChange={(e) => setAmount(e.target.value)}
               disabled={busy || verifyBusy || !connected}
               placeholder="Amount"
-              className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+              className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
             />
             <button
               type="button"
@@ -391,7 +391,7 @@ export function EasyaTradingDeposit({
             </a>
           )}
 
-          <div className="border-t border-grid pt-4">
+          <div className="border-t-2 border-grid pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
@@ -407,7 +407,7 @@ export function EasyaTradingDeposit({
                 onChange={(e) => setManualSignature(e.target.value)}
                 disabled={verifyBusy || !connected || !authToken}
                 placeholder="Transaction signature (base58)"
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
                 type="button"
@@ -420,7 +420,7 @@ export function EasyaTradingDeposit({
             </div>
           </div>
 
-          <div className="border-t border-grid pt-4">
+          <div className="border-t-2 border-grid pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
@@ -433,7 +433,7 @@ export function EasyaTradingDeposit({
                 value={withdrawToken}
                 onChange={(e) => setWithdrawToken(e.target.value)}
                 disabled={withdrawBusy || !connected || balances.length === 0}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               >
                 {balances.length === 0 ? (
                   <option value="">No balance</option>
@@ -453,7 +453,7 @@ export function EasyaTradingDeposit({
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 disabled={withdrawBusy || !connected || !withdrawToken}
                 placeholder={`Max ${withdrawableAmount}`}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
                 type="button"
@@ -507,7 +507,7 @@ export function EasyaTradingDeposit({
           ) : (
             <div className="mt-3 space-y-2">
               {balances.map((row) => (
-                <div key={row.token} className="border border-grid bg-background/60 px-3 py-2.5">
+                <div key={row.token} className="border-2 border-grid bg-background/60 px-3 py-2.5">
                   <div className="flex items-center justify-between font-display text-base font-bold">
                     <span>{row.token}</span>
                     <span className="text-signal tabular-nums">{row.available} avail</span>

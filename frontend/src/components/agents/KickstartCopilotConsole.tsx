@@ -33,7 +33,7 @@ function TradingConfirmDetailsView({ details }: { details?: ConfirmationDetails 
     details.action === "cancel_trading_order"
   ) {
     return (
-      <dl className="mt-3 space-y-2 border-t border-grid pt-3 font-mono text-[11px]">
+      <dl className="mt-3 space-y-2 border-t-2 border-grid pt-3 font-mono text-[11px]">
         <div className="grid grid-cols-[110px_1fr] gap-1">
           {details.order_type && (
             <>
@@ -316,7 +316,7 @@ export function KickstartCopilotConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
+      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
         <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
           {KICKSTART_COPILOT.description} Connect your wallet (free) and ask about token overview,
           analytics, health scores, risks, comparisons, and launch operations.
@@ -347,13 +347,13 @@ export function KickstartCopilotConsole() {
       )}
 
       {publicKey && authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to use the EasyA Analysis Agent (free).
         </div>
       )}
 
       {!publicKey && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet to sign in and chat with the copilot.
         </div>
       )}
@@ -396,14 +396,14 @@ export function KickstartCopilotConsole() {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 disabled={busy || !token}
                 placeholder={token ? "e.g. Give me an overview of BITAGENTS" : "Sign in with wallet to chat"}
-                className="flex-1 border border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
+                className="flex-1 border-2 border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -422,7 +422,7 @@ export function KickstartCopilotConsole() {
                 type="button"
                 disabled={busy || !token}
                 onClick={() => void runCommand(prompt)}
-                className="border border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
+                className="border-2 border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
               >
                 {prompt}
               </button>
@@ -457,7 +457,7 @@ export function KickstartCopilotConsole() {
       )}
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to start chatting.
         </div>
       )}

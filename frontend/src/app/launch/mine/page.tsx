@@ -97,7 +97,7 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
         <button
           onClick={connectTelegram}
           disabled={busy}
-          className="border border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+          className="border-2 border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
         >
           {telegramLink ? "Re-generate link" : "Connect Telegram"}
         </button>
@@ -113,7 +113,7 @@ function NotifySection({ agent, token, onUpdated }: { agent: LaunchedAgentRecord
           <button
             onClick={sendTest}
             disabled={busy}
-            className="border border-grid px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
+            className="border-2 border-grid px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground disabled:opacity-40"
           >
             Send Test
           </button>
@@ -205,10 +205,10 @@ function AgentRow({
   }
 
   return (
-    <article className="border border-grid bg-surface/40 p-5">
+    <article className="border-2 border-grid bg-surface/40 p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center border border-grid bg-background/80 text-signal">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center border-2 border-grid bg-background/80 text-signal">
             <Bell size={18} strokeWidth={1.75} />
           </div>
           <div>
@@ -225,14 +225,14 @@ function AgentRow({
           {agent.status === "draft" ? (
             <Link
               href={`/launch/create?agentId=${agent.id}`}
-              className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
+              className="border-2 border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
             >
               Resume
             </Link>
           ) : (
             <button
               onClick={() => setEditing((v) => !v)}
-              className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
+              className="border-2 border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-foreground transition hover:border-signal hover:text-signal"
             >
               {editing ? "Cancel" : "Edit"}
             </button>
@@ -250,7 +250,7 @@ function AgentRow({
               <button
                 onClick={() => setConfirmingDelete(false)}
                 disabled={deleting}
-                className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+                className="border-2 border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
               >
                 Cancel
               </button>
@@ -258,7 +258,7 @@ function AgentRow({
           ) : (
             <button
               onClick={() => setConfirmingDelete(true)}
-              className="border border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-destructive hover:text-destructive"
+              className="border-2 border-grid px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-destructive hover:text-destructive"
             >
               Delete
             </button>
@@ -272,7 +272,7 @@ function AgentRow({
       )}
 
       {editing && (
-        <div className="mt-4 space-y-3 border-t border-grid pt-4">
+        <div className="mt-4 space-y-3 border-t-2 border-grid pt-4">
           <div>
             <label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
               Description
@@ -281,7 +281,7 @@ function AgentRow({
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
-              className="mt-1 w-full resize-y border border-grid bg-background px-3 py-2 text-sm text-foreground"
+              className="mt-1 w-full resize-y border-2 border-grid bg-background px-3 py-2 text-sm text-foreground"
             />
           </div>
           {priceWatch && (
@@ -295,7 +295,7 @@ function AgentRow({
                 min="0.1"
                 value={threshold}
                 onChange={(e) => setThreshold(e.target.value)}
-                className="mt-1 w-32 border border-grid bg-background px-3 py-2 text-sm text-foreground"
+                className="mt-1 w-32 border-2 border-grid bg-background px-3 py-2 text-sm text-foreground"
               />
             </div>
           )}
@@ -308,7 +308,7 @@ function AgentRow({
             {saving ? "Saving…" : "Save changes"}
           </button>
 
-          <div className="border-t border-grid pt-4">
+          <div className="border-t-2 border-grid pt-4">
             <label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
               Notification destination — change where THIS agent alerts you
             </label>
@@ -319,7 +319,7 @@ function AgentRow({
         </div>
       )}
 
-      <div className="mt-4 border-t border-grid pt-3">
+      <div className="mt-4 border-t-2 border-grid pt-3">
         <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
           Notifications
         </div>
@@ -343,7 +343,7 @@ function AgentRow({
 function SubscribedAgentRow({ sub }: { sub: MySubscription }) {
   return (
     <Link href={`/agents/custom/${sub.agent_id}`} className="block">
-      <article className="border border-grid bg-surface/40 p-5 transition hover:border-signal/60">
+      <article className="border-2 border-grid bg-surface/40 p-5 transition hover:border-signal/60">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="font-display text-lg font-bold">{sub.agent_name ?? "Untitled agent"}</h3>
@@ -362,7 +362,7 @@ function SubscribedAgentRow({ sub }: { sub: MySubscription }) {
         {sub.agent_description && (
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{sub.agent_description}</p>
         )}
-        <div className="mt-4 border-t border-grid pt-3">
+        <div className="mt-4 border-t-2 border-grid pt-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             Notifications
           </div>
@@ -408,7 +408,7 @@ export default function MyAgentsPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
-      <div className="mb-8 border-b border-grid pb-6">
+      <div className="mb-8 border-b-2 border-grid pb-6">
         <h1 className="font-display text-3xl font-bold leading-tight md:text-4xl">My agents</h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
           Agents you've launched, and agents you've adopted from someone else — this is the only
@@ -433,14 +433,14 @@ export default function MyAgentsPage() {
       )}
 
       {!publicKey ? (
-        <div className="border border-grid bg-surface/40 p-5">
+        <div className="border-2 border-grid bg-surface/40 p-5">
           <p className="text-sm text-muted-foreground">Connect your wallet to see your agents.</p>
           <div className="mt-3">
             <WalletMultiButton className="wallet-adapter-button-trigger!" />
           </div>
         </div>
       ) : authBusy || !isAuthenticated ? (
-        <div className="border border-grid bg-surface/40 p-5">
+        <div className="border-2 border-grid bg-surface/40 p-5">
           <p className="text-sm text-muted-foreground">Approve the wallet sign-in message to continue.</p>
         </div>
       ) : loading ? (
@@ -448,10 +448,10 @@ export default function MyAgentsPage() {
           Loading your agents…
         </div>
       ) : error ? (
-        <div className="border border-grid bg-surface/40 p-5 text-sm text-destructive">{error}</div>
+        <div className="border-2 border-grid bg-surface/40 p-5 text-sm text-destructive">{error}</div>
       ) : tab === "created" ? (
         agents.length === 0 ? (
-          <div className="border border-grid bg-surface/40 p-5">
+          <div className="border-2 border-grid bg-surface/40 p-5">
             <p className="text-sm text-muted-foreground">You haven't launched an agent yet.</p>
             <Link
               href="/launch/create"
@@ -476,7 +476,7 @@ export default function MyAgentsPage() {
           </div>
         )
       ) : subscriptions.length === 0 ? (
-        <div className="border border-grid bg-surface/40 p-5">
+        <div className="border-2 border-grid bg-surface/40 p-5">
           <p className="text-sm text-muted-foreground">
             You haven't adopted anyone else's agent yet — browse the marketplace and subscribe to one.
           </p>

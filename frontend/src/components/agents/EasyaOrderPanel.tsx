@@ -184,7 +184,7 @@ function OrderExecutionsDialog({
             const href = orderExplorerUrl(row.signature, cluster);
             const ok = row.status === "success";
             return (
-              <div key={row.id ?? `${row.signature ?? "row"}-${index}`} className="border border-grid bg-background/60 p-3">
+              <div key={row.id ?? `${row.signature ?? "row"}-${index}`} className="border-2 border-grid bg-background/60 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-mono text-[11px] text-foreground">
                     Buy #{executions.length - index}
@@ -324,7 +324,7 @@ function LimitOrderRow({
             setEditing(true);
             setActionError(null);
           }}
-          className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
         >
           Edit
         </button>
@@ -351,7 +351,7 @@ function LimitOrderRow({
               setSlippageBps(String(order.slippage_bps ?? 100));
               setActionError(null);
             }}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:text-foreground disabled:opacity-40"
           >
             Cancel edit
           </button>
@@ -362,7 +362,7 @@ function LimitOrderRow({
           type="button"
           disabled={busy || actionBusy}
           onClick={() => setConfirmCancel(true)}
-          className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
+          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-warn hover:text-warn disabled:opacity-40"
         >
           {removeLabel}
         </button>
@@ -372,7 +372,7 @@ function LimitOrderRow({
           type="button"
           disabled={busy || actionBusy}
           onClick={() => setHistoryOpen(true)}
-          className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
+          className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal disabled:opacity-40"
         >
           Tx history
         </button>
@@ -462,7 +462,7 @@ function LimitOrderRow({
       : null;
 
   return (
-    <div className="border border-grid bg-background/60 p-3">
+    <div className="border-2 border-grid bg-background/60 p-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">{orderTitle(order)}</div>
@@ -476,7 +476,7 @@ function LimitOrderRow({
       </div>
 
       {(canEdit || canCancel || hasOrderHistory(order)) && (
-        <div className="mt-3 border-b border-grid pb-3">{actionButtons}</div>
+        <div className="mt-3 border-b-2 border-grid pb-3">{actionButtons}</div>
       )}
 
       {!editing ? (
@@ -582,7 +582,7 @@ function LimitOrderRow({
               value={amountSol}
               onChange={(e) => setAmountSol(e.target.value)}
               disabled={actionBusy}
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -595,7 +595,7 @@ function LimitOrderRow({
               onChange={(e) => setLimitPrice(e.target.value)}
               disabled={actionBusy}
               placeholder="optional"
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           <label className="grid gap-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -608,7 +608,7 @@ function LimitOrderRow({
               onChange={(e) => setLimitMcap(e.target.value)}
               disabled={actionBusy}
               placeholder="optional"
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
           {(order.order_type === "threshold" || order.recurring) && (
@@ -622,7 +622,7 @@ function LimitOrderRow({
                 onChange={(e) => setStopMcap(e.target.value)}
                 disabled={actionBusy}
                 placeholder="optional"
-                className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+                className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
               />
             </label>
           )}
@@ -636,7 +636,7 @@ function LimitOrderRow({
               value={slippageBps}
               onChange={(e) => setSlippageBps(e.target.value)}
               disabled={actionBusy}
-              className="border border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
+              className="border-2 border-grid bg-background px-2 py-1.5 text-sm text-foreground outline-none focus:border-signal"
             />
           </label>
         </div>
@@ -686,7 +686,7 @@ function MarketOrderRow({
   const ok = order.status === "filled" && !order.error_message;
 
   return (
-    <div className="border border-grid bg-background/40 px-3 py-3">
+    <div className="border-2 border-grid bg-background/40 px-3 py-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="font-mono text-xs text-foreground">Market buy · {order.output_token}</div>
@@ -747,7 +747,7 @@ function MarketOrderRow({
             href={href}
             target="_blank"
             rel="noopener noreferrer"
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-signal transition hover:bg-signal/10"
           >
             Explorer ↗
           </a>
@@ -756,7 +756,7 @@ function MarketOrderRow({
           <button
             type="button"
             onClick={() => setHistoryOpen(true)}
-            className="border border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
+            className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-signal"
           >
             Tx history
           </button>
@@ -931,12 +931,12 @@ export function EasyaOrderPanel({
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search token, pair, id, mint…"
-            className="flex-1 border border-grid bg-background px-3 py-2 font-mono text-[11px] text-foreground outline-none focus:border-signal"
+            className="flex-1 border-2 border-grid bg-background px-3 py-2 font-mono text-[11px] text-foreground outline-none focus:border-signal"
           />
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as OrderStatusFilter)}
-            className="border border-grid bg-background px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground outline-none focus:border-signal"
+            className="border-2 border-grid bg-background px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-foreground outline-none focus:border-signal"
           >
             <option value="all">All limit orders</option>
             <option value="active">Active only</option>

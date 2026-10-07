@@ -433,7 +433,7 @@ export function DcaAgentDeposit({
                 value={token}
                 onChange={(e) => setToken(e.target.value as PresetToken | "custom")}
                 disabled={busy || verifyBusy || !connected}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               >
                 {PRESET_TOKENS.map((t) => (
                   <option key={t} value={t}>
@@ -450,7 +450,7 @@ export function DcaAgentDeposit({
                 onChange={(e) => setAmount(e.target.value)}
                 disabled={busy || verifyBusy || !connected}
                 placeholder="Amount"
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
                 type="button"
@@ -472,7 +472,7 @@ export function DcaAgentDeposit({
                   onChange={(e) => setCustomMint(e.target.value)}
                   disabled={busy || verifyBusy || !connected}
                   placeholder="Token mint address (any SPL token)"
-                  className="w-full border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                  className="w-full border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
                 />
                 {resolvedCustom && (
                   <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
@@ -506,7 +506,7 @@ export function DcaAgentDeposit({
             </a>
           )}
 
-          <div className="border-t border-grid pt-4">
+          <div className="border-t-2 border-grid pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
@@ -522,7 +522,7 @@ export function DcaAgentDeposit({
                 onChange={(e) => setManualSignature(e.target.value)}
                 disabled={verifyBusy || !connected || !authToken}
                 placeholder="Transaction signature (base58)"
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
                 type="button"
@@ -535,7 +535,7 @@ export function DcaAgentDeposit({
             </div>
           </div>
 
-          <div className="border-t border-grid pt-4">
+          <div className="border-t-2 border-grid pt-4">
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
@@ -548,7 +548,7 @@ export function DcaAgentDeposit({
                 value={withdrawToken}
                 onChange={(e) => setWithdrawToken(e.target.value)}
                 disabled={withdrawBusy || !connected || balances.length === 0}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               >
                 {balances.length === 0 ? (
                   <option value="">No balance</option>
@@ -568,7 +568,7 @@ export function DcaAgentDeposit({
                 onChange={(e) => setWithdrawAmount(e.target.value)}
                 disabled={withdrawBusy || !connected || !withdrawToken}
                 placeholder={`Max ${withdrawableAmount}`}
-                className="border border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
+                className="border-2 border-grid bg-background px-3 py-2.5 font-mono text-sm outline-none focus:border-signal disabled:opacity-50"
               />
               <button
                 type="button"
@@ -620,7 +620,7 @@ export function DcaAgentDeposit({
           ) : (
             <div className="mt-3 space-y-2">
               {balances.map((row) => (
-                <div key={row.token} className="border border-grid bg-background/60 px-3 py-2.5">
+                <div key={row.token} className="border-2 border-grid bg-background/60 px-3 py-2.5">
                   <div className="flex items-center justify-between font-display text-base font-bold">
                     <span>{row.token}</span>
                     <span className="text-signal tabular-nums">{row.available} avail</span>

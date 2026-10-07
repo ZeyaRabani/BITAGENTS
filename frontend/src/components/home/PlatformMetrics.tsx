@@ -14,7 +14,7 @@ export function PlatformMetrics() {
   ];
 
   return (
-    <section className="border-b border-grid bg-surface/30">
+    <section className="border-b-2 border-grid bg-surface/30">
       <div className="mx-auto grid max-w-7xl grid-cols-2 gap-px bg-border md:grid-cols-4">
         {stats.map(([value, label]) => (
           <div key={label} className="bg-background px-6 py-6">

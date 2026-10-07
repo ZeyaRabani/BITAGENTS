@@ -74,7 +74,7 @@ const CHECKLIST_ITEMS: { key: keyof AgentChecklist | "fields"; label: string }[]
 
 function ChecklistSidebar({ checklist, loading }: { checklist: AgentChecklist | null; loading: boolean }) {
   return (
-    <div className="border border-grid bg-surface/40 p-4">
+    <div className="border-2 border-grid bg-surface/40 p-4">
       <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         Launch checklist
       </div>
@@ -97,12 +97,12 @@ function ChecklistSidebar({ checklist, loading }: { checklist: AgentChecklist | 
         </ul>
       )}
       {checklist?.watch_type && (
-        <p className="mt-3 border-t border-grid pt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+        <p className="mt-3 border-t-2 border-grid pt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           Type: {checklist.watch_type.replace("_", " ")}
         </p>
       )}
       {checklist?.launched && (
-        <p className="mt-3 border-t border-grid pt-3 text-xs text-signal">This agent is already live.</p>
+        <p className="mt-3 border-t-2 border-grid pt-3 text-xs text-signal">This agent is already live.</p>
       )}
     </div>
   );
@@ -202,7 +202,7 @@ export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) 
   return (
     <div className="space-y-6">
       {!publicKey && (
-        <div className="flex flex-col items-start gap-3 border border-grid bg-surface/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col items-start gap-3 border-2 border-grid bg-surface/40 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-muted-foreground">Connect your wallet to start building an agent.</p>
           <WalletMultiButton className="wallet-adapter-button-trigger!" />
         </div>
@@ -215,7 +215,7 @@ export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) 
       )}
 
       {publicKey && authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to continue.
         </div>
       )}
@@ -248,7 +248,7 @@ export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) 
                     type="button"
                     disabled={!token || busy}
                     onClick={() => void runMessage(prompt)}
-                    className="border border-grid bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground transition hover:border-signal/40 hover:text-foreground disabled:opacity-40"
+                    className="border-2 border-grid bg-surface/40 px-3 py-2 text-left font-mono text-xs text-muted-foreground transition hover:border-signal/40 hover:text-foreground disabled:opacity-40"
                   >
                     {prompt}
                   </button>
@@ -281,7 +281,7 @@ export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) 
           </div>
         )}
 
-        <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
+        <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
           <div className="flex gap-2">
             <textarea
               value={input}
@@ -299,7 +299,7 @@ export function AgentBuilderChat({ resumeAgentId }: { resumeAgentId?: string }) 
               }
               disabled={!token || busy}
               rows={1}
-              className="max-h-40 min-h-[42px] flex-1 resize-y border border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
+              className="max-h-40 min-h-[42px] flex-1 resize-y border-2 border-grid bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground disabled:opacity-50"
             />
             <button
               type="submit"

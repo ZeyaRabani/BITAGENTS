@@ -1,6 +1,6 @@
 export function Hero() {
     return (
-        <section id="top" className="relative overflow-hidden border-b border-grid">
+        <section id="top" className="relative overflow-hidden border-b-2 border-grid">
             <div className="mx-auto max-w-7xl px-6 py-10">
                 <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">
                     The Financial Operating System For AI Agents
@@ -16,7 +16,7 @@ export function Hero() {
                     <a href="/launch/create" className="group inline-flex items-center gap-2 bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
                         Launch An Agent <span className="transition group-hover:translate-x-0.5">→</span>
                     </a>
-                    <a href="/launch" className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
+                    <a href="/launch" className="inline-flex items-center gap-2 border-2 border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
                         Explore The Launchpad
                     </a>
                 </div>

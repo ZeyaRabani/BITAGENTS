@@ -71,7 +71,7 @@ export function MultiWalletDemo() {
             from another&apos;s — only an internal database keeps track of who owns
             what.
           </p>
-          <div className="rounded-lg border border-grid bg-black/20 px-3 py-2 font-mono text-xs">
+          <div className="rounded-lg border-2 border-grid bg-black/20 px-3 py-2 font-mono text-xs">
             6uMzjzHbFTxPBXjd17AtpvP4r18UjYvS35ENxMuHhNZo
             <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
               same address for every user, no exceptions
@@ -121,7 +121,7 @@ export function MultiWalletDemo() {
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                   Your unique deposit address
                 </div>
-                <div className="rounded-lg border border-grid bg-black/20 px-3 py-2 font-mono text-xs break-all">
+                <div className="rounded-lg border-2 border-grid bg-black/20 px-3 py-2 font-mono text-xs break-all">
                   {data.your_deposit_address}
                 </div>
                 <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -129,7 +129,7 @@ export function MultiWalletDemo() {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between rounded-lg border border-grid px-3 py-2">
+              <div className="flex items-center justify-between rounded-lg border-2 border-grid px-3 py-2">
                 <div>
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                     Balance
@@ -158,7 +158,7 @@ export function MultiWalletDemo() {
               <button
                 type="button"
                 onClick={() => setRefreshTick((n) => n + 1)}
-                className="w-full rounded-lg border border-grid px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-surface/60"
+                className="w-full rounded-lg border-2 border-grid px-3 py-1.5 text-xs uppercase tracking-wider text-muted-foreground hover:bg-surface/60"
               >
                 Refresh balance
               </button>

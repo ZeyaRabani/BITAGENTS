@@ -120,7 +120,7 @@ function CampaignExecutionsDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <div className="max-h-[50vh] space-y-2 overflow-y-auto border border-grid p-3">
+        <div className="max-h-[50vh] space-y-2 overflow-y-auto border-2 border-grid p-3">
           {loading && <p className="font-mono text-[11px] text-muted-foreground">Loading…</p>}
           {error && <p className="font-mono text-[11px] text-warn">{error}</p>}
           {!loading && !error && rows.length === 0 && (
@@ -129,7 +129,7 @@ function CampaignExecutionsDialog({
           {rows.map((row, index) => (
             <div
               key={`${row.at ?? index}-${index}`}
-              className="flex flex-wrap items-center justify-between gap-2 border border-grid bg-background/60 px-3 py-2 font-mono text-[10px]"
+              className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-background/60 px-3 py-2 font-mono text-[10px]"
             >
               <span className="text-muted-foreground">
                 Cycle {row.cycle ?? index + 1} · {formatTime(row.at)}
@@ -299,7 +299,7 @@ export function VolumeCampaignPanel({
         {filtered.map((campaign) => {
           const provisionErr = provisionErrorMessage(campaign);
           return (
-            <div key={campaign.id} className="border border-grid bg-background/60 p-4">
+            <div key={campaign.id} className="border-2 border-grid bg-background/60 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-[12px] text-foreground">{campaign.name}</p>
@@ -323,7 +323,7 @@ export function VolumeCampaignPanel({
                   {campaign.status === "active" && (
                     <button
                       type="button"
-                      className="border border-grid px-2 py-1 font-mono text-[10px] uppercase"
+                      className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase"
                       disabled={busyId === campaign.id}
                       onClick={() =>
                         setPendingAction({ id: campaign.id, action: "pause", name: campaign.name })
@@ -361,7 +361,7 @@ export function VolumeCampaignPanel({
                   )}
                   <button
                     type="button"
-                    className="border border-grid px-2 py-1 font-mono text-[10px] uppercase"
+                    className="border-2 border-grid px-2 py-1 font-mono text-[10px] uppercase"
                     onClick={() => setHistoryCampaign(campaign)}
                   >
                     History

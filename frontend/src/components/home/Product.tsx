@@ -27,7 +27,7 @@ const cards = [
 
 export function Product() {
   return (
-    <section id="product" className="border-b border-grid">
+    <section id="product" className="border-b-2 border-grid">
       <div className="mx-auto max-w-7xl px-6 py-20 md:py-24">
         <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Product</div>
         <div className="mt-4 grid gap-12 md:grid-cols-[1fr_1.4fr] md:items-start">
@@ -41,7 +41,7 @@ export function Product() {
               is not available yet.
             </p>
           </div>
-          <div className="grid gap-px border border-grid bg-border sm:grid-cols-2">
+          <div className="grid gap-px border-2 border-grid bg-border sm:grid-cols-2">
             {cards.map(({ icon: Icon, title, body }) => (
               <div key={title} className="bg-background p-6">
                 <Icon className="h-5 w-5 text-signal" />

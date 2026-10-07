@@ -11,7 +11,7 @@ export function Ticker() {
   ];
   const row = [...items, ...items];
   return (
-    <div className="border-b border-grid bg-surface/40">
+    <div className="border-b-2 border-grid bg-surface/40">
       <div className="ticker-mask overflow-hidden">
         <div className="flex w-max animate-ticker gap-10 px-6 py-3 font-mono text-xs">
           {row.map((it, i) => (

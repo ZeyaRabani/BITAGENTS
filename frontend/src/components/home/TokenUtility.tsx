@@ -11,7 +11,7 @@ const items = [
 
 export function TokenUtility() {
   return (
-    <section id="token-utility" className="border-b border-grid">
+    <section id="token-utility" className="border-b-2 border-grid">
       <div className="mx-auto max-w-7xl px-6 py-20 md:py-24">
         <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Token Utility</div>
         <h2 className="mt-4 max-w-3xl font-display text-4xl font-bold leading-tight md:text-5xl">
@@ -20,7 +20,7 @@ export function TokenUtility() {
         <p className="mt-5 max-w-2xl text-muted-foreground">
           The BIT Agents token is designed to connect product usage with marketplace access, agent rewards, and future settlement flows.
         </p>
-        <div className="mt-12 grid gap-px bg-[color:var(--border)] border border-grid sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-12 grid gap-px bg-[color:var(--border)] border-2 border-grid sm:grid-cols-2 lg:grid-cols-4">
           {items.map((i) => (
             <div key={i.title} className="bg-background p-6">
               <Lock className="h-4 w-4 text-signal" />

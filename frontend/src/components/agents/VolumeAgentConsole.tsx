@@ -69,7 +69,7 @@ function TxLink({ tx, cluster }: { tx: ParsedTransaction; cluster?: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex flex-wrap items-center justify-between gap-2 border border-grid bg-surface/40 px-3 py-2 transition hover:border-signal"
+      className="flex flex-wrap items-center justify-between gap-2 border-2 border-grid bg-surface/40 px-3 py-2 transition hover:border-signal"
     >
       <span className="font-mono text-[11px] text-foreground">{short}</span>
       <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.14em]">
@@ -123,7 +123,7 @@ function ActionCard({
       )}
 
       {act.transactions.length > 0 && (
-        <div className="mt-2 space-y-2 border-t border-grid pt-2">
+        <div className="mt-2 space-y-2 border-t-2 border-grid pt-2">
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
             Transaction{act.transactions.length > 1 ? "s" : ""}
           </div>
@@ -134,7 +134,7 @@ function ActionCard({
       )}
 
       {act.result && (
-        <pre className="mt-2 max-h-40 overflow-auto border-t border-grid pt-2 text-[10px] leading-relaxed text-foreground/80">
+        <pre className="mt-2 max-h-40 overflow-auto border-t-2 border-grid pt-2 text-[10px] leading-relaxed text-foreground/80">
           {act.result}
         </pre>
       )}
@@ -339,7 +339,7 @@ export function VolumeAgentConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
+      <div className="border-2 border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
           {VOLUME_AGENT.description} Connect your wallet, deposit SOL + token, then schedule Meteora DLMM
           buy/sell volume cycles. Existing pools are reused automatically; new pairs may require ~{poolCost}{" "}
@@ -359,7 +359,7 @@ export function VolumeAgentConsole() {
       )}
 
       {publicKey && authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in message to authenticate. The message includes acceptance of our Terms,
           Privacy Policy, and Risk Disclaimer.
         </div>
@@ -374,13 +374,13 @@ export function VolumeAgentConsole() {
       />
 
       {!publicKey && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Connect your wallet above to deposit and run volume campaigns tied to your balance.
         </div>
       )}
 
       {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+        <div className="border-2 border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
           Approve the wallet sign-in prompt to use the Volume Agent.
         </div>
       )}
@@ -435,7 +435,7 @@ export function VolumeAgentConsole() {
                 )}
 
                 {msg.transactions && msg.transactions.length > 0 && (
-                  <div className="mt-3 space-y-2 border-t border-grid pt-3">
+                  <div className="mt-3 space-y-2 border-t-2 border-grid pt-3">
                     <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
                       Transaction{msg.transactions.length > 1 ? "s" : ""}
                     </div>
@@ -454,14 +454,14 @@ export function VolumeAgentConsole() {
             <div ref={chatEndRef} />
           </div>
 
-          <form onSubmit={onSubmit} className="mt-4 border-t border-grid pt-4">
+          <form onSubmit={onSubmit} className="mt-4 border-t-2 border-grid pt-4">
             <div className="flex flex-col gap-3 sm:flex-row">
               <input
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 disabled={busy || !token}
                 placeholder={token ? "e.g. List my volume campaigns" : "Sign in with wallet to chat"}
-                className="flex-1 border border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
+                className="flex-1 border-2 border-grid bg-background px-4 py-3 font-mono text-sm text-foreground outline-none transition placeholder:text-muted-foreground focus:border-signal disabled:opacity-50"
               />
               <button
                 type="submit"
@@ -480,7 +480,7 @@ export function VolumeAgentConsole() {
                 type="button"
                 disabled={busy || !token}
                 onClick={() => void runCommand(prompt)}
-                className="border border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
+                className="border-2 border-grid px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground transition hover:border-signal hover:text-foreground disabled:opacity-40"
               >
                 {prompt}
               </button>
@@ -522,7 +522,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">Token A (base)</span>
               <input
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={baseToken}
                 onChange={(e) => setBaseToken(e.target.value)}
                 placeholder="Symbol or mint (e.g. USDC)"
@@ -531,7 +531,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">Token B (quote)</span>
               <select
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={quoteToken}
                 onChange={(e) => setQuoteToken(e.target.value)}
               >
@@ -546,7 +546,7 @@ export function VolumeAgentConsole() {
               type="button"
               onClick={() => void checkMeteoraPool()}
               disabled={poolCheckBusy || !baseToken.trim()}
-              className="border border-grid px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:border-signal disabled:opacity-50"
+              className="border-2 border-grid px-4 py-2 font-mono text-[11px] uppercase tracking-[0.12em] transition hover:border-signal disabled:opacity-50"
             >
               {poolCheckBusy ? "Checking Meteora…" : "Check on Meteora"}
             </button>
@@ -621,7 +621,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px] sm:col-span-2">
               <span className="text-muted-foreground">Base token (same as pool setup)</span>
               <input
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={baseToken}
                 onChange={(e) => setBaseToken(e.target.value)}
                 placeholder="Symbol or mint (e.g. USDC)"
@@ -631,7 +631,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">Quote token</span>
               <select
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={quoteToken}
                 onChange={(e) => setQuoteToken(e.target.value)}
               >
@@ -642,7 +642,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">{quoteToken} per trade leg</span>
               <input
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={tradeAmount}
                 onChange={(e) => setTradeAmount(e.target.value)}
                 inputMode="decimal"
@@ -652,7 +652,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">Interval</span>
               <input
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={interval}
                 onChange={(e) => setInterval(e.target.value)}
                 placeholder="30 seconds"
@@ -662,7 +662,7 @@ export function VolumeAgentConsole() {
             <label className="space-y-1 font-mono text-[11px]">
               <span className="text-muted-foreground">Cycles (buy + sell each)</span>
               <input
-                className="w-full border border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
+                className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground outline-none focus:border-signal"
                 value={maxExecutions}
                 onChange={(e) => setMaxExecutions(e.target.value)}
                 inputMode="numeric"

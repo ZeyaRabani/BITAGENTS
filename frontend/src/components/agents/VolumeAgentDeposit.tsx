@@ -181,7 +181,7 @@ export function VolumeAgentDeposit({
               <label className="space-y-1 font-mono text-[11px]">
                 <span className="text-muted-foreground">Token</span>
                 <select
-                  className="w-full border border-grid bg-background px-3 py-2 text-foreground"
+                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
                   value={token}
                   onChange={(e) => setToken(e.target.value as typeof token)}
                 >
@@ -197,7 +197,7 @@ export function VolumeAgentDeposit({
                 <label className="space-y-1 font-mono text-[11px] sm:col-span-2">
                   <span className="text-muted-foreground">Mint address</span>
                   <input
-                    className="w-full border border-grid bg-background px-3 py-2 text-foreground"
+                    className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
                     value={customMint}
                     onChange={(e) => setCustomMint(e.target.value)}
                     placeholder="Token mint for your pair"
@@ -212,7 +212,7 @@ export function VolumeAgentDeposit({
               <label className="space-y-1 font-mono text-[11px]">
                 <span className="text-muted-foreground">Amount</span>
                 <input
-                  className="w-full border border-grid bg-background px-3 py-2 text-foreground"
+                  className="w-full border-2 border-grid bg-background px-3 py-2 text-foreground"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
                   placeholder="0.0"
@@ -231,7 +231,7 @@ export function VolumeAgentDeposit({
             </button>
 
             {balances.length > 0 && (
-              <div className="space-y-2 border border-grid p-3">
+              <div className="space-y-2 border-2 border-grid p-3">
                 <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Balances</p>
                 {balances.map((row) => (
                   <div key={row.token} className="flex justify-between font-mono text-[11px]">

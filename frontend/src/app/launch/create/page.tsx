@@ -9,7 +9,7 @@ export default async function CreateAgentPage({
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <div className="mb-8 border-b border-grid pb-6">
+      <div className="mb-8 border-b-2 border-grid pb-6">
         <h1 className="font-display text-3xl font-bold leading-tight md:text-4xl">
           {agentId ? "Resume your agent" : "Launch an agent"}
         </h1>

@@ -14,7 +14,7 @@ export function AgentDetailHeader({
 }) {
   return (
     <>
-      <div className="mb-6 flex flex-col items-start justify-between gap-4 border-b border-grid pb-6 md:flex-row md:items-end">
+      <div className="mb-6 flex flex-col items-start justify-between gap-4 border-b-2 border-grid pb-6 md:flex-row md:items-end">
         <div>
           <h1 className="font-display text-3xl font-bold leading-tight md:text-4xl">{agent.name}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">

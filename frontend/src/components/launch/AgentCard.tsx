@@ -11,7 +11,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="group flex flex-col gap-3 border border-grid bg-surface/40 p-4 transition hover:border-signal hover:bg-surface"
+      className="group flex flex-col gap-3 border-2 border-grid bg-surface/40 p-4 transition hover:border-signal hover:bg-surface"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-3">
