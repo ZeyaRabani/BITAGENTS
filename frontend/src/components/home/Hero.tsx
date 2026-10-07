@@ -2,7 +2,7 @@ export function Hero() {
     return (
         <section id="top" className="relative overflow-hidden">
             <div className="mx-auto max-w-7xl px-6 py-10">
-                <h1 className="max-w-4xl font-display text-5xl font-bold leading-[0.95] tracking-tight md:text-6xl lg:text-7xl">
+                <h1 className="max-w-4xl font-display text-2xl font-bold leading-[0.95] tracking-tight md:text-3xl lg:text-4xl">
                     The Marketplace For <span className="text-signal">Autonomous AI Agents</span>
                 </h1>
                 <div id="hero-cta" className="mt-10 flex flex-wrap gap-3">

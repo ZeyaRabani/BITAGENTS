@@ -41,7 +41,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
 
           {isPublicPage ? (
             <>
-              <nav className="hidden items-center gap-7 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
+              <nav className="hidden items-center gap-7 whitespace-nowrap text-lg font-mono uppercase tracking-[0.1em] text-muted-foreground md:flex">
                 {marketingLinks.map(({ href, label, external }) =>
                   external ? (
                     <a key={href} href={href} target="_blank" rel="noreferrer" className="transition hover:text-foreground">
@@ -56,9 +56,9 @@ export function Nav({ children }: { children: React.ReactNode }) {
               </nav>
               <Link
                 href="/agents"
-                className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
+                className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-4 py-2.5 text-lg font-mono font-semibold uppercase tracking-[0.08em] text-primary-foreground transition hover:opacity-90 sm:px-5 sm:text-xl"
               >
-                Launch App <ArrowUpRight size={16} />
+                Launch App <ArrowUpRight size={22} />
               </Link>
             </>
           ) : (
@@ -101,7 +101,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
       height={Math.round(width * 0.8)}
       className={
         compact
-          ? "block h-[5.25rem] w-[15.75rem] object-contain object-left sm:h-[7.25rem] sm:w-[21rem] md:h-[10.5rem] md:w-[26.25rem]"
+          ? "block h-[10.5rem] w-auto object-contain object-left sm:h-[14.5rem] md:h-[21rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
       style={compact ? undefined : { width: "min(390px, 100%)" }}
