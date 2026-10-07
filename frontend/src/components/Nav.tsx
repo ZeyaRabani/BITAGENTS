@@ -17,12 +17,12 @@ const marketingLinks = [
 ];
 
 const navLinkBase =
-  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition border-2";
+  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition";
 
 function appLinkClass(active: boolean) {
   return active
-    ? `${navLinkBase} border-signal bg-surface/60 text-signal`
-    : `${navLinkBase} border-transparent text-muted-foreground hover:border-grid hover:bg-surface/40 hover:text-foreground`;
+    ? `${navLinkBase} bg-signal/15 text-signal`
+    : `${navLinkBase} text-muted-foreground hover:bg-surface/40 hover:text-foreground`;
 }
 
 export function Nav({ children }: { children: React.ReactNode }) {
@@ -31,10 +31,8 @@ export function Nav({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header
-        className={`sticky top-0 z-30 bg-background/80 backdrop-blur ${isPublicPage ? "" : "border-b-2 border-grid"}`}
-      >
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-6 sm:gap-6 sm:px-8 sm:py-8">
+      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-6 sm:gap-6 sm:py-8">
           <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />
           </Link>
@@ -96,7 +94,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
   return (
     <img
       src="/bit-agents-logo-transparent.png"
-      alt="BIT Agents"
+      alt="BITAGENTS"
       width={width}
       height={Math.round(width * 0.8)}
       className={

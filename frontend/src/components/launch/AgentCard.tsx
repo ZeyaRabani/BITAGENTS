@@ -17,7 +17,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
   return (
     <Link
       href={`/agents/${agent.id}`}
-      className="group flex flex-col gap-4 border-2 border-grid bg-surface/40 p-6 transition hover:border-signal hover:bg-surface"
+      className="group flex flex-col gap-4 bg-card p-6 transition hover:bg-surface-2"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -29,7 +29,7 @@ export function AgentCard({ agent }: { agent: LaunchedAgent }) {
             </div>
           </div>
         </div>
-        <div className="shrink-0 border-2 border-grid px-2 py-1 text-right font-mono">
+        <div className="shrink-0 bg-surface-2 px-2 py-1 text-right font-mono">
           <div className="text-sm font-bold tabular-nums" style={{ color }}>
             {agentScore(agent).toLocaleString()}
           </div>

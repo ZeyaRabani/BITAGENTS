@@ -20,16 +20,16 @@ export function AgentMarketplace() {
   return (
     <AppShell
       title="Agent Marketplace"
-      subtitle="Discover and run BIT Agents. Pay per task on Solana - launch your own from the Launchpad."
+      subtitle="Discover and run BITAGENTS agents. Pay per task on Solana - launch your own from the Launchpad."
     >
       <div className="mt-6 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setCategory(null)}
-          className={`border-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+          className={`px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
             category === null
-              ? "border-signal bg-signal/10 text-signal"
-              : "border-grid text-muted-foreground hover:border-signal/40 hover:text-foreground"
+              ? "bg-signal text-background"
+              : "bg-surface-2 text-muted-foreground hover:bg-surface hover:text-foreground"
           }`}
         >
           All
@@ -39,10 +39,10 @@ export function AgentMarketplace() {
             key={cat}
             type="button"
             onClick={() => setCategory(cat)}
-            className={`border-2 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+            className={`px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
               category === cat
-                ? "border-signal bg-signal/10 text-signal"
-                : "border-grid text-muted-foreground hover:border-signal/40 hover:text-foreground"
+                ? "bg-signal text-background"
+                : "bg-surface-2 text-muted-foreground hover:bg-surface hover:text-foreground"
             }`}
           >
             {cat}

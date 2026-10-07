@@ -13,7 +13,7 @@ export function Platform() {
               Built for agent-native workflows.
             </h2>
             <p className="mt-6 max-w-md text-muted-foreground">
-              BIT Agents is focused on active automation: agents that watch, research, alert, prepare, and coordinate workflows across on-chain activity from a single marketplace.
+              BITAGENTS is focused on active automation: agents that watch, research, alert, prepare, and coordinate workflows across on-chain activity from a single marketplace.
             </p>
           </div>
           <div className="grid gap-px bg-[color:var(--border)] border-2 border-grid sm:grid-cols-2">
@@ -26,7 +26,7 @@ export function Platform() {
               </ul>
             </div>
             <div className="bg-[color:var(--surface-2)] p-6">
-              <div className="font-display text-base font-bold text-signal">BIT Agents</div>
+              <div className="font-display text-base font-bold text-signal">BITAGENTS</div>
               <ul className="mt-5 space-y-3 text-sm text-foreground">
                 {["Active automation", "AI agents", "Marketplace-native workflows"].map((t) => (
                   <li key={t} className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-signal" /> {t}</li>

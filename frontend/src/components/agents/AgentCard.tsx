@@ -10,9 +10,9 @@ export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
   const showDcaStats = agent.slug === "dca";
 
   const inner = (
-    <article className="group flex h-full flex-col border-2 border-grid bg-surface/40 p-5 transition hover:border-signal/60 hover:bg-surface/70">
+    <article className="group flex h-full flex-col bg-card p-5 transition hover:bg-surface-2">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center border-2 border-grid bg-background/80 text-signal">
+        <div className="flex h-10 w-10 items-center justify-center bg-surface-2 text-signal">
           <Icon size={18} strokeWidth={1.75} />
         </div>
       </div>
@@ -26,7 +26,7 @@ export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
       <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{agent.tagline}</p>
 
       {showDcaStats && (
-        <div className="mt-5 grid grid-cols-2 gap-3 border-t-2 border-grid pt-4 sm:grid-cols-3">
+        <div className="mt-5 grid grid-cols-2 gap-3 pt-4 sm:grid-cols-3">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
               Per task
@@ -56,12 +56,12 @@ export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
 
       <div className="mt-auto pt-5">
         {agent.available ? (
-          <span className="inline-flex w-full items-center justify-between border-2 border-grid bg-background/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
+          <span className="inline-flex w-full items-center justify-between bg-surface-2 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:bg-signal group-hover:text-background">
             Configure agent
             <ArrowRight size={14} />
           </span>
         ) : (
-          <span className="inline-flex w-full items-center justify-between border-2 border-grid/70 bg-background/30 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="inline-flex w-full items-center justify-between bg-surface-2/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
             Coming soon
           </span>
         )}
