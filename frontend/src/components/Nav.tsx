@@ -89,9 +89,11 @@ export function Nav({ children }: { children: React.ReactNode }) {
 }
 
 export function Wordmark({ compact = false }: { compact?: boolean }) {
-  // Horizontal lockup is natively 1500x500 (3:1) -- very different shape
-  // from the old stacked two-line mark, so sizes are chosen fresh rather
-  // than carried over.
+  // Cropped to its actual glyph bounds (was 1500x500 with asymmetric
+  // transparent padding baked in -- 143px empty on the left, 108px on the
+  // right -- which misaligned the visible letters from everything else
+  // using object-left). Now 1262x206, ~6.13:1.
+  const RATIO = 1262 / 206;
   const width = compact ? 300 : 450;
 
   return (
@@ -99,10 +101,10 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
       src="/bitagents-wordmark-horizontal.png"
       alt="BITAGENTS"
       width={width}
-      height={Math.round(width / 3)}
+      height={Math.round(width / RATIO)}
       className={
         compact
-          ? "block h-[3.5rem] w-auto object-contain object-left sm:h-[4.5rem] md:h-[6rem]"
+          ? "block h-[3rem] w-auto object-contain object-left sm:h-[3.75rem] md:h-[5rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
       style={compact ? undefined : { width: "min(450px, 100%)" }}
