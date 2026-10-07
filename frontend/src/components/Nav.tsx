@@ -11,9 +11,9 @@ const appLinks = [
 ];
 
 const marketingLinks = [
-  { href: "/#product", label: "Product" },
+  { href: "/agents", label: "Agents" },
   { href: "/#how", label: "How It Works" },
-  { href: "/#token-utility", label: "Token Utility" },
+  { href: "https://gitbook.bitagents.app/", label: "Gitbook", external: true },
 ];
 
 const navLinkBase =
@@ -31,7 +31,9 @@ export function Nav({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 border-b-2 border-grid bg-background/80 backdrop-blur">
+      <header
+        className={`sticky top-0 z-30 bg-background/80 backdrop-blur ${isPublicPage ? "" : "border-b-2 border-grid"}`}
+      >
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
           <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />
@@ -40,11 +42,17 @@ export function Nav({ children }: { children: React.ReactNode }) {
           {isPublicPage ? (
             <>
               <nav className="hidden items-center gap-7 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
-                {marketingLinks.map(({ href, label }) => (
-                  <Link key={href} href={href} className="transition hover:text-foreground">
-                    {label}
-                  </Link>
-                ))}
+                {marketingLinks.map(({ href, label, external }) =>
+                  external ? (
+                    <a key={href} href={href} target="_blank" rel="noreferrer" className="transition hover:text-foreground">
+                      {label}
+                    </a>
+                  ) : (
+                    <Link key={href} href={href} className="transition hover:text-foreground">
+                      {label}
+                    </Link>
+                  )
+                )}
               </nav>
               <Link
                 href="/agents"
@@ -93,7 +101,7 @@ export function Wordmark({ compact = false }: { compact?: boolean }) {
       height={Math.round(width * 0.8)}
       className={
         compact
-          ? "block h-10 w-30 object-contain object-left sm:h-14 sm:w-40 md:h-20 md:w-50"
+          ? "block h-[5.25rem] w-[15.75rem] object-contain object-left sm:h-[7.25rem] sm:w-[21rem] md:h-[10.5rem] md:w-[26.25rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
       style={compact ? undefined : { width: "min(390px, 100%)" }}

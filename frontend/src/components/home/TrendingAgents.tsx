@@ -7,17 +7,13 @@ export function TrendingAgents() {
   const trending = [...LAUNCHED_AGENTS].sort((a, b) => b.volumeUsd - a.volumeUsd).slice(0, 6);
 
   return (
-    <section id="trending" className="border-b-2 border-grid">
+    <section id="trending">
       <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
         <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Launchpad</div>
-            <h2 className="mt-4 font-display text-4xl font-bold leading-tight md:text-5xl">
+            <h2 className="font-display text-4xl font-bold leading-tight md:text-5xl">
               Trending agents now
             </h2>
-            <p className="mt-3 max-w-lg text-sm text-muted-foreground">
-              Live agents, ranked by volume. Anyone can launch one — describe what it does, pick a model, ship it.
-            </p>
           </div>
           <Link
             href="/launch"

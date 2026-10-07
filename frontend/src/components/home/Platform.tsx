@@ -4,7 +4,7 @@ import { Check, X } from "lucide-react";
 
 export function Platform() {
   return (
-    <section id="platform" className="border-b-2 border-grid">
+    <section id="platform" >
       <div className="mx-auto max-w-7xl px-6 py-20 md:py-24">
         <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Platform</div>
         <div className="mt-4 grid gap-12 md:grid-cols-[1.1fr_1.4fr] md:items-start">
