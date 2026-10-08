@@ -132,6 +132,15 @@
   .ticker-mask {
     mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
   }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* =========================================================

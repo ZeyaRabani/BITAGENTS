@@ -26,10 +26,10 @@ export function AgentMarketplace() {
         <button
           type="button"
           onClick={() => setCategory(null)}
-          className={`px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+          className={`rounded-full px-4 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
             category === null
               ? "bg-signal text-background"
-              : "bg-surface-2 text-muted-foreground hover:bg-surface hover:text-foreground"
+              : "border border-grid text-muted-foreground hover:border-signal hover:text-foreground"
           }`}
         >
           All
@@ -39,10 +39,10 @@ export function AgentMarketplace() {
             key={cat}
             type="button"
             onClick={() => setCategory(cat)}
-            className={`px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+            className={`rounded-full px-4 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
               category === cat
                 ? "bg-signal text-background"
-                : "bg-surface-2 text-muted-foreground hover:bg-surface hover:text-foreground"
+                : "border border-grid text-muted-foreground hover:border-signal hover:text-foreground"
             }`}
           >
             {cat}
