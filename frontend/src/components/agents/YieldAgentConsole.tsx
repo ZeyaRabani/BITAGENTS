@@ -92,6 +92,29 @@ export function YieldAgentConsole() {
     }
   }
 
+  async function onTestYield() {
+    if (!token) return;
+    setInvestBusy(true);
+    setError(null);
+    setInvestNote(null);
+    try {
+      const result = await investYieldCapital(token, {
+        asset: "SOL",
+        capital: 0.0511,
+        duration_days: 2,
+        yield_type: "any",
+        skip_deposit_ledger: true,
+      });
+      setInvestNote(result.message ?? "Test yield deposit sent.");
+      const dash = await fetchYieldDashboard(token);
+      if (dash) setDashboard(dash);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Test yield failed");
+    } finally {
+      setInvestBusy(false);
+    }
+  }
+
   async function onInvest(e: FormEvent) {
     e.preventDefault();
     if (!token) return;
@@ -233,6 +256,22 @@ export function YieldAgentConsole() {
           </button>
         </form>
         {investNote && <p className="mt-3 font-mono text-[11px] text-signal">{investNote}</p>}
+        {/* <div className="mt-4 border-t border-grid pt-4">
+          <button
+            type="button"
+            disabled={!token || investBusy}
+            onClick={() => void onTestYield()}
+            className="border border-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
+          >
+            {investBusy ? "Sending…" : "Test yield · 0.0511 SOL"}
+          </button>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Uses SOL already in the Circle wallet for 2 days. Skips verified-deposit check.
+            Deposits into the best of Kamino, Jupiter JLP, or Save. Leave at least 0.03 SOL
+            for fees.
+          </p>
+          {error && <p className="mt-3 font-mono text-[11px] text-warn">{error}</p>}
+        </div> */}
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-3">
