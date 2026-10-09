@@ -1,55 +1,89 @@
 "use client";
 
-import { ArrowLeftRight, Bot, Clock, Repeat2 } from "lucide-react";
+import Link from "next/link";
 
-const cards = [
+const trendingAgents = [
   {
-    icon: ArrowLeftRight,
-    title: "DCA Agent",
-    body: "Set up recurring Solana buys from natural language. Schedule swaps, preview quotes, and manage plans without leaving chat.",
+    id: "volume",
+    initials: "VO",
+    name: "Volume Agent",
+    category: "Trading",
+    body: "Run volume campaigns on tokens that already trade. Deposit SOL and schedule buy/sell cycles through Jupiter.",
+    href: "/agents/volume",
   },
   {
-    icon: Repeat2,
-    title: "On-Chain Automation",
-    body: "Deposits, custodial agent wallet flows, and a background scheduler execute DCA plans on mainnet with on-chain proof and ledger tracking.",
+    id: "dca",
+    initials: "DC",
+    name: "DCA Agent",
+    category: "Trading",
+    body: "Set up recurring Solana buys from natural language. Schedule swaps and manage plans without leaving chat.",
+    href: "/agents/dca",
   },
   {
-    icon: Bot,
-    title: "Agent Marketplace",
-    body: "Discover and run BIT Agents from one catalog. Browse live agents today - third-party deployment is not open yet.",
+    id: "hedge-fund",
+    initials: "HE",
+    name: "Hedge Fund Agent",
+    category: "Trading",
+    body: "Deposit SOL, run live Jupiter strategy sleeves, and liquidate back to SOL with risk-managed fees.",
+    href: "/agents/hedge-fund",
   },
   {
-    icon: Clock,
-    title: "Scheduled Execution",
-    body: "From seconds to monthly intervals, automation keeps buying on your schedule while you monitor balances, history, and platform metrics.",
+    id: "kickstart-copilot",
+    initials: "EA",
+    name: "EasyA Analysis Agent",
+    category: "Research",
+    body: "Solana token analysis - live price, liquidity, holders, health scores, risk checks, and comparisons.",
+    href: "/agents/kickstart-copilot",
   },
-];
+] as const;
 
 export function Product() {
   return (
-    <section id="product" className="border-b border-grid">
-      <div className="mx-auto max-w-7xl px-6 py-20 md:py-24">
-        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Product</div>
-        <div className="mt-4 grid gap-12 md:grid-cols-[1fr_1.4fr] md:items-start">
-          <div>
-            <h2 className="font-display text-4xl font-bold leading-tight md:text-5xl">
-              Agents that run on-chain workflows.
-            </h2>
-            <p className="mt-6 max-w-md text-muted-foreground">
-              BIT Agents is an agent marketplace for running specialized automation - starting with DCA on Solana.
-              Users can discover agents, connect a wallet, and execute tasks from one place. Listing your own agent
-              is not available yet.
-            </p>
-          </div>
-          <div className="grid gap-px border border-grid bg-border sm:grid-cols-2">
-            {cards.map(({ icon: Icon, title, body }) => (
-              <div key={title} className="bg-background p-6">
-                <Icon className="h-5 w-5 text-signal" />
-                <div className="mt-5 font-display text-lg font-bold">{title}</div>
-                <p className="mt-2 text-sm text-muted-foreground">{body}</p>
+    <section id="product" className="border-b border-grid/70">
+      <div className="mx-auto max-w-7xl px-6 py-16 md:py-20">
+        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end">
+          <h2 className="font-display text-3xl font-bold tracking-tight md:text-4xl">
+            Trending agents now
+          </h2>
+          <Link
+            href="/agents"
+            className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground transition hover:text-signal"
+          >
+            See full launchpad →
+          </Link>
+        </div>
+
+        <div className="mt-10 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+          {trendingAgents.map((agent) => (
+            <Link
+              key={agent.id}
+              href={agent.href}
+              className="group flex h-full flex-col rounded-2xl border border-grid bg-surface/50 p-5 transition hover:border-signal hover:bg-surface/80"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-grid bg-background/80 font-mono text-xs font-bold uppercase tracking-[0.08em] text-signal">
+                  {agent.initials}
+                </div>
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {agent.category}
+                </span>
               </div>
-            ))}
-          </div>
+              <h3 className="mt-4 font-display text-base font-bold transition group-hover:text-signal">
+                {agent.name}
+              </h3>
+              <p className="mt-3 flex-1 text-sm leading-relaxed text-muted-foreground">
+                {agent.body}
+              </p>
+              <div className="mt-5 flex items-center justify-between border-t border-grid pt-4">
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  Live
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-full border border-grid px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
+                  Launch →
+                </span>
+              </div>
+            </Link>
+          ))}
         </div>
       </div>
     </section>

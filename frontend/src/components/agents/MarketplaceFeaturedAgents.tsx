@@ -2,7 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AgentCard } from "@/components/agents/AgentCard";
-import { FEATURED_AGENTS, type MarketplaceAgent } from "@/lib/agentsCatalog";
+import {
+  FEATURED_AGENTS,
+  type AgentCategory,
+  type MarketplaceAgent,
+} from "@/lib/agentsCatalog";
 import {
   fetchPlatformMetrics,
   formatMetricNumber,
@@ -13,11 +17,11 @@ import { mapLaunchedToMarketplaceAgent } from "@/lib/launchMarketplace";
 
 export function MarketplaceFeaturedAgents({
   query = "",
-  filter = "all",
+  category = "all",
   onCountChange,
 }: {
   query?: string;
-  filter?: "all" | "verified" | "community";
+  category?: "all" | AgentCategory;
   onCountChange?: (count: number) => void;
 }) {
   const [totalRuns, setTotalRuns] = useState<string | null>(null);
@@ -57,8 +61,7 @@ export function MarketplaceFeaturedAgents({
     const merged = [...catalog, ...launched];
     const q = query.trim().toLowerCase();
     return merged.filter((agent) => {
-      if (filter === "verified" && !agent.verified) return false;
-      if (filter === "community" && agent.verified) return false;
+      if (category !== "all" && agent.category !== category) return false;
       if (!q) return true;
       return (
         agent.name.toLowerCase().includes(q) ||
@@ -67,7 +70,7 @@ export function MarketplaceFeaturedAgents({
         agent.category.toLowerCase().includes(q)
       );
     });
-  }, [totalRuns, volumeSol, launched, query, filter]);
+  }, [totalRuns, volumeSol, launched, query, category]);
 
   useEffect(() => {
     onCountChange?.(agents.length);
@@ -75,14 +78,14 @@ export function MarketplaceFeaturedAgents({
 
   if (agents.length === 0) {
     return (
-      <div className="border border-grid bg-surface/40 px-4 py-8 text-center font-mono text-xs text-muted-foreground">
+      <div className="rounded-2xl border border-grid bg-surface/40 px-4 py-8 text-center font-mono text-xs text-muted-foreground">
         No agents match this search or filter.
       </div>
     );
   }
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
       {agents.map((agent) => (
         <AgentCard key={agent.id} agent={agent} />
       ))}

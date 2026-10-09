@@ -2,8 +2,16 @@
 
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
-import { AGENT_ICONS } from "@/lib/agentsCatalog";
 import type { MarketplaceAgent } from "@/lib/agentsCatalog";
+
+function agentInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+}
 
 export function AgentCard({
   agent,
@@ -12,79 +20,70 @@ export function AgentCard({
   agent: MarketplaceAgent;
   preview?: boolean;
 }) {
-  const Icon = AGENT_ICONS[agent.iconId];
   const showDcaStats = agent.slug === "dca" && !preview;
-  const isVerified = Boolean(agent.verified ?? agent.source === "catalog");
   const href = agent.href ?? `/agents/${agent.slug}`;
 
   const inner = (
-    <article className="group flex h-full flex-col border border-grid bg-surface/40 p-5 transition hover:border-signal/60 hover:bg-surface/70">
+    <article className="group flex h-full flex-col rounded-2xl border border-grid bg-surface/50 p-5 transition hover:border-signal hover:bg-surface/80">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex h-10 w-10 items-center justify-center border border-grid bg-background/80 text-signal">
-          <Icon size={18} strokeWidth={1.75} />
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-grid bg-background/80 font-mono text-xs font-bold uppercase tracking-[0.08em] text-signal">
+          {agentInitials(agent.name)}
         </div>
-        {isVerified ? (
-          <span className="border border-signal/50 bg-signal/10 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-signal">
-            Verified
-          </span>
-        ) : (
-          <span className="border border-grid px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-            Community
-          </span>
-        )}
+        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          {agent.category}
+        </span>
       </div>
 
       <h3 className="mt-4 font-display text-lg font-bold transition group-hover:text-signal">
         {agent.name}
       </h3>
-      <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-        {agent.category}
-        {agent.pricePerTask ? ` · ${agent.pricePerTask}` : ""}
-      </p>
-      <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{agent.tagline}</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{agent.tagline}</p>
 
       {showDcaStats && (
-        <div className="mt-5 grid grid-cols-2 gap-3 border-t border-grid pt-4 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-3 gap-2 border-t border-grid pt-3">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
               Per task
             </div>
-            <div className="mt-1 font-display text-base font-bold tabular-nums text-signal md:text-lg">
+            <div className="mt-1 font-mono text-[11px] font-semibold tabular-nums text-signal">
               {agent.pricePerTask ?? "-"}
             </div>
           </div>
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
               Total tx
             </div>
-            <div className="mt-1 font-display text-base font-bold tabular-nums md:text-lg">
+            <div className="mt-1 font-mono text-[11px] font-semibold tabular-nums">
               {agent.runs ?? "-"}
             </div>
           </div>
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
               Volume
             </div>
-            <div className="mt-1 font-display text-base font-bold tabular-nums text-signal md:text-lg">
+            <div className="mt-1 font-mono text-[11px] font-semibold tabular-nums text-signal">
               {agent.volumeSol ?? "-"}
             </div>
           </div>
         </div>
       )}
 
-      <div className="mt-auto pt-5">
+      <div className="mt-auto flex items-center justify-between gap-3 pt-5">
+        <span className="font-display text-lg font-bold tabular-nums text-signal">
+          {agent.rating > 0 ? agent.rating.toFixed(1) : "—"}
+        </span>
         {preview ? (
-          <span className="inline-flex w-full items-center justify-between border border-grid bg-background/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Preview only
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-grid px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Preview
           </span>
         ) : agent.available ? (
-          <span className="inline-flex w-full items-center justify-between border border-grid bg-background/60 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
-            {agent.source === "launched" ? "View agent" : "Configure agent"}
-            <ArrowRight size={14} />
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-grid px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-foreground transition group-hover:border-signal group-hover:text-signal">
+            {agent.source === "launched" ? "View" : "Configure"}
+            <ArrowRight size={12} />
           </span>
         ) : (
-          <span className="inline-flex w-full items-center justify-between border border-grid/70 bg-background/30 px-4 py-3 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Coming soon
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-grid/70 px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+            Soon
           </span>
         )}
       </div>

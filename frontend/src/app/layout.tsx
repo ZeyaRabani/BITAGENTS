@@ -15,7 +15,7 @@ export const metadata = constructMetadata();
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-background text-foreground">
+      <body className="text-foreground">
         <SolanaProviders>
           <Nav>{children}</Nav>
         </SolanaProviders>

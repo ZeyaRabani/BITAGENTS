@@ -7,6 +7,11 @@ import { usePathname } from "next/navigation";
 
 const appLinks = [
   {
+    href: "/agents/launch",
+    label: "Launchpad",
+    match: (path: string) => path.startsWith("/agents/launch"),
+  },
+  {
     href: "/agents",
     label: "Marketplace",
     match: (path: string) =>
@@ -19,26 +24,29 @@ const appLinks = [
     label: "Dashboard",
     match: (path: string) => path.startsWith("/agents/dashboard"),
   },
+];
+
+const marketingLinks: {
+  href: string;
+  label: string;
+  external?: boolean;
+}[] = [
+  { href: "/agents", label: "Agents" },
+  { href: "/#how", label: "How It Works" },
   {
-    href: "/agents/launch",
-    label: "Launch Agents",
-    match: (path: string) => path.startsWith("/agents/launch"),
+    href: "https://github.com/ZeyaRabani/BITAGENTS",
+    label: "GitHub",
+    external: true,
   },
 ];
 
-const marketingLinks = [
-  { href: "/#product", label: "Product" },
-  { href: "/#how", label: "How It Works" },
-  { href: "/#token-utility", label: "Token Utility" },
-];
-
 const navLinkBase =
-  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition border";
+  "rounded-full border px-3.5 py-1.5 text-xs font-mono font-semibold uppercase tracking-[0.14em] transition";
 
 function appLinkClass(active: boolean) {
   return active
-    ? `${navLinkBase} border-signal bg-surface/60 text-signal`
-    : `${navLinkBase} border-transparent text-muted-foreground hover:border-grid hover:bg-surface/40 hover:text-foreground`;
+    ? `${navLinkBase} border-signal bg-signal text-primary-foreground`
+    : `${navLinkBase} border-grid bg-surface/30 text-muted-foreground hover:border-signal/50 hover:text-foreground`;
 }
 
 export function Nav({ children }: { children: React.ReactNode }) {
@@ -47,8 +55,8 @@ export function Nav({ children }: { children: React.ReactNode }) {
   const isPublicPage = pathname === "/" || pathname === "/coming-soon" || isMaintenance;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 border-b border-grid bg-background/80 backdrop-blur">
+    <div className="site-shell min-h-screen">
+      <header className="sticky top-0 z-30 border-b border-grid/70 bg-[#07080c]/70 backdrop-blur-md">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
           <Link href={isMaintenance ? "/maintenance" : "/"} className="min-w-0 shrink">
             <Wordmark compact />
@@ -60,16 +68,32 @@ export function Nav({ children }: { children: React.ReactNode }) {
             </span>
           ) : isPublicPage ? (
             <>
-              <nav className="hidden items-center gap-7 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
-                {marketingLinks.map(({ href, label }) => (
-                  <Link key={href} href={href} className="transition hover:text-foreground">
-                    {label}
-                  </Link>
-                ))}
+              <nav className="hidden items-center gap-3 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
+                {marketingLinks.map(({ href, label, external }) =>
+                  external ? (
+                    <a
+                      key={href}
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="rounded-full border border-grid px-3 py-1.5 transition hover:border-signal/60 hover:text-foreground"
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    <Link
+                      key={href}
+                      href={href}
+                      className="rounded-full border border-grid px-3 py-1.5 transition hover:border-signal/60 hover:text-foreground"
+                    >
+                      {label}
+                    </Link>
+                  )
+                )}
               </nav>
               <Link
                 href="/agents"
-                className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
+                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-signal bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
               >
                 Launch App <ArrowUpRight size={16} />
               </Link>

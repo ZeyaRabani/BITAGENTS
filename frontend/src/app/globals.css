@@ -45,27 +45,28 @@
    ========================================================= */
 
 :root {
-  --radius: 0.25rem;
+  --radius: 0.75rem;
 
-  --background: #0c0a09;
-  --foreground: #f5efe6;
+  /* Cesto-inspired vertical wash: deep dark at the top, lifted charcoal below */
+  --background: #07080c;
+  --foreground: #f3f1ec;
 
-  --card: #151210;
-  --card-foreground: #f5efe6;
+  --card: #12141b;
+  --card-foreground: #f3f1ec;
 
-  --surface: #12100e;
-  --surface-2: #1a1714;
+  --surface: #0e1016;
+  --surface-2: #161922;
 
-  --muted-foreground: #9a8b7a;
+  --muted-foreground: #8b909c;
 
-  --border: #2a2520;
-  --grid: #2a2520;
+  --border: #2a2f3a;
+  --grid: #2a2f3a;
 
   --signal: #ff6b4a;
   --warn: #f4a261;
 
   --primary: #ff6b4a;
-  --primary-foreground: #0c0a09;
+  --primary-foreground: #07080c;
 
   --destructive: #ef4444;
 }
@@ -81,13 +82,15 @@
 
   body {
     background-color: var(--background);
+    background-image: linear-gradient(180deg, #05060a 0%, #0b0d14 45%, #141824 100%);
+    background-attachment: fixed;
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
 
   html {
-    background: var(--background);
+    background: #05060a;
   }
 
   ::selection {
@@ -127,6 +130,10 @@
 
   .border-grid {
     border-color: var(--grid);
+  }
+
+  .site-shell {
+    background: transparent;
   }
 
   .ticker-mask {
@@ -189,8 +196,8 @@
   background: transparent !important;
   color: var(--foreground) !important;
 
-  border: 2px solid var(--border) !important;
-  border-radius: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 9999px !important;
 
   font-family: var(--font-mono) !important;
   font-size: 11px !important;
@@ -222,8 +229,8 @@
 
 .wallet-adapter-dropdown-list {
   background: var(--surface) !important;
-  border: 2px solid var(--border) !important;
-  border-radius: 0 !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 1rem !important;
 }
 
 .wallet-adapter-dropdown-list-item {

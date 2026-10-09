@@ -21,11 +21,11 @@ const steps = [
 
 export function HowItWorks() {
   return (
-    <section id="how" className="border-b border-grid">
+    <section id="how" className="border-b border-grid/70">
       <div className="mx-auto max-w-7xl px-6 py-20 md:py-28">
         <div className="flex flex-col items-start justify-between gap-6 md:flex-row md:items-end">
           <div className="max-w-2xl">
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Flow</div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-signal">Plan</div>
             <h2 className="mt-4 font-display text-4xl font-bold leading-tight md:text-5xl">
               How it works
             </h2>
@@ -35,15 +35,26 @@ export function HowItWorks() {
           </div>
         </div>
 
-        <ol className="mt-14 grid gap-px bg-[color:var(--border)] md:grid-cols-3">
+        <ol className="mt-14 grid gap-4 md:grid-cols-3">
           {steps.map((s) => (
-            <li key={s.n} className="bg-background p-6">
-              <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">Step {s.n}</div>
+            <li key={s.n} className="rounded-2xl border border-grid bg-surface/40 p-6">
+              <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                Step {s.n}
+              </div>
               <h3 className="mt-4 font-display text-lg font-bold">{s.title}</h3>
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{s.body}</p>
-              <div className="mt-5 border border-grid bg-background p-3 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
+              <div className="mt-5 rounded-xl border border-grid bg-background/60 p-3 font-mono text-[10.5px] leading-relaxed text-muted-foreground">
                 {s.code.map((line, i) => (
-                  <div key={i} className={line.startsWith("✓") ? "text-signal" : line.startsWith("→") ? "text-warn" : ""}>
+                  <div
+                    key={i}
+                    className={
+                      line.startsWith("✓")
+                        ? "text-signal"
+                        : line.startsWith("→")
+                          ? "text-warn"
+                          : ""
+                    }
+                  >
                     {line}
                   </div>
                 ))}
