@@ -7,11 +7,6 @@ import { usePathname } from "next/navigation";
 
 const appLinks = [
   {
-    href: "/agents/launch",
-    label: "Launchpad",
-    match: (path: string) => path.startsWith("/agents/launch"),
-  },
-  {
     href: "/agents",
     label: "Marketplace",
     match: (path: string) =>
@@ -24,6 +19,11 @@ const appLinks = [
     label: "Dashboard",
     match: (path: string) => path.startsWith("/agents/dashboard"),
   },
+  {
+    href: "/agents/launch",
+    label: "Launch Agents",
+    match: (path: string) => path.startsWith("/agents/launch"),
+  },
 ];
 
 const marketingLinks: {
@@ -31,13 +31,9 @@ const marketingLinks: {
   label: string;
   external?: boolean;
 }[] = [
-  { href: "/agents", label: "Agents" },
+  { href: "/#product", label: "Product" },
   { href: "/#how", label: "How It Works" },
-  {
-    href: "https://github.com/ZeyaRabani/BITAGENTS",
-    label: "GitHub",
-    external: true,
-  },
+  { href: "/#token-utility", label: "Token Utility" },
 ];
 
 const navLinkBase =
@@ -45,7 +41,7 @@ const navLinkBase =
 
 function appLinkClass(active: boolean) {
   return active
-    ? `${navLinkBase} border-signal bg-signal text-primary-foreground`
+    ? `${navLinkBase} border-signal bg-surface/60 text-signal`
     : `${navLinkBase} border-grid bg-surface/30 text-muted-foreground hover:border-signal/50 hover:text-foreground`;
 }
 

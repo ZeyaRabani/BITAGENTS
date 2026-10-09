@@ -59,6 +59,8 @@ export function YieldAgentDeposit({
   const { connection } = useConnection();
   const { publicKey, sendTransaction, connected } = useWallet();
   const [agentWallet, setAgentWallet] = useState<string | null>(null);
+  const [walletReady, setWalletReady] = useState(false);
+  const [circleError, setCircleError] = useState<string | null>(null);
   const [balances, setBalances] = useState<YieldTokenBalanceRow[]>([]);
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
@@ -81,22 +83,60 @@ export function YieldAgentDeposit({
     if (data) {
       setBalances(data.balances);
       onBalancesChange?.(data);
+      if (data.agent_wallet) {
+        setAgentWallet(data.agent_wallet);
+        setWalletReady(true);
+      }
     }
   }, [publicKey, authToken, onBalancesChange]);
 
   useEffect(() => {
     if (!authToken) {
       setAgentWallet(null);
+      setWalletReady(false);
+      setCircleError(null);
       return;
     }
-    void fetchYieldAgentWallet(authToken).then((info) => {
-      setAgentWallet(info?.agent_wallet ?? null);
-    });
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 24;
+
+    async function loadWallet() {
+      setWalletReady(false);
+      while (!cancelled && attempts < maxAttempts) {
+        attempts += 1;
+        const info = await fetchYieldAgentWallet(authToken!);
+        if (cancelled) return;
+        if (info?.agent_wallet) {
+          setAgentWallet(info.agent_wallet);
+          setCircleError(info.circle_error ?? null);
+          setWalletReady(true);
+          return;
+        }
+        setCircleError(info?.circle_error ?? null);
+        if (info?.circle_error) {
+          setWalletReady(true);
+          return;
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, attempts === 1 ? 1500 : 4000));
+      }
+      if (!cancelled) {
+        setWalletReady(true);
+        setCircleError((prev) => prev ?? "Yield agent wallet is taking longer than expected. Refresh and try again.");
+      }
+    }
+
+    void loadWallet();
+    return () => {
+      cancelled = true;
+    };
   }, [authToken]);
 
   useEffect(() => {
+    if (!agentWallet) return;
     void refreshBalances();
-  }, [refreshBalances]);
+  }, [agentWallet, refreshBalances]);
 
   function applyVerifiedBalances(result: YieldDepositVerifyResponse) {
     if (result.balances?.balances) {
@@ -198,7 +238,10 @@ export function YieldAgentDeposit({
       return;
     }
     if (!agentWallet) {
-      setError("Yield agent wallet is not ready yet.");
+      setError(
+        circleError ??
+          "Yield agent wallet is still provisioning. Wait a few seconds for the address to appear, then try again."
+      );
       return;
     }
     const parsed = Number(amount);
@@ -305,12 +348,23 @@ export function YieldAgentDeposit({
         verify it. The agent uses the credited balance when it stakes the best protocol for your
         requirements.
       </p>
-      {agentWallet && (
-        <p className="mt-3 break-all font-mono text-[11px] text-muted-foreground">
-          Agent wallet: {agentWallet}
-          {cluster ? ` · ${cluster}` : ""}
-        </p>
-      )}
+      <div className="mt-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+        <span className="uppercase tracking-[0.16em] text-signal">Your Yield agent wallet</span>
+        <div className="mt-1 break-all text-foreground">
+          {agentWallet ??
+            (authToken
+              ? walletReady
+                ? "Wallet unavailable"
+                : "Provisioning your personal Yield agent wallet…"
+              : "Sign in to provision your personal agent wallet")}
+          {agentWallet && cluster ? ` · ${cluster}` : ""}
+        </div>
+        {circleError && (
+          <div className="mt-2 border border-warn/40 bg-warn/10 px-2 py-1.5 text-[10px] normal-case tracking-normal text-warn">
+            {circleError}
+          </div>
+        )}
+      </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         <div className="border border-grid bg-surface/30 px-3 py-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -343,11 +397,15 @@ export function YieldAgentDeposit({
         />
         <button
           type="button"
-          disabled={busy || verifyBusy || !connected}
+          disabled={busy || verifyBusy || !connected || !agentWallet}
           onClick={() => void onDeposit()}
           className="bg-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-primary-foreground disabled:opacity-40"
         >
-          {busy || verifyBusy ? depositPhase ?? "Processing…" : "Deposit"}
+          {busy || verifyBusy
+            ? depositPhase ?? "Processing…"
+            : !agentWallet && authToken && !walletReady
+              ? "Provisioning…"
+              : "Deposit"}
         </button>
       </div>
 
