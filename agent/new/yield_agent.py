@@ -13,11 +13,14 @@ from agent_tool_runner import _reply_from_tool_result, execute_tool, run_tool_ag
 from hosted_llm import CAPIX_MODEL, DEFAULT_LLM_MODEL, use_capix
 from yield_ledger import (
     AGENT_TYPE,
-    check_yield_can_spend,
+    YIELD_PLATFORM_FEE_RATE,
+    check_yield_can_invest,
     get_yield_agent_wallet_info,
     get_yield_user_balances,
     record_yield_credit,
+    record_yield_platform_fee,
     record_yield_spend,
+    yield_platform_fee,
 )
 from yield_protocols import (
     SOL_MINT,
@@ -92,6 +95,8 @@ If the user names Kamino, Jupiter, or Save, deposit into that protocol.
 
 Rules:
 - Say which yield type you used.
+- Platform fee is 0.5% of capital on each successful invest, charged on top of capital
+  (0.1 SOL invest needs 0.1005 SOL idle, plus a little more for Solana transaction costs).
 - Never invent APYs, signatures, or balances.
 - Not financial advice. Keep replies concise.
 """
@@ -229,7 +234,7 @@ def allocate_to_venue(
     if not venue or not venue.get("mint"):
         return {"error": "No executable yield venue is available right now."}
 
-    spend = check_yield_can_spend(wallet, amount)
+    spend = check_yield_can_invest(wallet, amount)
     if spend.get("error"):
         return spend
 
@@ -248,6 +253,13 @@ def allocate_to_venue(
     explorer = swap.get("explorer_url") or (f"https://solscan.io/tx/{signature}" if signature else None)
     pos_id = uuid.uuid4().hex[:16]
     record_yield_spend(
+        wallet,
+        amount,
+        reference_id=pos_id,
+        signature=signature,
+        explorer_url=explorer,
+    )
+    record_yield_platform_fee(
         wallet,
         amount,
         reference_id=pos_id,
@@ -416,7 +428,7 @@ def invest_for_requirements(
             "message": _compared_message(comparison, amount, asset_norm, duration, ytype),
         }
 
-    spend = check_yield_can_spend(wallet, amount, token=asset_norm)
+    spend = check_yield_can_invest(wallet, amount, token=asset_norm)
     if spend.get("error"):
         return {
             "status": "needs_deposit",
@@ -424,6 +436,8 @@ def invest_for_requirements(
             "comparison": comparison,
             "error": spend["error"],
             "available": spend.get("available"),
+            "platform_fee": spend.get("platform_fee"),
+            "total_required": spend.get("total_required"),
         }
 
     tok = resolve_token(asset_norm)
@@ -446,6 +460,14 @@ def invest_for_requirements(
     explorer = swap.get("explorer_url") or (f"https://solscan.io/tx/{signature}" if signature else None)
     pos_id = uuid.uuid4().hex[:16]
     record_yield_spend(
+        wallet,
+        amount,
+        token=asset_norm,
+        reference_id=pos_id,
+        signature=signature,
+        explorer_url=explorer,
+    )
+    fee_rec = record_yield_platform_fee(
         wallet,
         amount,
         token=asset_norm,
@@ -483,10 +505,14 @@ def invest_for_requirements(
             "status": "confirmed",
         }
     )
+    fee_amt = float(fee_rec.get("fee") or yield_platform_fee(amount))
     return {
         "status": "invested",
         "position": position,
         "spent": amount,
+        "platform_fee": fee_amt,
+        "fee_rate": YIELD_PLATFORM_FEE_RATE,
+        "total_charged": round(amount + fee_amt, 12),
         "asset": asset_norm,
         "duration_days": duration,
         "received": out_amt,
@@ -498,7 +524,8 @@ def invest_for_requirements(
         "message": (
             f"Invested {amount} {asset_norm} for {duration} days into Jupiter JLP"
             + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
-            + " via Jupiter. This yield type is liquidity provision."
+            + f" via Jupiter. Platform fee {fee_amt} {asset_norm} "
+            f"({YIELD_PLATFORM_FEE_RATE * 100:.1f}%). This yield type is liquidity provision."
         ),
     }
 
@@ -521,13 +548,16 @@ def _invest_save_api(
     agent_wallet = get_yield_wallet_pubkey(wallet)
     if not agent_wallet:
         return {"error": "Yield agent wallet is not configured (Circle)."}
+    platform_fee = yield_platform_fee(amount)
     if not skip_deposit_ledger:
-        spend = check_yield_can_spend(wallet, amount, token=asset_norm)
+        spend = check_yield_can_invest(wallet, amount, token=asset_norm)
         if spend.get("error"):
             return {
                 "status": "needs_deposit",
                 "error": spend["error"],
                 "available": spend.get("available"),
+                "platform_fee": spend.get("platform_fee"),
+                "total_required": spend.get("total_required"),
             }
     prepared = prepare_save_sol_deposit(agent_wallet, amount)
     if prepared.get("error"):
@@ -536,8 +566,9 @@ def _invest_save_api(
     try:
         lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
         sol_balance = lamports / 1e9
+        # Capital leaves the wallet; platform fee stays; keep SOL_FEE_RESERVE for gas.
         if sol_balance - amount - rent_sol < SOL_FEE_RESERVE - 1e-9:
-            needed = amount + rent_sol + SOL_FEE_RESERVE
+            needed = amount + platform_fee + rent_sol + SOL_FEE_RESERVE
             short = max(0.0, needed - sol_balance)
             rent_note = (
                 f" plus {rent_sol:.6f} SOL to open the token accounts"
@@ -547,11 +578,14 @@ def _invest_save_api(
             return {
                 "error": (
                     f"The Circle wallet has {sol_balance:.6f} SOL. "
-                    f"This deposit needs {amount:.6f} SOL{rent_note}, "
-                    f"and {SOL_FEE_RESERVE} SOL must stay in the wallet for fees. "
+                    f"This deposit needs {amount:.6f} SOL capital + {platform_fee:.6f} SOL "
+                    f"platform fee ({YIELD_PLATFORM_FEE_RATE * 100:.1f}%){rent_note}, "
+                    f"and about {SOL_FEE_RESERVE} SOL for transaction costs. "
                     f"Send about {short:.6f} more SOL to the Circle wallet, then try again."
                 ),
                 "status": "failed",
+                "platform_fee": platform_fee,
+                "total_required": round(amount + platform_fee, 12),
             }
     except Exception as exc:
         return {"error": f"Could not read the Circle wallet balance: {exc}"}
@@ -602,6 +636,15 @@ def _invest_save_api(
         signature=signature,
         explorer_url=explorer,
     )
+    if not skip_deposit_ledger:
+        record_yield_platform_fee(
+            wallet,
+            amount,
+            token=asset_norm,
+            reference_id=pos_id,
+            signature=signature,
+            explorer_url=explorer,
+        )
     position = insert_yield_position(
         {
             "id": pos_id,
@@ -632,10 +675,14 @@ def _invest_save_api(
             "status": "confirmed",
         }
     )
+    fee_amt = platform_fee if not skip_deposit_ledger else 0.0
     return {
         "status": "invested",
         "position": position,
         "spent": amount,
+        "platform_fee": fee_amt,
+        "fee_rate": YIELD_PLATFORM_FEE_RATE,
+        "total_charged": round(amount + fee_amt, 12),
         "asset": asset_norm,
         "duration_days": duration,
         "route": "save_lend",
@@ -644,7 +691,12 @@ def _invest_save_api(
         "mandate": mandate,
         "message": (
             f"Deposited {amount} SOL for {duration} days into Save Finance SOL lending. "
-            f"Confirmed transaction: {explorer or signature}."
+            + (
+                f"Platform fee {fee_amt} SOL ({YIELD_PLATFORM_FEE_RATE * 100:.1f}%). "
+                if fee_amt
+                else ""
+            )
+            + f"Confirmed transaction: {explorer or signature}."
         ),
     }
 
@@ -687,8 +739,9 @@ def _invest_kamino_api(
     agent_wallet = get_yield_wallet_pubkey(wallet)
     if not agent_wallet:
         return {"error": "Yield agent wallet is not configured (Circle).", "comparison": comparison}
+    platform_fee = yield_platform_fee(amount)
     if not skip_deposit_ledger:
-        spend = check_yield_can_spend(wallet, amount, token=asset_norm)
+        spend = check_yield_can_invest(wallet, amount, token=asset_norm)
         if spend.get("error"):
             return {
                 "status": "needs_deposit",
@@ -696,6 +749,8 @@ def _invest_kamino_api(
                 "comparison": comparison,
                 "error": spend["error"],
                 "available": spend.get("available"),
+                "platform_fee": spend.get("platform_fee"),
+                "total_required": spend.get("total_required"),
             }
     try:
         lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
@@ -703,12 +758,15 @@ def _invest_kamino_api(
         if sol_balance - amount < SOL_FEE_RESERVE - 1e-12:
             return {
                 "error": (
-                    f"Deposit of {amount:.6f} SOL would leave only "
-                    f"{max(0.0, sol_balance - amount):.6f} SOL for fees. "
+                    f"Deposit of {amount:.6f} SOL capital (+ {platform_fee:.6f} SOL "
+                    f"platform fee) would leave only "
+                    f"{max(0.0, sol_balance - amount):.6f} SOL for transaction costs. "
                     f"Keep at least {SOL_FEE_RESERVE} SOL idle in the Circle wallet."
                 ),
                 "comparison": comparison,
                 "status": "compared",
+                "platform_fee": platform_fee,
+                "total_required": round(amount + platform_fee, 12),
             }
     except Exception as exc:
         return {"error": f"Could not read the Circle wallet balance: {exc}", "comparison": comparison}
@@ -740,6 +798,15 @@ def _invest_kamino_api(
         signature=signature,
         explorer_url=explorer,
     )
+    if not skip_deposit_ledger:
+        record_yield_platform_fee(
+            wallet,
+            amount,
+            token=asset_norm,
+            reference_id=pos_id,
+            signature=signature,
+            explorer_url=explorer,
+        )
     kind = "vault" if venue.get("deposit_route") == "kamino_vault" else "lending"
     position = insert_yield_position(
         {
@@ -771,10 +838,14 @@ def _invest_kamino_api(
             "status": "confirmed",
         }
     )
+    fee_amt = platform_fee if not skip_deposit_ledger else 0.0
     return {
         "status": "invested",
         "position": position,
         "spent": amount,
+        "platform_fee": fee_amt,
+        "fee_rate": YIELD_PLATFORM_FEE_RATE,
+        "total_charged": round(amount + fee_amt, 12),
         "asset": asset_norm,
         "duration_days": duration,
         "venue": venue,
@@ -785,7 +856,13 @@ def _invest_kamino_api(
         "message": (
             f"Deposited {amount} SOL for {duration} days into Kamino Finance {kind}"
             + (f" at {venue.get('apy')}% APY" if venue.get("apy") is not None else "")
-            + f" through the Kamino API. Confirmed transaction: {explorer or signature}."
+            + f" through the Kamino API."
+            + (
+                f" Platform fee {fee_amt} SOL ({YIELD_PLATFORM_FEE_RATE * 100:.1f}%)."
+                if fee_amt
+                else ""
+            )
+            + f" Confirmed transaction: {explorer or signature}."
         ),
     }
 

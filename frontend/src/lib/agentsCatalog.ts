@@ -5,6 +5,7 @@ import {
   Bot,
   Radar,
   Search,
+  TrendingUp,
   Wallet,
 } from "lucide-react";
 
@@ -16,7 +17,8 @@ export type AgentIconId =
   | "bell"
   | "bot"
   | "radar"
-  | "swap";
+  | "swap"
+  | "yield";
 
 export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   wallet: Wallet,
@@ -25,6 +27,7 @@ export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   bot: Bot,
   radar: Radar,
   swap: ArrowLeftRight,
+  yield: TrendingUp,
 };
 
 export type MarketplaceAgent = {
@@ -197,7 +200,24 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     available: true,
     model: "meta-llama/llama-3.1-8b-instruct",
     cluster: "mainnet",
-  }
+  },
+  {
+    id: "yield",
+    slug: "yield",
+    name: "Yield Agent",
+    category: "Trading",
+    description:
+      "Deposit SOL into Kamino, Jupiter JLP, or Save. Compare yields in chat, then deploy idle capital into the best matching venue. 0.5% fee per invest on top of capital.",
+    tagline: "Kamino · Jupiter JLP · Save",
+    pricePerTask: "0.5% / tx",
+    runs: "-",
+    volumeSol: "-",
+    rating: 4.8,
+    iconId: "yield",
+    available: true,
+    model: "meta-llama/llama-3.1-8b-instruct",
+    cluster: "mainnet",
+  },
 ];
 
 export function getAgentBySlug(slug: string): MarketplaceAgent | undefined {

@@ -8,6 +8,7 @@ import type { MarketplaceAgent } from "@/lib/agentsCatalog";
 export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
   const Icon = AGENT_ICONS[agent.iconId];
   const showDcaStats = agent.slug === "dca";
+  const showYieldFee = agent.slug === "yield" && Boolean(agent.pricePerTask);
 
   const inner = (
     <article className="group flex h-full flex-col border border-grid bg-surface/40 p-5 transition hover:border-signal/60 hover:bg-surface/70">
@@ -50,6 +51,17 @@ export function AgentCard({ agent }: { agent: MarketplaceAgent }) {
             <div className="mt-1 font-display text-base font-bold tabular-nums text-signal md:text-lg">
               {agent.volumeSol ?? "-"}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showYieldFee && (
+        <div className="mt-5 border-t border-grid pt-4">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Per invest
+          </div>
+          <div className="mt-1 font-display text-base font-bold tabular-nums text-signal md:text-lg">
+            {agent.pricePerTask}
           </div>
         </div>
       )}

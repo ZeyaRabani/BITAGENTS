@@ -11,7 +11,10 @@ import {
   investYieldCapital,
   mapYieldActions,
   sendYieldAgentMessage,
+  yieldInvestTotalCost,
+  yieldPlatformFee,
   YIELD_EXAMPLE_PROMPTS,
+  YIELD_PLATFORM_FEE_RATE,
   YIELD_TYPE_HELP,
   YIELD_TYPES,
   type YieldDashboard,
@@ -159,14 +162,21 @@ export function YieldAgentConsole() {
   const online = health?.status === "ok";
   const venues = dashboard?.yields?.markets ?? dashboard?.yields?.executable_venues ?? [];
   const positions = dashboard?.positions ?? [];
+  const feeRate = health?.platform_fee_rate ?? YIELD_PLATFORM_FEE_RATE;
+  const capitalNum = Number(capital);
+  const feePreview =
+    Number.isFinite(capitalNum) && capitalNum > 0 ? yieldPlatformFee(capitalNum) : null;
+  const totalPreview =
+    Number.isFinite(capitalNum) && capitalNum > 0 ? yieldInvestTotalCost(capitalNum) : null;
 
   return (
     <div className="space-y-6">
       <div className="border border-grid bg-surface/40 px-4 py-4">
         <p className="text-sm leading-relaxed text-muted-foreground">
           Send SOL to your Circle yield wallet, then ask in chat or use the form. The agent
-          deposits into Kamino, Jupiter JLP, or Save. Name a protocol to use that one, or
-          leave the yield type on Any and it deposits into the best match. Not financial advice.
+          deposits into Kamino, Jupiter JLP, or Save. Each invest charges a{" "}
+          {(feeRate * 100).toFixed(1)}% fee on top of capital (0.1 SOL invest needs 0.1005 SOL
+          idle, plus a little more for Solana transaction costs). Not financial advice.
         </p>
       </div>
 
@@ -178,7 +188,9 @@ export function YieldAgentConsole() {
         <span>·</span>
         <span>{health?.model ?? "hosted LLM"}</span>
         <span>·</span>
-        <span className="text-signal">Free · wallet sign-in required</span>
+        <span className="text-signal">
+          {(feeRate * 100).toFixed(1)}% / invest · wallet sign-in required
+        </span>
       </div>
 
       {error && (
@@ -255,6 +267,12 @@ export function YieldAgentConsole() {
             {investBusy ? "Comparing…" : "Find best and invest"}
           </button>
         </form>
+        {feePreview != null && totalPreview != null && (
+          <p className="mt-3 font-mono text-[11px] text-muted-foreground">
+            Platform fee {(feeRate * 100).toFixed(1)}%: {feePreview} SOL · total required from
+            idle balance: {totalPreview} SOL (+ gas in the Circle wallet)
+          </p>
+        )}
         {investNote && <p className="mt-3 font-mono text-[11px] text-signal">{investNote}</p>}
         {/* <div className="mt-4 border-t border-grid pt-4">
           <button

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -12,6 +13,24 @@ from dca_agent import SOL_ADDRESS_FULL, resolve_token, sol_rpc
 ALLOWED_DEPOSIT_TOKENS = {"SOL"}
 ALLOWED_WITHDRAW_TOKENS = {"SOL"}
 AGENT_TYPE = "yield"
+
+# Platform fee on each successful Yield invest (charged on top of capital).
+# Example: 0.1 SOL capital → 0.0005 SOL fee → user needs 0.1005 SOL idle (+ gas).
+YIELD_PLATFORM_FEE_RATE = float(os.environ.get("YIELD_PLATFORM_FEE_RATE", "0.005") or "0.005")
+
+
+def yield_platform_fee(capital: float) -> float:
+    """0.5% platform fee charged in SOL for a successful Yield invest."""
+    amount = float(capital)
+    if amount <= 0:
+        return 0.0
+    return round(amount * YIELD_PLATFORM_FEE_RATE, 12)
+
+
+def yield_invest_total_cost(capital: float) -> float:
+    """Capital plus platform fee required in the Yield Circle ledger."""
+    amount = float(capital)
+    return round(amount + yield_platform_fee(amount), 12)
 
 
 def get_yield_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
@@ -136,6 +155,27 @@ def check_yield_can_spend(user_wallet: str, amount: float, token: str = "SOL") -
     }
 
 
+def check_yield_can_invest(user_wallet: str, capital: float, token: str = "SOL") -> dict[str, Any]:
+    """Ensure idle balance covers capital plus the 0.5% platform fee."""
+    capital = float(capital)
+    fee = yield_platform_fee(capital)
+    total = yield_invest_total_cost(capital)
+    check = check_yield_can_spend(user_wallet, total, token=token)
+    check["capital"] = capital
+    check["platform_fee"] = fee
+    check["total_required"] = total
+    check["fee_rate"] = YIELD_PLATFORM_FEE_RATE
+    if check.get("error"):
+        token_u = (token or "SOL").strip().upper()
+        check["error"] = (
+            f"Insufficient idle {token_u}. Available: {check.get('available')}, "
+            f"needed: {total} ({capital} capital + {fee} platform fee at "
+            f"{YIELD_PLATFORM_FEE_RATE * 100:.1f}%). "
+            f"Deposit at least {total} {token_u}, plus a little more for Solana transaction costs."
+        )
+    return check
+
+
 def _insert_yield_ledger(
     user_wallet: str,
     *,
@@ -196,6 +236,41 @@ def record_yield_spend(
     if rec.get("error"):
         return rec
     return {"spent": float(amount), "token": (token or "SOL").strip().upper()}
+
+
+def record_yield_platform_fee(
+    user_wallet: str,
+    capital: float,
+    *,
+    reference_id: str,
+    token: str = "SOL",
+    signature: Optional[str] = None,
+    explorer_url: Optional[str] = None,
+) -> dict[str, Any]:
+    """Record the 0.5% platform fee for a successful Yield invest (SOL stays in Circle wallet)."""
+    fee = yield_platform_fee(capital)
+    if fee <= 0:
+        return {"status": "skipped", "fee": 0.0, "token": (token or "SOL").strip().upper()}
+    rec = _insert_yield_ledger(
+        user_wallet,
+        token=token,
+        direction="spend",
+        amount=fee,
+        reference_type="yield_fee",
+        reference_id=f"fee:{reference_id}"[:128],
+        signature=signature,
+        explorer_url=explorer_url,
+    )
+    if rec.get("error"):
+        return rec
+    return {
+        "status": "recorded",
+        "fee": fee,
+        "fee_rate": YIELD_PLATFORM_FEE_RATE,
+        "token": (token or "SOL").strip().upper(),
+        "capital": float(capital),
+        "total_charged": yield_invest_total_cost(capital),
+    }
 
 
 def record_yield_credit(

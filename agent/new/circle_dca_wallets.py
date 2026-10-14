@@ -29,12 +29,13 @@ CIRCLE_API_KEY = os.environ.get("CIRCLE_API_KEY", "").strip()
 CIRCLE_ENTITY_SECRET = os.environ.get("CIRCLE_ENTITY_SECRET", "").strip()
 CIRCLE_WALLET_SET_ID = os.environ.get("CIRCLE_WALLET_SET_ID", "").strip()
 
-AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund")
+AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund", "yield")
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
     "easya": "EasyA",
     "volume": "Volume",
     "hedge_fund": "HedgeFund",
+    "yield": "Yield",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -43,6 +44,18 @@ _sdk_client = None
 _sdk_lock = threading.Lock()
 _pubkey_lock = threading.Lock()
 _cached_entity_public_key: Optional[str] = None
+_ensure_wallet_locks: dict[str, threading.Lock] = {}
+_ensure_wallet_locks_guard = threading.Lock()
+
+
+def _ensure_lock_for(user_wallet: str, agent_type: str) -> threading.Lock:
+    key = f"{agent_type}:{user_wallet.strip().lower()}"
+    with _ensure_wallet_locks_guard:
+        lock = _ensure_wallet_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _ensure_wallet_locks[key] = lock
+        return lock
 
 
 class CircleDcaWalletError(RuntimeError):
@@ -68,6 +81,8 @@ def normalize_agent_type(agent_type: str) -> str:
         "hedgefund": "hedge_fund",
         "volume2": "volume",
         "bitagents_volume": "volume",
+        "yield_agent": "yield",
+        "yield-optimizer": "yield",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:
@@ -287,9 +302,22 @@ def ensure_agent_wallet_for_user(user_wallet: str, agent_type: str) -> dict[str,
     if existing:
         return existing
 
-    created = _create_circle_wallet_for_user(user_wallet, agent_type)
-    save_user_agent_wallet(created)
-    return get_user_agent_wallet(user_wallet, agent_type) or created
+    # Agent/balance/dashboard can hit this at once on first load. Serialize creates
+    # so Circle is not called thrice and a failed race does not leave the UI empty.
+    with _ensure_lock_for(user_wallet, agent_type):
+        existing = get_user_agent_wallet(user_wallet, agent_type)
+        if existing:
+            return existing
+        try:
+            created = _create_circle_wallet_for_user(user_wallet, agent_type)
+            save_user_agent_wallet(created)
+            return get_user_agent_wallet(user_wallet, agent_type) or created
+        except CircleDcaWalletError:
+            # Another request may have finished creating while we were waiting on Circle.
+            raced = get_user_agent_wallet(user_wallet, agent_type)
+            if raced:
+                return raced
+            raise
 
 
 def ensure_dca_agent_wallet_for_user(user_wallet: str) -> dict[str, Any]:

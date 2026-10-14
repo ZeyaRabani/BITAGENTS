@@ -11,9 +11,23 @@ export type YieldHealth = {
   agent: string;
   model?: string;
   pricing?: string;
+  platform_fee_rate?: number;
   auth_required?: boolean;
   live_routing?: string;
 };
+
+/** 0.5% platform fee charged on top of invest capital. */
+export const YIELD_PLATFORM_FEE_RATE = 0.005;
+
+export function yieldPlatformFee(capital: number): number {
+  if (!Number.isFinite(capital) || capital <= 0) return 0;
+  return Math.round(capital * YIELD_PLATFORM_FEE_RATE * 1e12) / 1e12;
+}
+
+export function yieldInvestTotalCost(capital: number): number {
+  if (!Number.isFinite(capital) || capital <= 0) return 0;
+  return Math.round((capital + yieldPlatformFee(capital)) * 1e12) / 1e12;
+}
 
 export type YieldVenue = {
   protocol_id?: string;
@@ -175,12 +189,12 @@ export const YIELD_TYPES = [
 ] as const;
 
 export const YIELD_TYPE_HELP: Record<(typeof YIELD_TYPES)[number]["id"], string> = {
-  any: "Any ranks Kamino, Jupiter, and Save, then deposits into the best match. Kamino uses its API. Jupiter buys JLP. Save deposits into SOL lending.",
+  any: "Any ranks Kamino, Jupiter, and Save, then deposits into the best match. Kamino uses its API. Jupiter buys JLP. Save deposits into SOL lending. Fee is 0.5% of capital on top (0.1 SOL invest needs 0.1005 SOL idle, plus a little for gas).",
   lending:
-    "Lending ranks Kamino and Save SOL markets and deposits into the one with the better rate.",
+    "Lending ranks Kamino and Save SOL markets and deposits into the one with the better rate. Fee is 0.5% of capital on top of the invest amount.",
   liquidity_vault:
-    "Liquidity vault deposits SOL into the best Kamino vault through the Kamino API (https://api.kamino.finance).",
-  jlp: "JLP sends deposited SOL from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token.",
+    "Liquidity vault deposits SOL into the best Kamino vault through the Kamino API (https://api.kamino.finance). Fee is 0.5% of capital on top of the invest amount.",
+  jlp: "JLP sends deposited SOL from your Circle wallet through Jupiter into JLP, Jupiter's liquidity pool token. Fee is 0.5% of capital on top of the invest amount.",
 };
 
 export const YIELD_EXAMPLE_PROMPTS = [

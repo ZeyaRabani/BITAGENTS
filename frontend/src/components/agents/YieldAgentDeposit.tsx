@@ -344,9 +344,9 @@ export function YieldAgentDeposit({
     <Panel title="Capital">
       <p className="text-sm text-muted-foreground">
         Send SOL to your Yield Agent wallet. After you send funds, the deposit is verified and
-        credited automatically. If confirmation expires, paste the transaction hash below and
-        verify it. The agent uses the credited balance when it stakes the best protocol for your
-        requirements.
+        credited automatically. Each invest takes a 0.5% fee on top of capital (for 0.1 SOL
+        yield you need at least 0.1005 SOL idle, plus a little more for Solana transaction
+        costs). If confirmation expires, paste the transaction hash below and verify it.
       </p>
       <div className="mt-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
         <span className="uppercase tracking-[0.16em] text-signal">Your Yield agent wallet</span>
