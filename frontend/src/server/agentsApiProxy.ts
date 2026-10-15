@@ -392,6 +392,28 @@ export async function proxyYieldDashboard(authToken: string): Promise<Response> 
   });
 }
 
+export async function proxyYieldPositionAdd(
+  positionId: string,
+  body: { capital: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/positions/${encodeURIComponent(positionId)}/add`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyYieldPositionUnwind(
+  positionId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/yield/positions/${encodeURIComponent(positionId)}/unwind`, {
+    method: "POST",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyKickstartWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/kickstart/wallet/agent`, {
     cache: "no-store",

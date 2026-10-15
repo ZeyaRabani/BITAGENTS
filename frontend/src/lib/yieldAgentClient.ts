@@ -46,11 +46,14 @@ export type YieldPosition = {
   id: string;
   protocol_id: string;
   protocol_name: string;
+  mint?: string;
   symbol: string;
   amount: number;
   entry_apy?: number | null;
   status: string;
+  last_signature?: string | null;
   explorer_url?: string | null;
+  updated_at?: string | null;
 };
 
 export type YieldDashboard = {
@@ -146,6 +149,63 @@ export async function investYieldCapital(
     body: JSON.stringify(body),
   });
   const data = (await res.json()) as YieldInvestResult & { detail?: unknown };
+  if (!res.ok) {
+    throw new Error(readInvestError(data));
+  }
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
+export type YieldPositionActionResult = {
+  status: string;
+  message?: string;
+  error?: string;
+  signature?: string;
+  explorer_url?: string;
+  position?: YieldPosition;
+  added_capital?: number;
+  platform_fee?: number;
+  total_charged?: number;
+  sol_returned?: number;
+};
+
+export async function addCapitalToYieldPosition(
+  positionId: string,
+  capital: number,
+  authToken: string
+): Promise<YieldPositionActionResult> {
+  const res = await fetch(`/api/agents/yield/positions/${encodeURIComponent(positionId)}/add`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${authToken}`,
+    },
+    body: JSON.stringify({ capital }),
+  });
+  const data = (await res.json()) as YieldPositionActionResult & { detail?: unknown };
+  if (!res.ok) {
+    throw new Error(readInvestError(data));
+  }
+  if (data.error) {
+    throw new Error(data.error);
+  }
+  return data;
+}
+
+export async function unwindYieldPosition(
+  positionId: string,
+  authToken: string
+): Promise<YieldPositionActionResult> {
+  const res = await fetch(
+    `/api/agents/yield/positions/${encodeURIComponent(positionId)}/unwind`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${authToken}` },
+    }
+  );
+  const data = (await res.json()) as YieldPositionActionResult & { detail?: unknown };
   if (!res.ok) {
     throw new Error(readInvestError(data));
   }

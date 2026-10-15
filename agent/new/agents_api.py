@@ -1535,6 +1535,37 @@ def yield_invest(
     return result
 
 
+class YieldAddCapitalRequest(BaseModel):
+    capital: float
+
+
+@app.post("/yield/positions/{position_id}/add")
+def yield_position_add(
+    position_id: str,
+    body: YieldAddCapitalRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    from yield_agent import add_capital_to_position
+
+    result = add_capital_to_position(auth_wallet, position_id, body.capital)
+    if result.get("error") and result.get("status") not in ("needs_deposit",):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/yield/positions/{position_id}/unwind")
+def yield_position_unwind(
+    position_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    from yield_agent import unwind_position
+
+    result = unwind_position(auth_wallet, position_id)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
 @app.post("/yield/chat", response_model=ChatResponse)
 def yield_chat(
     body: KickstartChatRequest,

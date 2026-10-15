@@ -956,20 +956,225 @@ def _unwind_kamino(wallet: str, pos: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def unwind_position(user_wallet: str, position_id: Optional[str] = None) -> dict[str, Any]:
-    from db import list_yield_positions, update_yield_position, insert_yield_rebalance
+def _get_active_position(wallet: str, position_id: Optional[str] = None) -> dict[str, Any]:
+    from db import list_yield_positions
 
-    wallet = (user_wallet or "").strip()
     positions = list_yield_positions(wallet, active_only=True)
     if not positions:
-        return {"error": "No active yield positions to unwind."}
-    pos = None
+        return {"error": "No active yield positions."}
     if position_id:
         pos = next((p for p in positions if p.get("id") == position_id), None)
+        if not pos:
+            return {"error": "Position not found."}
+        return pos
+    return positions[0]
+
+
+def add_capital_to_position(
+    user_wallet: str,
+    position_id: str,
+    capital: float,
+) -> dict[str, Any]:
+    """Deposit more SOL into an existing yield position (same protocol)."""
+    from circle_dca_wallets import resolve_agent_signing_context
+    from db import insert_yield_rebalance, update_yield_position
+    from dca_agent import _send_signed_transaction, sol_rpc
+    from save_deposit import prepare_save_sol_deposit
+    from yield_ledger import get_yield_wallet_pubkey
+    from yield_protocol_apis import build_kamino_deposit
+
+    wallet = (user_wallet or "").strip()
+    pos = _get_active_position(wallet, position_id)
+    if pos.get("error"):
+        return pos
+
+    try:
+        amount = round(float(capital), 9)
+    except (TypeError, ValueError):
+        return {"error": "Capital must be a number."}
+    if amount < MIN_ALLOCATE_SOL:
+        return {"error": f"Minimum add amount is {MIN_ALLOCATE_SOL} SOL."}
+
+    spend = check_yield_can_invest(wallet, amount, token="SOL")
+    if spend.get("error"):
+        return {
+            "status": "needs_deposit",
+            "error": spend["error"],
+            "available": spend.get("available"),
+            "platform_fee": spend.get("platform_fee"),
+            "total_required": spend.get("total_required"),
+        }
+
+    protocol_id = str(pos.get("protocol_id") or "")
+    agent_wallet = get_yield_wallet_pubkey(wallet)
+    if not agent_wallet:
+        return {"error": "Yield agent wallet is not configured (Circle)."}
+
+    platform_fee = yield_platform_fee(amount)
+    signature: Optional[str] = None
+    explorer: Optional[str] = None
+    added_units = amount
+
+    if protocol_id in {"kamino", "kamino-vault"}:
+        if protocol_id == "kamino-vault":
+            venue = {"deposit_route": "kamino_vault", "kvault": pos.get("mint")}
+        else:
+            venue = {"deposit_route": "kamino_lend", "reserve": pos.get("mint")}
+        try:
+            lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
+            sol_balance = lamports / 1e9
+            if sol_balance - amount < SOL_FEE_RESERVE - 1e-12:
+                return {
+                    "error": (
+                        f"Adding {amount:.6f} SOL (+ {platform_fee:.6f} fee) would leave only "
+                        f"{max(0.0, sol_balance - amount):.6f} SOL for transaction costs. "
+                        f"Keep at least {SOL_FEE_RESERVE} SOL idle."
+                    ),
+                    "platform_fee": platform_fee,
+                    "total_required": round(amount + platform_fee, 12),
+                }
+        except Exception as exc:
+            return {"error": f"Could not read the Circle wallet balance: {exc}"}
+        sent = _send_kamino_transaction(
+            wallet,
+            lambda: build_kamino_deposit(agent_wallet=agent_wallet, amount=amount, venue=venue),
+        )
+        if sent.get("error") or sent.get("status") in ("failed", "error"):
+            return {
+                "error": sent.get("error") or "Kamino top-up failed.",
+                "signature": sent.get("signature"),
+                "explorer_url": sent.get("explorer_url"),
+                "status": "failed",
+            }
+        signature = sent.get("signature")
+        explorer = sent.get("explorer_url")
+    elif protocol_id == "save":
+        prepared = prepare_save_sol_deposit(agent_wallet, amount)
+        if prepared.get("error"):
+            return {**prepared, "status": "failed"}
+        rent_sol = int(prepared.get("extra_lamports") or 0) / 1e9
+        try:
+            lamports = int((sol_rpc("getBalance", [agent_wallet]) or {}).get("value", 0))
+            sol_balance = lamports / 1e9
+            if sol_balance - amount - rent_sol < SOL_FEE_RESERVE - 1e-9:
+                needed = amount + platform_fee + rent_sol + SOL_FEE_RESERVE
+                return {
+                    "error": (
+                        f"The Circle wallet has {sol_balance:.6f} SOL. "
+                        f"Need about {needed:.6f} SOL (capital + fee + rent + gas)."
+                    ),
+                    "status": "failed",
+                    "platform_fee": platform_fee,
+                    "total_required": round(amount + platform_fee, 12),
+                }
+        except Exception as exc:
+            return {"error": f"Could not read the Circle wallet balance: {exc}"}
+        signing = resolve_agent_signing_context(wallet, AGENT_TYPE)
+        if signing.get("pubkey") and signing.get("pubkey") != agent_wallet:
+            return {"error": "Yield wallet address does not match the Circle signer."}
+        sent = _send_signed_transaction(
+            signing.get("keypair") if signing.get("mode") == "local" else None,
+            prepared["instructions"],
+            circle_wallet_id=signing.get("wallet_id") if signing.get("mode") == "circle" else None,
+            retries=3,
+        )
+        if sent.get("error") or sent.get("status") in ("failed", "error"):
+            return {
+                "error": sent.get("error") or "Save top-up failed.",
+                "signature": sent.get("signature"),
+                "explorer_url": sent.get("explorer_url"),
+                "status": "failed",
+            }
+        signature = sent.get("signature")
+        explorer = sent.get("explorer_url")
+    elif protocol_id == "drift":
+        return {"error": "Drift top-ups are not available."}
     else:
-        pos = positions[0]
-    if not pos:
-        return {"error": "Position not found."}
+        # Jupiter JLP / LST-style positions: swap more SOL into the position mint.
+        mint = str(pos.get("mint") or "")
+        if not mint:
+            return {"error": "This position has no mint to top up."}
+        swap = _execute_swap(
+            user_wallet=wallet,
+            input_mint=SOL_MINT,
+            output_mint=mint,
+            amount=amount,
+            input_decimals=9,
+        )
+        if swap.get("error") or swap.get("status") in ("failed", "error"):
+            return {"error": swap.get("error") or "Jupiter top-up swap failed.", "swap": swap}
+        added_units = _out_amount(swap, amount)
+        signature = swap.get("signature")
+        explorer = swap.get("explorer_url") or (
+            f"https://solscan.io/tx/{signature}" if signature else None
+        )
+
+    record_yield_spend(
+        wallet,
+        amount,
+        token="SOL",
+        reference_id=f"add:{pos['id']}"[:128],
+        signature=signature,
+        explorer_url=explorer,
+    )
+    record_yield_platform_fee(
+        wallet,
+        amount,
+        token="SOL",
+        reference_id=str(pos["id"]),
+        signature=signature,
+        explorer_url=explorer,
+    )
+    new_amount = round(float(pos.get("amount") or 0) + float(added_units), 9)
+    updated = update_yield_position(
+        str(pos["id"]),
+        {
+            "amount": new_amount,
+            "last_signature": signature,
+            "explorer_url": explorer,
+            "status": "active",
+        },
+    )
+    insert_yield_rebalance(
+        {
+            "id": uuid.uuid4().hex[:16],
+            "user_wallet": wallet,
+            "position_id": pos["id"],
+            "from_protocol": "idle_sol",
+            "to_protocol": protocol_id or pos.get("protocol_name"),
+            "amount": amount,
+            "from_apy": 0,
+            "to_apy": pos.get("entry_apy"),
+            "signature": signature,
+            "explorer_url": explorer,
+            "status": "confirmed",
+        }
+    )
+    return {
+        "status": "updated",
+        "position": updated or {**pos, "amount": new_amount},
+        "added_capital": amount,
+        "added_units": added_units,
+        "platform_fee": platform_fee,
+        "fee_rate": YIELD_PLATFORM_FEE_RATE,
+        "total_charged": round(amount + platform_fee, 12),
+        "signature": signature,
+        "explorer_url": explorer,
+        "message": (
+            f"Added {amount} SOL to {pos.get('protocol_name') or protocol_id} "
+            f"(+ {platform_fee} SOL platform fee). Position size is now {new_amount} "
+            f"{pos.get('symbol') or 'SOL'}."
+        ),
+    }
+
+
+def unwind_position(user_wallet: str, position_id: Optional[str] = None) -> dict[str, Any]:
+    from db import update_yield_position, insert_yield_rebalance
+
+    wallet = (user_wallet or "").strip()
+    pos = _get_active_position(wallet, position_id)
+    if pos.get("error"):
+        return pos
 
     if str(pos.get("protocol_id") or "") == "drift":
         return {

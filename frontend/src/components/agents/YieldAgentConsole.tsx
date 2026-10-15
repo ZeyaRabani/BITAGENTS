@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
 import { YieldAgentDeposit } from "@/components/agents/YieldAgentDeposit";
+import { YieldPositionPanel } from "@/components/agents/YieldPositionPanel";
 import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import { useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -54,17 +55,22 @@ export function YieldAgentConsole() {
   const [investNote, setInvestNote] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const refreshDashboard = useCallback(async () => {
+    if (!token) {
+      setDashboard(null);
+      return;
+    }
+    const dash = await fetchYieldDashboard(token);
+    if (dash) setDashboard(dash);
+  }, [token]);
+
   useEffect(() => {
     void fetchYieldHealth().then(setHealth);
   }, []);
 
   useEffect(() => {
-    if (!token) {
-      setDashboard(null);
-      return;
-    }
-    void fetchYieldDashboard(token).then(setDashboard);
-  }, [token]);
+    void refreshDashboard();
+  }, [refreshDashboard]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -84,8 +90,7 @@ export function YieldAgentConsole() {
         { id: `a-${Date.now()}`, role: "assistant", content: res.reply },
       ]);
       setActions(mapYieldActions(res.actions));
-      const dash = await fetchYieldDashboard(token);
-      if (dash) setDashboard(dash);
+      await refreshDashboard();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Request failed";
       setError(msg);
@@ -142,8 +147,7 @@ export function YieldAgentConsole() {
         yield_type: yieldType,
       });
       setInvestNote(result.message ?? "Requirements saved.");
-      const dash = await fetchYieldDashboard(token);
-      if (dash) setDashboard(dash);
+      await refreshDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Invest failed");
     } finally {
@@ -274,22 +278,19 @@ export function YieldAgentConsole() {
           </p>
         )}
         {investNote && <p className="mt-3 font-mono text-[11px] text-signal">{investNote}</p>}
-        {/* <div className="mt-4 border-t border-grid pt-4">
-          <button
-            type="button"
-            disabled={!token || investBusy}
-            onClick={() => void onTestYield()}
-            className="border border-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-signal transition hover:bg-signal/10 disabled:opacity-40"
-          >
-            {investBusy ? "Sending…" : "Test yield · 0.0511 SOL"}
-          </button>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Uses SOL already in the Circle wallet for 2 days. Skips verified-deposit check.
-            Deposits into the best of Kamino, Jupiter JLP, or Save. Leave at least 0.03 SOL
-            for fees.
-          </p>
-          {error && <p className="mt-3 font-mono text-[11px] text-warn">{error}</p>}
-        </div> */}
+      </Panel>
+
+      <Panel title="Your yield positions">
+        <p className="mb-3 text-sm text-muted-foreground">
+          Edit to add more SOL to a position, or remove to unwind back to idle SOL in your Yield
+          wallet.
+        </p>
+        <YieldPositionPanel
+          positions={positions}
+          authToken={token}
+          busy={busy || investBusy}
+          onUpdated={() => void refreshDashboard()}
+        />
       </Panel>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -375,28 +376,6 @@ export function YieldAgentConsole() {
                     <span className="font-mono text-[11px] tabular-nums text-signal">
                       {venue.apy != null ? `${venue.apy.toFixed(2)}%` : "—"}
                     </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
-
-          <Panel title="Positions">
-            {positions.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No deployed yield yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {positions.map((pos) => (
-                  <div key={pos.id} className="border border-grid bg-surface/30 px-3 py-2">
-                    <div className="flex justify-between gap-2 font-mono text-xs">
-                      <span>{pos.protocol_name}</span>
-                      <span className="text-signal">
-                        {pos.amount} {pos.symbol}
-                      </span>
-                    </div>
-                    <p className="mt-1 font-mono text-[10px] text-muted-foreground">
-                      Entry APY {pos.entry_apy != null ? `${pos.entry_apy.toFixed(2)}%` : "—"}
-                    </p>
                   </div>
                 ))}
               </div>
