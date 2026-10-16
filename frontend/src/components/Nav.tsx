@@ -6,82 +6,47 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const appLinks = [
-  {
-    href: "/agents",
-    label: "Marketplace",
-    match: (path: string) =>
-      path.startsWith("/agents") &&
-      !path.startsWith("/agents/launch") &&
-      !path.startsWith("/agents/dashboard"),
-  },
-  {
-    href: "/agents/dashboard",
-    label: "Dashboard",
-    match: (path: string) => path.startsWith("/agents/dashboard"),
-  },
-  {
-    href: "/agents/launch",
-    label: "Launch Agents",
-    match: (path: string) => path.startsWith("/agents/launch"),
-  },
+  { href: "/launch", label: "Launchpad", match: (path: string) => path.startsWith("/launch") },
+  { href: "/agents", label: "Marketplace", match: (path: string) => path.startsWith("/agents") },
 ];
 
-const marketingLinks: {
-  href: string;
-  label: string;
-  external?: boolean;
-}[] = [
-  { href: "/#product", label: "Product" },
+const marketingLinks = [
+  { href: "/agents", label: "Agents" },
   { href: "/#how", label: "How It Works" },
-  { href: "/#token-utility", label: "Token Utility" },
+  { href: "https://gitbook.bitagents.app/", label: "Gitbook", external: true },
 ];
 
 const navLinkBase =
-  "rounded-full border px-3.5 py-1.5 text-xs font-mono font-semibold uppercase tracking-[0.14em] transition";
+  "px-3 py-1.5 text-xs font-mono uppercase tracking-[0.14em] transition";
 
 function appLinkClass(active: boolean) {
   return active
-    ? `${navLinkBase} border-signal bg-surface/60 text-signal`
-    : `${navLinkBase} border-grid bg-surface/30 text-muted-foreground hover:border-signal/50 hover:text-foreground`;
+    ? `${navLinkBase} bg-signal/15 text-signal`
+    : `${navLinkBase} text-muted-foreground hover:bg-surface/40 hover:text-foreground`;
 }
 
 export function Nav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isMaintenance = pathname === "/maintenance";
-  const isPublicPage = pathname === "/" || pathname === "/coming-soon" || isMaintenance;
+  const isPublicPage = pathname === "/" || pathname === "/coming-soon";
 
   return (
-    <div className="site-shell min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-grid/70 bg-[#07080c]/70 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
-          <Link href={isMaintenance ? "/maintenance" : "/"} className="min-w-0 shrink">
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-6 sm:gap-6 sm:py-8">
+          <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />
           </Link>
 
-          {isMaintenance ? (
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-signal">
-              Under maintenance
-            </span>
-          ) : isPublicPage ? (
+          {isPublicPage ? (
             <>
-              <nav className="hidden items-center gap-3 text-xs font-mono uppercase tracking-[0.14em] text-muted-foreground md:flex">
+              <nav className="hidden items-center gap-7 whitespace-nowrap text-lg font-mono uppercase tracking-[0.1em] text-muted-foreground md:flex">
                 {marketingLinks.map(({ href, label, external }) =>
                   external ? (
-                    <a
-                      key={href}
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-full border border-grid px-3 py-1.5 transition hover:border-signal/60 hover:text-foreground"
-                    >
+                    <a key={href} href={href} target="_blank" rel="noreferrer" className="transition hover:text-foreground">
                       {label}
                     </a>
                   ) : (
-                    <Link
-                      key={href}
-                      href={href}
-                      className="rounded-full border border-grid px-3 py-1.5 transition hover:border-signal/60 hover:text-foreground"
-                    >
+                    <Link key={href} href={href} className="transition hover:text-foreground">
                       {label}
                     </Link>
                   )
@@ -89,9 +54,9 @@ export function Nav({ children }: { children: React.ReactNode }) {
               </nav>
               <Link
                 href="/agents"
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-full border border-signal bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
+                className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-4 py-2.5 text-lg font-mono font-semibold uppercase tracking-[0.08em] text-primary-foreground transition hover:opacity-90 sm:px-5 sm:text-xl"
               >
-                Launch App <ArrowUpRight size={16} />
+                Launch App <ArrowUpRight size={22} />
               </Link>
             </>
           ) : (
@@ -124,20 +89,25 @@ export function Nav({ children }: { children: React.ReactNode }) {
 }
 
 export function Wordmark({ compact = false }: { compact?: boolean }) {
-  const width = compact ? 200 : 390;
+  // Cropped to its actual glyph bounds (was 1500x500 with asymmetric
+  // transparent padding baked in -- 143px empty on the left, 108px on the
+  // right -- which misaligned the visible letters from everything else
+  // using object-left). Now 1262x206, ~6.13:1.
+  const RATIO = 1262 / 206;
+  const width = compact ? 300 : 450;
 
   return (
     <img
-      src="/bit-agents-logo-transparent.png"
-      alt="BIT Agents"
+      src="/bitagents-wordmark-horizontal.png"
+      alt="BITAGENTS"
       width={width}
-      height={Math.round(width * 0.8)}
+      height={Math.round(width / RATIO)}
       className={
         compact
-          ? "block h-10 w-30 object-contain object-left sm:h-14 sm:w-40 md:h-20 md:w-50"
+          ? "block h-[3rem] w-auto object-contain object-left sm:h-[3.75rem] md:h-[5rem]"
           : "block h-auto max-w-full object-contain object-left"
       }
-      style={compact ? undefined : { width: "min(390px, 100%)" }}
+      style={compact ? undefined : { width: "min(450px, 100%)" }}
     />
   );
 }

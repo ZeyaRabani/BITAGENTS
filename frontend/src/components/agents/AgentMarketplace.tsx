@@ -1,55 +1,91 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MarketplaceFeaturedAgents } from "@/components/agents/MarketplaceFeaturedAgents";
+import { MarketplaceCommunityAgents } from "@/components/agents/MarketplaceCommunityAgents";
 import { AppShell } from "@/components/AppShell";
-import { AGENT_CATEGORIES, FEATURED_AGENTS, type AgentCategory } from "@/lib/agentsCatalog";
+import { FEATURED_AGENTS, type AgentCategory } from "@/lib/agentsCatalog";
 
-const CATEGORY_FILTERS: { id: "all" | AgentCategory; label: string }[] = [
-  { id: "all", label: "All" },
-  ...AGENT_CATEGORIES.map((item) => ({ id: item.name, label: item.name })),
-];
+const CATEGORIES: AgentCategory[] = ["Monitor", "Research", "Alerts", "Automation", "Trading"];
 
 export function AgentMarketplace() {
-  const [listedCount, setListedCount] = useState(FEATURED_AGENTS.length);
-  const [category, setCategory] = useState<"all" | AgentCategory>("all");
+  const [category, setCategory] = useState<AgentCategory | null>(null);
+  const [communityCount, setCommunityCount] = useState<number | null>(null);
+
+  const listedCount = useMemo(
+    () => FEATURED_AGENTS.filter((agent) => !category || agent.category === category).length,
+    [category]
+  );
 
   return (
     <AppShell
       title="Agent Marketplace"
-      subtitle="Discover and run BIT Agents. Pay per task on Solana - launch your own from the Launchpad."
+      subtitle="Discover and run BITAGENTS agents. Pay per task on Solana - launch your own from the Launchpad."
     >
-      <div className="mt-2 flex flex-wrap gap-2">
-        {CATEGORY_FILTERS.map((item) => {
-          const active = category === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setCategory(item.id)}
-              className={`rounded-full border px-3.5 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] transition ${
-                active
-                  ? "border-signal bg-signal text-primary-foreground"
-                  : "border-grid bg-surface/40 text-muted-foreground hover:border-signal/50 hover:text-foreground"
-              }`}
-            >
-              {item.label}
-            </button>
-          );
-        })}
+      <div className="mt-6 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setCategory(null)}
+          className={`rounded-full px-4 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+            category === null
+              ? "bg-signal text-background"
+              : "border border-grid text-muted-foreground hover:border-signal hover:text-foreground"
+          }`}
+        >
+          All
+        </button>
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => setCategory(cat)}
+            className={`rounded-full px-4 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+              category === cat
+                ? "bg-signal text-background"
+                : "border border-grid text-muted-foreground hover:border-signal hover:text-foreground"
+            }`}
+          >
+            {cat}
+          </button>
+        ))}
       </div>
 
-      <div className="mt-8 flex items-center justify-between gap-3">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
-          Verified agents
-        </h2>
-        <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          {listedCount} listed
-        </span>
-      </div>
+      {category && listedCount === 0 && communityCount === 0 && (
+        <p className="mt-10 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+          No {category} agents listed yet.
+        </p>
+      )}
 
-      <div className="mt-4">
-        <MarketplaceFeaturedAgents category={category} onCountChange={setListedCount} />
+      <div className="mt-8 grid gap-10">
+        <section>
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+              Verified agents
+            </h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              {listedCount} listed
+            </span>
+          </div>
+
+          <MarketplaceFeaturedAgents category={category} />
+        </section>
+
+        {communityCount !== 0 && (
+          <section>
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+                Community agents
+              </h2>
+              {communityCount !== null && (
+                <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {communityCount} listed
+                </span>
+              )}
+            </div>
+
+            <MarketplaceCommunityAgents category={category} onCount={setCommunityCount} />
+          </section>
+        )}
       </div>
     </AppShell>
   );

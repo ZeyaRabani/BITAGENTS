@@ -45,15 +45,10 @@ export type MarketplaceAgent = {
   available: boolean;
   model?: string;
   cluster?: string;
-  /** Official BIT Agents catalog entries show a Verified badge. */
-  verified?: boolean;
-  /** Override card link (e.g. community-launched agents). */
-  href?: string;
-  source?: "catalog" | "launched";
 };
 
 export const MARKETPLACE_STATS = {
-  liveAgents: "9",
+  liveAgents: "7",
   tasks24h: "102",
   activeBuilders: "22",
   uptime30d: "99.2%",
@@ -104,25 +99,8 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     name: "Volume Agent",
     category: "Trading",
     description:
-      "Run volume campaigns on tokens that already trade. Deposit SOL, pick a pair, and schedule buy/sell cycles through Jupiter — same path as BITAGENTS Volume.",
-    tagline: "Jupiter volume · no pool setup",
-    pricePerTask: "0.25% / leg",
-    runs: "-",
-    volumeSol: "-",
-    rating: 4.8,
-    iconId: "swap",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "volume2",
-    slug: "volume2",
-    name: "BITAGENTS Volume",
-    category: "Trading",
-    description:
-      "One-click BITAGENTS volume campaigns. Deposit SOL, pick Quick / Standard / Full day — no token fields or Meteora setup.",
-    tagline: "BITAGENTS presets · simple",
+      "Run volume campaigns. Deposit your token + SOL, create or reuse a pool, and schedule buy/sell cycles at your chosen frequency.",
+    tagline: "DLMM volume · pool infra",
     pricePerTask: "0.25% / leg",
     runs: "-",
     volumeSol: "-",
@@ -189,30 +167,16 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     cluster: "mainnet",
   },
   {
-    id: "hedge-fund",
-    slug: "hedge-fund",
-    name: "Hedge Fund Agent",
-    category: "Trading",
-    description:
-      "Deposit SOL, run live Jupiter strategy sleeves (USD notional), and liquidate back to SOL with 1% start / 10% profit fees. Paper mode still available.",
-    tagline: "Automated strategies · risk-managed",
-    pricePerTask: "1% Fee & 10% Profit",
-    runs: "-",
-    volumeSol: "-",
-    rating: 4.9,
-    iconId: "bot",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
     id: "yield",
     slug: "yield",
     name: "Yield Agent",
-    category: "Automation",
+    category: "Trading",
     description:
-      "Deposit SOL, compare live Solana yields, deploy into the best liquid-staking venue, and rebalance when another protocol pays more.",
-    tagline: "Compare · allocate · rebalance",
+      "Deposit SOL into Kamino, Jupiter JLP, or Save. Compare yields in chat, then deploy idle capital into the best matching venue. 0.5% fee per invest on top of capital.",
+    tagline: "Kamino · Jupiter JLP · Save",
+    pricePerTask: "0.5% / tx",
+    runs: "-",
+    volumeSol: "-",
     rating: 4.8,
     iconId: "yield",
     available: true,

@@ -237,6 +237,7 @@ def launch_agent(
         except Exception as exc:
             return {"error": f"Failed to save launched agent: {exc}"}
         get_creator_payout_wallet(user_wallet)
+        agent = _ensure_public_payment_wallet(agent)
         return {
             "status": "confirmed",
             "agent": _decorate_agent(agent),
@@ -355,6 +356,7 @@ def launch_agent(
         )
 
         get_creator_payout_wallet(user_wallet)
+        agent = _ensure_public_payment_wallet(agent)
         return {
             "status": "confirmed",
             "agent": _decorate_agent(agent),
@@ -374,13 +376,58 @@ def list_marketplace_launched_agents(limit: int = 100) -> dict[str, Any]:
     return {"agents": agents, "count": len(agents)}
 
 
+def _ensure_public_payment_wallet(agent: dict[str, Any]) -> dict[str, Any]:
+    """Create the unique Circle payment wallet when an agent is public + priced."""
+    if str(agent.get("visibility") or "") != "public":
+        return agent
+    try:
+        price = float(agent.get("price_per_month_sol") or 0)
+    except (TypeError, ValueError):
+        price = 0.0
+    if price <= 0:
+        return agent
+    from platform_payments import ensure_creator_agent_payment_wallet, get_agent_payment_wallet
+
+    existing = get_agent_payment_wallet(str(agent["id"]))
+    if existing:
+        agent = {
+            **agent,
+            "payment_wallet_address": existing.get("payment_wallet_address"),
+            "payment_circle_wallet_id": existing.get("circle_wallet_id"),
+        }
+        return agent
+    created = ensure_creator_agent_payment_wallet(
+        str(agent["id"]),
+        str(agent.get("user_wallet") or ""),
+    )
+    if created.get("error"):
+        print(f"  ⚠️  Agent payment wallet: {created['error']}")
+        return {**agent, "payment_wallet_error": created["error"]}
+    return {
+        **agent,
+        "payment_wallet_address": created.get("payment_wallet_address"),
+        "payment_circle_wallet_id": created.get("circle_wallet_id"),
+    }
+
+
 def _decorate_agent(agent: dict[str, Any]) -> dict[str, Any]:
+    from platform_payments import get_agent_payment_wallet, get_company_treasury_wallet
+
     seller = str(agent.get("user_wallet") or "").strip()
     payout = get_creator_payout_wallet(seller) or seller
+    pay = get_agent_payment_wallet(str(agent.get("id") or ""))
+    payment_addr = (
+        (pay or {}).get("payment_wallet_address")
+        or agent.get("payment_wallet_address")
+    )
     return {
         **agent,
         "creator_payout_wallet": payout,
+        "payment_wallet_address": payment_addr,
+        "creator_available_sol": float((pay or {}).get("creator_available_sol") or 0),
+        "platform_accrued_sol": float((pay or {}).get("platform_accrued_sol") or 0),
         "platform_fee_wallet": get_launch_fee_wallet(),
+        "company_treasury_wallet": get_company_treasury_wallet(),
         "platform_fee_rate": get_platform_fee_rate(),
         "payment_required": not is_free_launch(),
         "mode": get_app_mode(),
@@ -500,6 +547,7 @@ def update_user_launched_agent(
     )
     if not updated:
         return {"error": "Failed to update agent."}
+    updated = _ensure_public_payment_wallet(updated)
     message = f'Agent "{name}" relaunched.'
     if visibility_norm == "private" and existing.get("visibility") == "public":
         message = (
@@ -594,9 +642,16 @@ def subscribe_to_agent(
     """
     Verify a monthly SOL payment and record a subscription.
 
-    Buyer pays the listed price. 10% goes to the platform fee wallet and
-    90% goes to the creator Circle wallet. Development mode is free.
+    Buyer pays the full listed price to the agent's unique payment wallet.
+    Inside that wallet we split 90% creator / 10% platform cut. The platform
+    cut stays until the monthly treasury sweep. Development mode is free.
     """
+    from platform_payments import (
+        ensure_creator_agent_payment_wallet,
+        get_agent_payment_wallet,
+        record_creator_agent_subscription_split,
+    )
+
     buyer_wallet = (buyer_wallet or "").strip()
     agent_id = (agent_id or "").strip()
     signature = (signature or "").strip()
@@ -629,8 +684,16 @@ def subscribe_to_agent(
     platform_rate = get_platform_fee_rate()
     creator_share = round(price_sol * (1.0 - platform_rate), 9)
     platform_share = round(price_sol * platform_rate, 9)
-    creator_dest = get_creator_payout_wallet(seller_wallet) or seller_wallet
-    platform_dest = get_launch_fee_wallet()
+
+    pay = get_agent_payment_wallet(agent_id)
+    if not pay:
+        created = ensure_creator_agent_payment_wallet(agent_id, seller_wallet)
+        if created.get("error"):
+            return created
+        pay = created
+    payment_dest = str(pay.get("payment_wallet_address") or "").strip()
+    if not payment_dest:
+        return {"error": "Agent payment wallet is not configured."}
 
     if is_free_launch():
         now = datetime.now(timezone.utc)
@@ -642,7 +705,7 @@ def subscribe_to_agent(
                 "id": sub_id,
                 "agent_id": agent_id,
                 "buyer_wallet": buyer_wallet,
-                "seller_wallet": creator_dest,
+                "seller_wallet": payment_dest,
                 "price_sol": 0,
                 "payment_signature": signature,
                 "status": "active",
@@ -658,6 +721,7 @@ def subscribe_to_agent(
             "paid_sol": 0,
             "creator_sol": 0,
             "platform_sol": 0,
+            "payment_wallet_address": payment_dest,
             "message": f'Subscribed to "{agent.get("name")}" for 30 days (development: no fee).',
         }
 
@@ -720,35 +784,26 @@ def subscribe_to_agent(
                 ),
             }
 
-        inbound_creator = _parse_verified_user_deposits(tx, buyer_wallet, creator_dest)
-        creator_transfers = [
-            t for t in inbound_creator if str(t.get("token", "")).upper() in ("SOL", "WSOL")
+        inbound = _parse_verified_user_deposits(tx, buyer_wallet, payment_dest)
+        sol_transfers = [
+            t for t in inbound if str(t.get("token", "")).upper() in ("SOL", "WSOL")
         ]
-        paid_creator = max((float(t.get("amount") or 0) for t in creator_transfers), default=0.0)
-
-        paid_platform = 0.0
-        if platform_dest and platform_share > 0:
-            inbound_platform = _parse_verified_user_deposits(tx, buyer_wallet, platform_dest)
-            platform_transfers = [
-                t for t in inbound_platform if str(t.get("token", "")).upper() in ("SOL", "WSOL")
-            ]
-            paid_platform = max((float(t.get("amount") or 0) for t in platform_transfers), default=0.0)
-
-        if paid_creator + 1e-9 < creator_share:
+        paid = max((float(t.get("amount") or 0) for t in sol_transfers), default=0.0)
+        if paid + 1e-9 < price_sol:
             return {
                 "error": (
-                    f"Creator share is {creator_share} SOL to "
-                    f"{creator_dest[:4]}…{creator_dest[-4:]}. This transaction paid {paid_creator} SOL."
-                ),
-            }
-        if platform_dest and platform_share > 0 and paid_platform + 1e-9 < platform_share:
-            return {
-                "error": (
-                    f"Platform fee is {platform_share} SOL. This transaction paid {paid_platform} SOL."
+                    f"Subscription is {price_sol} SOL to the agent payment wallet "
+                    f"{payment_dest[:4]}…{payment_dest[-4:]}. This transaction paid {paid} SOL."
                 ),
             }
 
-        paid = paid_creator + paid_platform
+        split = record_creator_agent_subscription_split(
+            agent_id=agent_id,
+            price_sol=price_sol,
+            platform_rate=platform_rate,
+        )
+        if split.get("error"):
+            return split
 
         now = datetime.now(timezone.utc)
         expires = now + timedelta(days=30)
@@ -760,7 +815,7 @@ def subscribe_to_agent(
                 "id": sub_id,
                 "agent_id": agent_id,
                 "buyer_wallet": buyer_wallet,
-                "seller_wallet": creator_dest,
+                "seller_wallet": payment_dest,
                 "price_sol": price_sol,
                 "payment_signature": signature,
                 "status": "active",
@@ -774,7 +829,7 @@ def subscribe_to_agent(
             {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": buyer_wallet,
-                "agent_wallet": seller_wallet,
+                "agent_wallet": payment_dest,
                 "signature": signature,
                 "token": "SOL",
                 "mint": SOL_ADDRESS_FULL,
@@ -791,12 +846,34 @@ def subscribe_to_agent(
         return {
             "status": "confirmed",
             "subscription": subscription,
-            "agent": _decorate_agent(agent),
+            "agent": _decorate_agent(get_launched_agent(agent_id) or agent),
             "paid_sol": paid,
-            "creator_sol": paid_creator,
-            "platform_sol": paid_platform,
-            "message": f'Subscribed to "{agent.get("name")}" for 30 days.',
+            "creator_sol": creator_share,
+            "platform_sol": platform_share,
+            "payment_wallet_address": payment_dest,
+            "message": (
+                f'Subscribed to "{agent.get("name")}" for 30 days. '
+                f"{creator_share} SOL is available for the creator to withdraw; "
+                f"{platform_share} SOL platform cut stays until the monthly treasury sweep."
+            ),
         }
+
+
+def withdraw_creator_agent_earnings(
+    *,
+    user_wallet: str,
+    agent_id: str,
+    amount_sol: Optional[float] = None,
+    destination_wallet: Optional[str] = None,
+) -> dict[str, Any]:
+    from platform_payments import withdraw_creator_earnings
+
+    return withdraw_creator_earnings(
+        agent_id=agent_id,
+        creator_user_wallet=user_wallet,
+        destination_wallet=destination_wallet,
+        amount_sol=amount_sol,
+    )
 
 
 def _subscription_is_active(sub: dict[str, Any]) -> bool:

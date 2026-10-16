@@ -148,29 +148,21 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
         if (!(price > 0)) {
           throw new Error("This agent has no monthly price.");
         }
-        const rate = agent.platform_fee_rate ?? 0.1;
-        const creatorDest = agent.creator_payout_wallet || agent.user_wallet;
-        const platformDest = agent.platform_fee_wallet;
-        const creatorLamports = Math.round(price * (1 - rate) * LAMPORTS_PER_SOL);
-        const platformLamports = Math.round(price * rate * LAMPORTS_PER_SOL);
+        // Full price goes to the agent's unique payment wallet; platform splits 90/10 in ledger.
+        const paymentDest = agent.payment_wallet_address;
+        if (!paymentDest) {
+          throw new Error("This agent has no payment wallet configured yet.");
+        }
+        const lamports = Math.round(price * LAMPORTS_PER_SOL);
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
         const tx = new Transaction();
         tx.add(
           SystemProgram.transfer({
             fromPubkey: publicKey,
-            toPubkey: new PublicKey(creatorDest),
-            lamports: creatorLamports,
+            toPubkey: new PublicKey(paymentDest),
+            lamports,
           })
         );
-        if (platformDest && platformLamports > 0) {
-          tx.add(
-            SystemProgram.transfer({
-              fromPubkey: publicKey,
-              toPubkey: new PublicKey(platformDest),
-              lamports: platformLamports,
-            })
-          );
-        }
         tx.recentBlockhash = blockhash;
         tx.feePayer = publicKey;
         signature = await sendTransaction(tx, connection);
@@ -338,7 +330,7 @@ export function LaunchedAgentDetail({ agentId }: { agentId: string }) {
                 ? "This agent is private. If you already subscribed, access continues until that subscription ends. After it ends, the agent is no longer shown."
                 : freeUse
                   ? "Development mode: start this agent at 0 SOL."
-                  : `Pay ${price ?? 0} SOL for 30 days. ${Math.round((1 - rate) * 100)}% goes to the creator Circle wallet so they can claim later. The platform keeps ${Math.round(rate * 100)}%.`}
+                  : `Pay ${price ?? 0} SOL for 30 days to this agent's payment wallet. ${Math.round((1 - rate) * 100)}% is withdrawable by the creator anytime; ${Math.round(rate * 100)}% platform cut sweeps monthly to treasury.`}
             </p>
             {!listingPrivate && (
               <>

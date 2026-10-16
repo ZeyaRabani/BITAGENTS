@@ -8,6 +8,7 @@ import { useKickstartWalletAuth } from "@/hooks/useKickstartWalletAuth";
 import {
   fetchLaunchDashboard,
   listLaunchedAgents,
+  withdrawCreatorEarnings,
   type AgentSubscription,
   type LaunchDashboard,
   type LaunchedAgent,
@@ -37,7 +38,34 @@ function formatExpiry(value?: string) {
   }
 }
 
-function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
+function OwnedAgentRow({
+  agent,
+  authToken,
+  onWithdrawn,
+}: {
+  agent: LaunchedAgent;
+  authToken: string | null;
+  onWithdrawn?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const available = Number(agent.creator_available_sol || 0);
+
+  async function handleWithdraw() {
+    if (!authToken || available <= 0) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const result = await withdrawCreatorEarnings(agent.id, authToken);
+      setMsg(result.message ?? `Withdrew ${result.amount_sol} SOL`);
+      onWithdrawn?.();
+    } catch (err) {
+      setMsg(err instanceof Error ? err.message : "Withdraw failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="border border-grid bg-surface/30 px-3 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -53,12 +81,19 @@ function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
           {agent.visibility === "public"
             ? ` · ${agent.active_subscribers ?? 0} subscribers`
             : ""}
+          {available > 0 ? ` · ${available} SOL withdrawable` : ""}
         </span>
       </div>
       {agent.description && (
         <p className="mt-1 text-xs text-muted-foreground">{agent.description}</p>
       )}
       <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{agent.task}</p>
+      {agent.payment_wallet_address && (
+        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+          Payment wallet: {agent.payment_wallet_address.slice(0, 4)}…
+          {agent.payment_wallet_address.slice(-4)}
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap gap-3">
         <Link
           href={`/agents/launch?edit=${agent.id}`}
@@ -72,7 +107,18 @@ function OwnedAgentRow({ agent }: { agent: LaunchedAgent }) {
         >
           Open agent
         </Link>
+        {available > 0 && authToken ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void handleWithdraw()}
+            className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal hover:underline disabled:opacity-50"
+          >
+            {busy ? "Withdrawing…" : "Withdraw earnings"}
+          </button>
+        ) : null}
       </div>
+      {msg && <p className="mt-2 font-mono text-[11px] text-muted-foreground">{msg}</p>}
     </div>
   );
 }
@@ -256,15 +302,15 @@ export function AgentsDashboardConsole() {
           {data.creator_payout_wallet && (
             <div className="border border-grid bg-surface/40 px-4 py-3">
               <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                Creator earnings wallet
+                Default withdraw destination
               </div>
               <p className="mt-2 break-all font-mono text-xs text-foreground">
                 {data.creator_payout_wallet}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
-                Subscriptions send {Math.round((1 - (data.platform_fee_rate ?? 0.1)) * 100)}% here
-                via Circle. You can claim this SOL later. The platform keeps{" "}
-                {Math.round((data.platform_fee_rate ?? 0.1) * 100)}%.
+                Buyers pay each public agent&apos;s payment wallet. You can withdraw your{" "}
+                {Math.round((1 - (data.platform_fee_rate ?? 0.1)) * 100)}% anytime; the platform{" "}
+                {Math.round((data.platform_fee_rate ?? 0.1) * 100)}% sweeps monthly to treasury.
               </p>
             </div>
           )}
@@ -299,7 +345,12 @@ export function AgentsDashboardConsole() {
             ) : (
               <div className="space-y-3">
                 {data.listed_for_sale.map((agent) => (
-                  <OwnedAgentRow key={agent.id} agent={agent} />
+                  <OwnedAgentRow
+                    key={agent.id}
+                    agent={agent}
+                    authToken={token}
+                    onWithdrawn={() => void reload()}
+                  />
                 ))}
               </div>
             )}
@@ -311,7 +362,12 @@ export function AgentsDashboardConsole() {
             ) : (
               <div className="space-y-3">
                 {data.private_agents.map((agent) => (
-                  <OwnedAgentRow key={agent.id} agent={agent} />
+                  <OwnedAgentRow
+                    key={agent.id}
+                    agent={agent}
+                    authToken={token}
+                    onWithdrawn={() => void reload()}
+                  />
                 ))}
               </div>
             )}

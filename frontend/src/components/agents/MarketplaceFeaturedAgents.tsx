@@ -2,31 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AgentCard } from "@/components/agents/AgentCard";
-import {
-  FEATURED_AGENTS,
-  type AgentCategory,
-  type MarketplaceAgent,
-} from "@/lib/agentsCatalog";
+import { FEATURED_AGENTS, type AgentCategory } from "@/lib/agentsCatalog";
 import {
   fetchPlatformMetrics,
   formatMetricNumber,
   formatVolumeSol,
 } from "@/lib/dcaPlanClient";
-import { fetchPublicLaunchedAgents } from "@/lib/launchAgentClient";
-import { mapLaunchedToMarketplaceAgent } from "@/lib/launchMarketplace";
 
+/** The hand-coded, official agents -- shown under "Verified" in the
+ * marketplace, mirroring the Verified/Community split from Harshal's
+ * hr-marketplace branch (agreed on in the Sept 28 meeting as the direction
+ * to combine both builds' UI). */
 export function MarketplaceFeaturedAgents({
-  query = "",
-  category = "all",
-  onCountChange,
+  category,
 }: {
-  query?: string;
-  category?: "all" | AgentCategory;
-  onCountChange?: (count: number) => void;
+  category?: AgentCategory | null;
 }) {
   const [totalRuns, setTotalRuns] = useState<string | null>(null);
   const [volumeSol, setVolumeSol] = useState<string | null>(null);
-  const [launched, setLaunched] = useState<MarketplaceAgent[]>([]);
 
   useEffect(() => {
     void fetchPlatformMetrics().then((metrics) => {
@@ -38,54 +31,25 @@ export function MarketplaceFeaturedAgents({
     });
   }, []);
 
-  useEffect(() => {
-    void fetchPublicLaunchedAgents().then((agents) => {
-      setLaunched(agents.map(mapLaunchedToMarketplaceAgent));
-    });
-  }, []);
+  const agents = useMemo(
+    () =>
+      FEATURED_AGENTS.filter((agent) => !category || agent.category === category).map(
+        (agent) => {
+          if (agent.slug !== "dca") return agent;
+          return {
+            ...agent,
+            runs: totalRuns ?? agent.runs,
+            volumeSol: volumeSol ?? agent.volumeSol,
+          };
+        }
+      ),
+    [category, totalRuns, volumeSol]
+  );
 
-  const agents = useMemo(() => {
-    const catalog = FEATURED_AGENTS.map((agent) => {
-      const base: MarketplaceAgent = {
-        ...agent,
-        verified: true,
-        source: "catalog",
-      };
-      if (agent.slug !== "dca") return base;
-      return {
-        ...base,
-        runs: totalRuns ?? agent.runs,
-        volumeSol: volumeSol ?? agent.volumeSol,
-      };
-    });
-    const merged = [...catalog, ...launched];
-    const q = query.trim().toLowerCase();
-    return merged.filter((agent) => {
-      if (category !== "all" && agent.category !== category) return false;
-      if (!q) return true;
-      return (
-        agent.name.toLowerCase().includes(q) ||
-        agent.tagline.toLowerCase().includes(q) ||
-        agent.description.toLowerCase().includes(q) ||
-        agent.category.toLowerCase().includes(q)
-      );
-    });
-  }, [totalRuns, volumeSol, launched, query, category]);
-
-  useEffect(() => {
-    onCountChange?.(agents.length);
-  }, [agents.length, onCountChange]);
-
-  if (agents.length === 0) {
-    return (
-      <div className="rounded-2xl border border-grid bg-surface/40 px-4 py-8 text-center font-mono text-xs text-muted-foreground">
-        No agents match this search or filter.
-      </div>
-    );
-  }
+  if (agents.length === 0) return null;
 
   return (
-    <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
       {agents.map((agent) => (
         <AgentCard key={agent.id} agent={agent} />
       ))}

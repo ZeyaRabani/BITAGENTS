@@ -1,0 +1,26 @@
+const EVENTS = [
+  { who: "3nR8…vT1z", verb: "ran", what: "DCA Agent · 4 cycles", tone: "muted" },
+  { who: "9wLk…hB4x", verb: "confirmed a strategy on", what: "Hedge Fund Agent", tone: "signal" },
+  { who: "5fGm…9cQe", verb: "bonded", what: "Volume Agent pool", tone: "signal" },
+  { who: "2kJp…3wXa", verb: "ran", what: "Due Diligence Agent", tone: "muted" },
+];
+
+export function LaunchTicker() {
+  const row = [...EVENTS, ...EVENTS];
+  return (
+    <div className="bg-surface/40">
+      <div className="ticker-mask overflow-hidden">
+        <div className="flex w-max animate-ticker gap-8 px-6 py-2.5 font-mono text-xs">
+          {row.map((e, i) => (
+            <span key={i} className="flex items-center gap-2 whitespace-nowrap">
+              <span className={e.tone === "signal" ? "text-signal" : "text-muted-foreground"}>{e.who}</span>
+              <span className="text-muted-foreground">{e.verb}</span>
+              <span className="text-foreground">{e.what}</span>
+              <span className="text-muted-foreground/50">·</span>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}

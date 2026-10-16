@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Archivo:wght@400;500;600;700;800&family=Archivo+Black&display=swap");
 @import "tailwindcss";
 @source "../src";
 @import "tw-animate-css";
@@ -36,8 +36,8 @@
   --color-destructive: var(--destructive);
 
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
-  --font-sans: "Inter", ui-sans-serif, system-ui;
-  --font-display: "Space Grotesk", "Inter", sans-serif;
+  --font-sans: "Archivo", ui-sans-serif, system-ui;
+  --font-display: "Archivo Black", "Archivo", sans-serif;
 }
 
 /* =========================================================
@@ -45,28 +45,27 @@
    ========================================================= */
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0rem;
 
-  /* Cesto-inspired vertical wash: deep dark at the top, lifted charcoal below */
-  --background: #07080c;
-  --foreground: #f3f1ec;
+  --background: #0c0a09;
+  --foreground: #f5efe6;
 
-  --card: #12141b;
-  --card-foreground: #f3f1ec;
+  --card: #151210;
+  --card-foreground: #f5efe6;
 
-  --surface: #0e1016;
-  --surface-2: #161922;
+  --surface: #12100e;
+  --surface-2: #1a1714;
 
-  --muted-foreground: #8b909c;
+  --muted-foreground: #9a8b7a;
 
-  --border: #2a2f3a;
-  --grid: #2a2f3a;
+  --border: #2a2520;
+  --grid: #2a2520;
 
   --signal: #ff6b4a;
   --warn: #f4a261;
 
   --primary: #ff6b4a;
-  --primary-foreground: #07080c;
+  --primary-foreground: #0c0a09;
 
   --destructive: #ef4444;
 }
@@ -82,15 +81,13 @@
 
   body {
     background-color: var(--background);
-    background-image: linear-gradient(180deg, #05060a 0%, #0b0d14 45%, #141824 100%);
-    background-attachment: fixed;
     color: var(--foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
 
   html {
-    background: #05060a;
+    background: var(--background);
   }
 
   ::selection {
@@ -132,12 +129,17 @@
     border-color: var(--grid);
   }
 
-  .site-shell {
-    background: transparent;
-  }
-
   .ticker-mask {
     mask-image: linear-gradient(to right, transparent, black 8%, black 92%, transparent);
+  }
+
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 }
 
@@ -196,8 +198,8 @@
   background: transparent !important;
   color: var(--foreground) !important;
 
-  border: 1px solid var(--border) !important;
-  border-radius: 9999px !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 0 !important;
 
   font-family: var(--font-mono) !important;
   font-size: 11px !important;
@@ -229,8 +231,8 @@
 
 .wallet-adapter-dropdown-list {
   background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 1rem !important;
+  border: 2px solid var(--border) !important;
+  border-radius: 0 !important;
 }
 
 .wallet-adapter-dropdown-list-item {

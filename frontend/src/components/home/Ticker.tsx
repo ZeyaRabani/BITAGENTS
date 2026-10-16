@@ -1,26 +1,26 @@
-const items = [
-  { agent: "Volume Agent", action: "ran a Jupiter volume cycle", meta: "0.12 SOL · 2m ago" },
-  { agent: "DCA Agent", action: "bought SOL → USDC on schedule", meta: "0.05 SOL · 5m ago" },
-  { agent: "Hedge Fund Agent", action: "rebalanced a live sleeve", meta: "1.4 SOL · 8m ago" },
-  { agent: "Yield Agent", action: "compared Kamino vs Save APYs", meta: "4.3% best · 11m ago" },
-  { agent: "EasyA Analysis Agent", action: "scored a Solana mint", meta: "health 82 · 14m ago" },
-  { agent: "Whale Tracking Agent", action: "flagged a watched wallet move", meta: "42 SOL · 18m ago" },
-  { agent: "DCA Agent", action: "previewed a Jupiter quote", meta: "dry run · 22m ago" },
-  { agent: "Volume Agent", action: "finished a Standard campaign leg", meta: "0.08 SOL · 27m ago" },
-];
+import { LAUNCHED_AGENTS, formatUsd } from "@/lib/launchpadMock";
 
+/** Virtuals' "live trade feed" pattern -- a scrolling strip proving real
+ * activity is happening, instead of a static page. Pulls from the same
+ * LAUNCHED_AGENTS data the Trending section uses, so it's connected to
+ * real agent stats rather than disconnected placeholder copy. */
 export function Ticker() {
+  const items = LAUNCHED_AGENTS.map((a) => ({
+    sym: a.handle,
+    px: `${a.runs.toLocaleString()} runs`,
+    ch: formatUsd(a.volumeUsd),
+  }));
   const row = [...items, ...items];
   return (
-    <div className="border-y border-grid/80 bg-surface/30 backdrop-blur-sm">
+    <div className="border-y-2 border-grid bg-surface/40">
       <div className="ticker-mask overflow-hidden">
-        <div className="flex w-max animate-ticker gap-10 px-6 py-3.5 font-mono text-xs">
+        <div className="flex w-max animate-ticker gap-10 px-6 py-3 font-mono text-xs">
           {row.map((it, i) => (
-            <span key={`${it.agent}-${i}`} className="flex items-center gap-3 whitespace-nowrap">
-              <span className="text-signal">{it.agent}</span>
-              <span className="text-muted-foreground">{it.action}</span>
-              <span className="tabular-nums text-foreground/80">{it.meta}</span>
-              <span className="text-muted-foreground/40">·</span>
+            <span key={i} className="flex items-center gap-3 whitespace-nowrap">
+              <span className="text-signal">@{it.sym}</span>
+              <span className="text-muted-foreground tabular-nums">{it.px}</span>
+              <span className="tabular-nums text-foreground">{it.ch}</span>
+              <span className="text-muted-foreground/50">·</span>
             </span>
           ))}
         </div>

@@ -859,6 +859,14 @@ def record_dca_platform_fee(
     result["fee"] = fee
     result["fee_rate"] = DCA_PLATFORM_FEE_RATE
     result["fee_token"] = result.get("spend", {}).get("token") or input_token
+    # Accrue SOL platform fees for monthly treasury sweep (fee stays in agent wallet).
+    if str(result.get("fee_token") or input_token).upper() in ("SOL", "WSOL"):
+        try:
+            from platform_payments import accrue_agent_type_platform_fee
+
+            accrue_agent_type_platform_fee(user_wallet, "dca", fee)
+        except Exception as exc:
+            print(f"  ⚠️  DCA fee accrual skipped: {exc}")
     return result
 
 

@@ -481,6 +481,12 @@ def record_easya_platform_fee(
         return result
     result["fee"] = fee
     result["fee_rate"] = EASYA_PLATFORM_FEE_RATE
+    try:
+        from platform_payments import accrue_agent_type_platform_fee
+
+        accrue_agent_type_platform_fee(user_wallet, "easya", fee)
+    except Exception as exc:
+        print(f"  ⚠️  EasyA fee accrual skipped: {exc}")
     return result
 
 

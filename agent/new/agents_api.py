@@ -62,6 +62,7 @@ from launch_agent import (
     list_user_launched_agents,
     subscribe_to_agent,
     update_user_launched_agent,
+    withdraw_creator_agent_earnings,
 )
 from hosted_llm import (
     CAPIX_API_URL,
@@ -436,6 +437,17 @@ def _startup() -> None:
         )
     if start_yield_scheduler():
         print(f"  📈 Yield Agent scheduler started (every {YIELD_SCHEDULER_POLL_SECONDS}s)")
+    try:
+        from platform_payments import (
+            ensure_payments_schema,
+            start_platform_payments_scheduler,
+        )
+
+        ensure_payments_schema()
+        if start_platform_payments_scheduler():
+            print("  💸 Platform fee sweep scheduler started (last day of month, 11:00 GMT)")
+    except Exception as exc:
+        print(f"  ⚠️  Platform payments scheduler not started: {exc}")
     print(f"  🗄️  Cache backend: {cache_backend()}")
     print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund, Yield")
 
@@ -2024,6 +2036,56 @@ def launch_subscribe(
         status = 403 if result.get("status") == "rejected" else 400
         raise HTTPException(status_code=status, detail=result["error"])
     return result
+
+
+class WithdrawCreatorEarningsRequest(BaseModel):
+    amount_sol: Optional[float] = None
+    destination_wallet: Optional[str] = None
+
+
+@app.post("/launch/{agent_id}/withdraw-earnings")
+def launch_withdraw_earnings(
+    agent_id: str,
+    body: WithdrawCreatorEarningsRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = withdraw_creator_agent_earnings(
+        user_wallet=auth_wallet,
+        agent_id=agent_id,
+        amount_sol=body.amount_sol,
+        destination_wallet=body.destination_wallet,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/payments/sweep")
+def payments_sweep_now(
+    force: bool = Query(False),
+    _: None = Depends(require_internal_key),
+) -> dict[str, Any]:
+    """Manual/admin trigger for the monthly platform-fee sweep."""
+    from platform_payments import run_monthly_fee_sweep
+
+    return run_monthly_fee_sweep(force=force)
+
+
+@app.get("/payments/status")
+def payments_status(_: None = Depends(require_internal_key)) -> dict[str, Any]:
+    from platform_payments import (
+        get_company_treasury_wallet,
+        get_launch_fee_wallet,
+        list_fee_pots,
+        platform_payments_scheduler_status,
+    )
+
+    return {
+        "scheduler": platform_payments_scheduler_status(),
+        "launch_fee_wallet": get_launch_fee_wallet(),
+        "company_treasury_wallet": get_company_treasury_wallet(),
+        "fee_pots": list_fee_pots(),
+    }
 
 
 @app.post("/launch")

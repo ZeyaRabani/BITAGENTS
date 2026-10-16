@@ -356,6 +356,13 @@ def record_volume_platform_fee(
             "verified_at": datetime.now(timezone.utc).isoformat(),
         }
     )
+    if tok["symbol"] in ("SOL", "WSOL"):
+        try:
+            from platform_payments import accrue_agent_type_platform_fee
+
+            accrue_agent_type_platform_fee(user_wallet, "volume", fee)
+        except Exception as exc:
+            print(f"  ⚠️  Volume fee accrual skipped: {exc}")
     return {"fee": fee, "token": tok["symbol"]}
 
 

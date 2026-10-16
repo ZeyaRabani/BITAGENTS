@@ -15,7 +15,11 @@ export type LaunchedAgent = {
   created_at?: string;
   active_subscribers?: number;
   creator_payout_wallet?: string | null;
+  payment_wallet_address?: string | null;
+  creator_available_sol?: number;
+  platform_accrued_sol?: number;
   platform_fee_wallet?: string | null;
+  company_treasury_wallet?: string | null;
   platform_fee_rate?: number;
   payment_required?: boolean;
   mode?: "development" | "testing" | "production";
@@ -170,6 +174,42 @@ export async function subscribeToAgent(
     subscription: AgentSubscription;
     agent: LaunchedAgent;
     message?: string;
+  };
+}
+
+export async function withdrawCreatorEarnings(
+  agentId: string,
+  authToken: string,
+  body: { amount_sol?: number; destination_wallet?: string } = {}
+): Promise<{
+  status: string;
+  amount_sol?: number;
+  destination?: string;
+  signature?: string;
+  message?: string;
+  payment_wallet?: Record<string, unknown>;
+}> {
+  const res = await fetch(
+    `/api/agents/launch/${encodeURIComponent(agentId)}/withdraw-earnings`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${authToken}`,
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) {
+    throw new Error(await readError(res));
+  }
+  return (await res.json()) as {
+    status: string;
+    amount_sol?: number;
+    destination?: string;
+    signature?: string;
+    message?: string;
+    payment_wallet?: Record<string, unknown>;
   };
 }
 
