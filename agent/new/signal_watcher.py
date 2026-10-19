@@ -1,0 +1,308 @@
+"""
+Generic price-pattern signal engine for strategy agents (e.g. the Bounce Agent:
+"drop X% from recent high, then bounce Y% off the low").
+
+This is intentionally generic, not hardcoded to SOL/dip-bounce: any future
+price-pattern agent (breakout, mean-reversion, etc.) reuses the same sampling
+table and state machine by registering a different rule. The dip-then-bounce
+rule is the first concrete implementation.
+
+Price source: Jupiter's price API (JUPITER_PRICE_API, already used for spot
+lookups in dca_agent.py) sampled on a timer. This is the right tool for
+*live* minute-to-minute watching; Yahoo daily bars (yahoo_market_data.py)
+remain the right tool for the backtest gate, which needs a year of history,
+not real-time resolution. Both are keyless -- no new API key required for
+either piece.
+
+State machine per watched (symbol, rule) pair:
+
+    NEUTRAL
+      -> price falls `drop_pct` from the rolling high (over `lookback_minutes`)
+    ARMED (tracks the lowest price seen since arming)
+      -> price rises `bounce_pct` off that tracked low
+    FIRE (caller executes the trade, then calls reset_signal())
+      -> reset to NEUTRAL (with a cooldown so it doesn't re-fire on noise)
+"""
+
+from __future__ import annotations
+
+import os
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+
+from db import get_conn, init_db
+from dca_agent import JUPITER_PRICE_API, TOKEN_MINTS, _jupiter_get
+
+# ─── Threshold profiles ────────────────────────────────────────────────────
+# "real" is the actual strategy as described in the Oct 16 handoff meeting.
+# "test" is a deliberately tight/fast profile so the whole pipeline (signal
+# -> arm -> fire -> execute -> close) can be proven end-to-end within an
+# hour instead of waiting days for a genuine 10% move. Never used for an
+# agent a real user is relying on -- only for our own pipeline testing.
+SIGNAL_PROFILES: dict[str, dict[str, float]] = {
+    "real": {"drop_pct": 10.0, "bounce_pct": 5.0, "lookback_minutes": 60, "cooldown_minutes": 60},
+    "test": {"drop_pct": 0.3, "bounce_pct": 0.2, "lookback_minutes": 15, "cooldown_minutes": 5},
+}
+
+DEFAULT_SAMPLE_INTERVAL_SECONDS = int(os.environ.get("SIGNAL_SAMPLE_INTERVAL_SECONDS", "60") or "60")
+
+_scheduler_stop = None  # set lazily to a threading.Event in start_sampler()
+_scheduler_thread = None
+
+
+def ensure_signal_schema() -> None:
+    init_db()
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS price_samples (
+            id          BIGSERIAL PRIMARY KEY,
+            symbol      VARCHAR(16) NOT NULL,
+            price_usd   DOUBLE PRECISION NOT NULL,
+            source      VARCHAR(16) NOT NULL DEFAULT 'jupiter',
+            sampled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_price_samples_symbol_time ON price_samples (symbol, sampled_at DESC)",
+        """
+        CREATE TABLE IF NOT EXISTS signal_watches (
+            watch_id            VARCHAR(40) PRIMARY KEY,
+            agent_id            VARCHAR(32),
+            symbol              VARCHAR(16) NOT NULL,
+            profile              VARCHAR(16) NOT NULL DEFAULT 'real',
+            drop_pct            DOUBLE PRECISION NOT NULL,
+            bounce_pct          DOUBLE PRECISION NOT NULL,
+            lookback_minutes    INTEGER NOT NULL,
+            cooldown_minutes    INTEGER NOT NULL,
+            state               VARCHAR(16) NOT NULL DEFAULT 'neutral',
+            armed_high_usd      DOUBLE PRECISION,
+            armed_low_usd       DOUBLE PRECISION,
+            armed_at            TIMESTAMPTZ,
+            last_fired_at       TIMESTAMPTZ,
+            created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS idx_signal_watches_agent ON signal_watches (agent_id)",
+    ]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for stmt in statements:
+                cur.execute(stmt)
+
+
+# ─── Price sampling ─────────────────────────────────────────────────────────
+
+def sample_price(symbol: str) -> Optional[float]:
+    """Fetch one spot price from Jupiter's price API and store it. Returns the price or None."""
+    tok = TOKEN_MINTS.get(symbol.upper())
+    if not tok:
+        return None
+    try:
+        resp = _jupiter_get(JUPITER_PRICE_API, {"ids": tok["mint"]})
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        # Jupiter price/v3 keys the response directly by mint (no "data" wrapper)
+        # and uses "usdPrice", not "price" -- dca_agent.py's own fallback at
+        # the same endpoint assumes the older shape and is silently dead too.
+        data = body.get(tok["mint"]) or (body.get("data") or {}).get(tok["mint"])
+        price = None
+        if isinstance(data, dict):
+            price = data.get("usdPrice", data.get("price"))
+        if price is None:
+            return None
+        price = float(price)
+    except Exception:
+        return None
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO price_samples (symbol, price_usd, source) VALUES (%s, %s, 'jupiter')",
+                (symbol.upper(), price),
+            )
+    return price
+
+
+def rolling_high_low(symbol: str, lookback_minutes: int) -> Optional[dict[str, float]]:
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT MAX(price_usd) AS hi, MIN(price_usd) AS lo, COUNT(*) AS n "
+                "FROM price_samples WHERE symbol = %s AND sampled_at >= %s",
+                (symbol.upper(), cutoff),
+            )
+            row = cur.fetchone()
+    if not row or not row["n"]:
+        return None
+    return {"high": float(row["hi"]), "low": float(row["lo"]), "samples": int(row["n"])}
+
+
+# ─── Watch lifecycle ─────────────────────────────────────────────────────────
+
+def create_watch(agent_id: Optional[str], symbol: str, profile: str = "real") -> dict[str, Any]:
+    if profile not in SIGNAL_PROFILES:
+        return {"error": f"Unknown profile '{profile}'. Use one of {list(SIGNAL_PROFILES)}."}
+    ensure_signal_schema()
+    cfg = SIGNAL_PROFILES[profile]
+    watch_id = f"sw_{uuid_hex()}"
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO signal_watches
+                    (watch_id, agent_id, symbol, profile, drop_pct, bounce_pct, lookback_minutes, cooldown_minutes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    watch_id, agent_id, symbol.upper(), profile,
+                    cfg["drop_pct"], cfg["bounce_pct"], int(cfg["lookback_minutes"]), int(cfg["cooldown_minutes"]),
+                ),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def uuid_hex() -> str:
+    import uuid as _uuid
+    return _uuid.uuid4().hex[:12]
+
+
+def _get_watch(cur, watch_id: str) -> Optional[dict[str, Any]]:
+    cur.execute("SELECT * FROM signal_watches WHERE watch_id = %s", (watch_id,))
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def evaluate_watch(watch_id: str) -> dict[str, Any]:
+    """
+    Pull the latest price, advance the watch's state machine, and return the
+    current status. Call this on every sampler tick for every active watch.
+    Does NOT execute any trade -- it only returns {"fired": true, ...} when
+    the pattern completes. The caller (the agent's tool-dispatch loop) is
+    responsible for the actual swap and for calling reset_watch() after.
+    """
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            watch = _get_watch(cur, watch_id)
+            if not watch:
+                return {"error": "watch not found"}
+
+            now = datetime.now(timezone.utc)
+            if watch["state"] == "cooldown" and watch["last_fired_at"]:
+                last = watch["last_fired_at"]
+                if last.tzinfo is None:
+                    last = last.replace(tzinfo=timezone.utc)
+                if (now - last).total_seconds() < watch["cooldown_minutes"] * 60:
+                    return {"watch_id": watch_id, "state": "cooldown", "fired": False}
+                watch["state"] = "neutral"
+
+            price = sample_price(watch["symbol"])
+            if price is None:
+                return {"watch_id": watch_id, "state": watch["state"], "fired": False, "error": "price unavailable"}
+
+            hl = rolling_high_low(watch["symbol"], watch["lookback_minutes"])
+            if not hl:
+                return {"watch_id": watch_id, "state": watch["state"], "fired": False, "error": "no samples yet"}
+
+            fired = False
+
+            if watch["state"] == "neutral":
+                drop_from_high = (hl["high"] - price) / hl["high"] * 100 if hl["high"] else 0.0
+                if drop_from_high >= watch["drop_pct"]:
+                    cur.execute(
+                        """
+                        UPDATE signal_watches
+                        SET state = 'armed', armed_high_usd = %s, armed_low_usd = %s, armed_at = NOW(), updated_at = NOW()
+                        WHERE watch_id = %s
+                        """,
+                        (hl["high"], price, watch_id),
+                    )
+                    watch["state"] = "armed"
+                    watch["armed_low_usd"] = price
+
+            elif watch["state"] == "armed":
+                armed_low = min(watch["armed_low_usd"] or price, price)
+                bounce_from_low = (price - armed_low) / armed_low * 100 if armed_low else 0.0
+                if bounce_from_low >= watch["bounce_pct"]:
+                    cur.execute(
+                        """
+                        UPDATE signal_watches
+                        SET state = 'fired', last_fired_at = NOW(), updated_at = NOW()
+                        WHERE watch_id = %s
+                        """,
+                        (watch_id,),
+                    )
+                    watch["state"] = "fired"
+                    fired = True
+                elif armed_low != watch["armed_low_usd"]:
+                    cur.execute(
+                        "UPDATE signal_watches SET armed_low_usd = %s, updated_at = NOW() WHERE watch_id = %s",
+                        (armed_low, watch_id),
+                    )
+                    watch["armed_low_usd"] = armed_low
+
+            return {
+                "watch_id": watch_id,
+                "symbol": watch["symbol"],
+                "state": watch["state"],
+                "price_usd": price,
+                "rolling_high": hl["high"],
+                "rolling_low": hl["low"],
+                "armed_low_usd": watch.get("armed_low_usd"),
+                "fired": fired,
+            }
+
+
+def reset_watch(watch_id: str) -> None:
+    """Call this after the caller has executed (or declined) a fired signal."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE signal_watches SET state = 'cooldown', armed_high_usd = NULL, armed_low_usd = NULL, "
+                "armed_at = NULL, updated_at = NOW() WHERE watch_id = %s",
+                (watch_id,),
+            )
+
+
+# ─── Background sampler (same in-process scheduler-thread pattern already
+# proven by DCA/Volume/Hedge Fund/Yield/platform-payments) ──────────────────
+
+def _sampler_loop(stop_event) -> None:
+    import threading
+    while not stop_event.is_set():
+        try:
+            with get_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT DISTINCT symbol FROM signal_watches WHERE state != 'fired'")
+                    symbols = [r["symbol"] for r in cur.fetchall()]
+                    cur.execute("SELECT watch_id FROM signal_watches WHERE state != 'fired'")
+                    watch_ids = [r["watch_id"] for r in cur.fetchall()]
+            for sym in symbols:
+                sample_price(sym)
+            for wid in watch_ids:
+                evaluate_watch(wid)
+        except Exception as exc:
+            print(f"  ⚠️  signal sampler tick failed: {exc}")
+        stop_event.wait(DEFAULT_SAMPLE_INTERVAL_SECONDS)
+
+
+def start_sampler() -> bool:
+    import threading
+    global _scheduler_stop, _scheduler_thread
+    if _scheduler_thread is not None and _scheduler_thread.is_alive():
+        return False
+    ensure_signal_schema()
+    _scheduler_stop = threading.Event()
+    _scheduler_thread = threading.Thread(target=_sampler_loop, args=(_scheduler_stop,), daemon=True)
+    _scheduler_thread.start()
+    return True
+
+
+def stop_sampler() -> None:
+    if _scheduler_stop is not None:
+        _scheduler_stop.set()
