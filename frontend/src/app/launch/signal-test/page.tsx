@@ -50,6 +50,8 @@ async function apiCall(path: string, token: string, init?: RequestInit) {
   return data;
 }
 
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; actions?: unknown[] };
+
 export default function SignalTestPage() {
   const { token, busy: authBusy, error: authError, signIn } = useDcaWalletAuth();
   const [agentId, setAgentId] = useState("");
@@ -59,6 +61,12 @@ export default function SignalTestPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSessionId, setChatSessionId] = useState<string | undefined>();
+  const [chatBusy, setChatBusy] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (token) void signIn();
@@ -84,6 +92,36 @@ export default function SignalTestPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watch?.watch_id]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages, chatBusy]);
+
+  async function sendChat() {
+    const text = chatInput.trim();
+    if (!token || !agentId.trim() || !text) return;
+    setChatBusy(true);
+    setChatMessages((prev) => [...prev, { id: `u-${Date.now()}`, role: "user", content: text }]);
+    setChatInput("");
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/chat`, token, {
+        method: "POST",
+        body: JSON.stringify({ message: text, session_id: chatSessionId }),
+      });
+      setChatSessionId(data.session_id);
+      setChatMessages((prev) => [
+        ...prev,
+        { id: `a-${Date.now()}`, role: "assistant", content: data.reply ?? "(no reply)", actions: data.actions },
+      ]);
+    } catch (err) {
+      setChatMessages((prev) => [
+        ...prev,
+        { id: `e-${Date.now()}`, role: "assistant", content: `Error: ${err instanceof Error ? err.message : "request failed"}` },
+      ]);
+    } finally {
+      setChatBusy(false);
+    }
+  }
 
   async function startWatch() {
     if (!token || !agentId.trim()) return;
@@ -224,6 +262,61 @@ export default function SignalTestPage() {
               </p>
             </div>
           )}
+        </Panel>
+      </div>
+
+      <div className="mt-6">
+        <Panel title="Chat with the agent (real -- can deposit, watch, trade, withdraw)">
+          <div className="flex max-h-125 flex-col gap-3 overflow-y-auto pr-1">
+            {chatMessages.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Try: &quot;What&apos;s my balance and deposit address?&quot; or, once a watch fires,
+                &quot;Open a position&quot;.
+              </p>
+            )}
+            {chatMessages.map((m) => (
+              <div
+                key={m.id}
+                className={`rounded-xl px-4 py-3 text-sm whitespace-pre-wrap ${
+                  m.role === "user" ? "ml-8 bg-surface/60" : "mr-8 bg-surface-2"
+                }`}
+              >
+                <div className="mb-1 font-mono text-[9px] uppercase tracking-[0.16em] text-muted-foreground">
+                  {m.role === "user" ? "You" : "Agent"}
+                </div>
+                {m.content}
+                {!!m.actions?.length && (
+                  <div className="mt-2 font-mono text-[9px] text-muted-foreground">
+                    tools called: {(m.actions as { tool: string }[]).map((a) => a.tool).join(", ")}
+                  </div>
+                )}
+              </div>
+            ))}
+            {chatBusy && <p className="font-mono text-[10px] uppercase text-muted-foreground">Agent is thinking...</p>}
+            <div ref={chatEndRef} />
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void sendChat();
+            }}
+            className="mt-4 flex gap-2"
+          >
+            <input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              disabled={!token || !agentId.trim() || chatBusy}
+              placeholder={token ? "Message the agent..." : "Connect wallet and set an agent ID first"}
+              className="flex-1 rounded-full border border-grid bg-background px-4 py-2.5 text-sm disabled:opacity-40"
+            />
+            <button
+              type="submit"
+              disabled={!token || !agentId.trim() || chatBusy || !chatInput.trim()}
+              className="rounded-full bg-signal px-5 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-background disabled:opacity-40"
+            >
+              Send
+            </button>
+          </form>
         </Panel>
       </div>
     </AppShell>
