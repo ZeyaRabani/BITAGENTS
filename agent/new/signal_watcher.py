@@ -42,8 +42,13 @@ from dca_agent import JUPITER_PRICE_API, TOKEN_MINTS, _jupiter_get
 # hour instead of waiting days for a genuine 10% move. Never used for an
 # agent a real user is relying on -- only for our own pipeline testing.
 SIGNAL_PROFILES: dict[str, dict[str, float]] = {
-    "real": {"drop_pct": 10.0, "bounce_pct": 5.0, "lookback_minutes": 60, "cooldown_minutes": 60},
-    "test": {"drop_pct": 0.3, "bounce_pct": 0.2, "lookback_minutes": 15, "cooldown_minutes": 5},
+    "real": {"drop_pct": 10.0, "bounce_pct": 5.0, "lookback_minutes": 60, "cooldown_minutes": 60, "sample_interval_seconds": 60},
+    "test": {"drop_pct": 0.3, "bounce_pct": 0.2, "lookback_minutes": 15, "cooldown_minutes": 5, "sample_interval_seconds": 60},
+    # "fast_test": for proving the full in-and-out pipeline in a couple of
+    # minutes. Thresholds are set at roughly SOL's normal noise level over a
+    # 2-minute window -- this is NOT a trading edge, it's a pipeline test.
+    # Never offer this profile to a real launched agent a user depends on.
+    "fast_test": {"drop_pct": 0.05, "bounce_pct": 0.03, "lookback_minutes": 2, "cooldown_minutes": 1, "sample_interval_seconds": 10},
 }
 
 DEFAULT_SAMPLE_INTERVAL_SECONDS = int(os.environ.get("SIGNAL_SAMPLE_INTERVAL_SECONDS", "60") or "60")
@@ -75,6 +80,7 @@ def ensure_signal_schema() -> None:
             bounce_pct          DOUBLE PRECISION NOT NULL,
             lookback_minutes    INTEGER NOT NULL,
             cooldown_minutes    INTEGER NOT NULL,
+            sample_interval_seconds INTEGER NOT NULL DEFAULT 60,
             state               VARCHAR(16) NOT NULL DEFAULT 'neutral',
             armed_high_usd      DOUBLE PRECISION,
             armed_low_usd       DOUBLE PRECISION,
@@ -85,6 +91,7 @@ def ensure_signal_schema() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_signal_watches_agent ON signal_watches (agent_id)",
+        "ALTER TABLE signal_watches ADD COLUMN IF NOT EXISTS sample_interval_seconds INTEGER NOT NULL DEFAULT 60",
     ]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -154,17 +161,38 @@ def create_watch(agent_id: Optional[str], symbol: str, profile: str = "real") ->
             cur.execute(
                 """
                 INSERT INTO signal_watches
-                    (watch_id, agent_id, symbol, profile, drop_pct, bounce_pct, lookback_minutes, cooldown_minutes)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    (watch_id, agent_id, symbol, profile, drop_pct, bounce_pct, lookback_minutes, cooldown_minutes, sample_interval_seconds)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     watch_id, agent_id, symbol.upper(), profile,
                     cfg["drop_pct"], cfg["bounce_pct"], int(cfg["lookback_minutes"]), int(cfg["cooldown_minutes"]),
+                    int(cfg.get("sample_interval_seconds", 60)),
                 ),
             )
             row = cur.fetchone()
     return dict(row)
+
+
+def get_watch(watch_id: str) -> Optional[dict[str, Any]]:
+    """Read-only lookup, no sampling -- for a frontend poller or a chat tool
+    that just wants the current status without forcing a fresh price pull."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            row = _get_watch(cur, watch_id)
+    return row
+
+
+def list_watches_for_agent(agent_id: str) -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT * FROM signal_watches WHERE agent_id = %s ORDER BY created_at DESC",
+                (agent_id,),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 def uuid_hex() -> str:
@@ -272,23 +300,29 @@ def reset_watch(watch_id: str) -> None:
 # ─── Background sampler (same in-process scheduler-thread pattern already
 # proven by DCA/Volume/Hedge Fund/Yield/platform-payments) ──────────────────
 
+_LOOP_TICK_SECONDS = 5  # how often the loop wakes up to check which watches are due
+
+
 def _sampler_loop(stop_event) -> None:
-    import threading
+    last_run_at: dict[str, float] = {}
     while not stop_event.is_set():
         try:
             with get_conn() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT DISTINCT symbol FROM signal_watches WHERE state != 'fired'")
-                    symbols = [r["symbol"] for r in cur.fetchall()]
-                    cur.execute("SELECT watch_id FROM signal_watches WHERE state != 'fired'")
-                    watch_ids = [r["watch_id"] for r in cur.fetchall()]
-            for sym in symbols:
-                sample_price(sym)
-            for wid in watch_ids:
-                evaluate_watch(wid)
+                    cur.execute(
+                        "SELECT watch_id, sample_interval_seconds FROM signal_watches WHERE state != 'fired'"
+                    )
+                    due = cur.fetchall()
+            now = time.time()
+            for row in due:
+                wid = row["watch_id"]
+                interval = row["sample_interval_seconds"] or DEFAULT_SAMPLE_INTERVAL_SECONDS
+                if now - last_run_at.get(wid, 0) >= interval:
+                    evaluate_watch(wid)
+                    last_run_at[wid] = now
         except Exception as exc:
             print(f"  ⚠️  signal sampler tick failed: {exc}")
-        stop_event.wait(DEFAULT_SAMPLE_INTERVAL_SECONDS)
+        stop_event.wait(_LOOP_TICK_SECONDS)
 
 
 def start_sampler() -> bool:

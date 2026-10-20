@@ -74,6 +74,10 @@ ALLOWED_LAUNCH_MODULES = {
     "volume_campaigns",
     "solana_rpc",
     "easya_screener",
+    # Watches a token for a price pattern (e.g. "drop X%, then bounce Y%")
+    # and reports when it fires. Signal-only -- does not execute trades.
+    # See signal_watcher.py. Execution wiring is a deliberate separate step.
+    "price_signal_watch",
 }
 
 _launch_lock = threading.RLock()
@@ -564,6 +568,87 @@ def update_user_launched_agent(
     }
 
 
+def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
+    """Tool definitions for price-pattern signal watches. Only offered when the
+    agent has the price_signal_watch module enabled. Signal-only: these tools
+    can create a watch and check its state, but none of them can execute a
+    trade. Execution wiring is a deliberate separate step, not built here."""
+    if "price_signal_watch" not in (agent.get("modules") or []):
+        return []
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "create_price_signal_watch",
+                "description": (
+                    "Start watching a token for a drop-then-bounce price pattern "
+                    "(e.g. 'drops 10%, then bounces 5% off the low'). Does not "
+                    "execute any trade, it only watches and reports."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string", "description": "Token symbol, e.g. SOL"},
+                        "profile": {
+                            "type": "string",
+                            "enum": ["real", "test", "fast_test"],
+                            "description": (
+                                "'real' uses the agent's actual configured thresholds. "
+                                "'test' and 'fast_test' use much smaller thresholds purely "
+                                "to prove the watch fires correctly - only use these when "
+                                "the user explicitly asks to test the pipeline, never for "
+                                "a real strategy."
+                            ),
+                        },
+                    },
+                    "required": ["symbol"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "check_price_signal",
+                "description": "Check the current state of a price signal watch (neutral/armed/fired/cooldown) and the live price.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "watch_id": {"type": "string"},
+                    },
+                    "required": ["watch_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_price_signal_watches",
+                "description": "List all price signal watches this agent currently has running.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+    ]
+
+
+def _execute_signal_tool(name: str, args: dict[str, Any], *, agent_id: str) -> dict[str, Any]:
+    import signal_watcher as sw
+
+    if name == "create_price_signal_watch":
+        symbol = str(args.get("symbol") or "SOL").strip().upper()
+        profile = str(args.get("profile") or "real").strip().lower()
+        if profile not in sw.SIGNAL_PROFILES:
+            return {"error": f"Unknown profile '{profile}'. Use real, test, or fast_test."}
+        return sw.create_watch(agent_id=agent_id, symbol=symbol, profile=profile)
+    if name == "check_price_signal":
+        watch_id = str(args.get("watch_id") or "").strip()
+        if not watch_id:
+            return {"error": "watch_id is required"}
+        return sw.evaluate_watch(watch_id)
+    if name == "list_price_signal_watches":
+        return {"watches": sw.list_watches_for_agent(agent_id)}
+    return {"error": f"Unknown tool: {name}"}
+
+
 def chat_with_launched_agent(
     *,
     user_wallet: str,
@@ -593,6 +678,7 @@ def chat_with_launched_agent(
     from hosted_llm import DEFAULT_LLM_MODEL, call_llm
 
     modules = ", ".join(agent.get("modules") or []) or "none"
+    tools = _signal_tools_for_agent(agent)
     system = (
         f"You are {agent.get('name')}, a BIT Agents marketplace agent.\n"
         f"Description: {agent.get('description') or 'n/a'}\n"
@@ -600,6 +686,14 @@ def chat_with_launched_agent(
         f"Available modules: {modules}\n"
         "Stay on task. Be concise and useful. Do not invent transaction signatures."
     )
+    if tools:
+        system += (
+            "\n\nYou can watch a token's price for the drop-then-bounce pattern "
+            "using create_price_signal_watch, then check it with check_price_signal. "
+            "These tools only watch and report - you cannot buy or sell anything yet. "
+            "If a watch fires, tell the user clearly and say a human still needs to "
+            "place the actual trade for now."
+        )
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for item in history or []:
         role = str((item or {}).get("role") or "")
@@ -608,27 +702,57 @@ def chat_with_launched_agent(
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": (message or "").strip()})
 
-    try:
-        raw = call_llm(messages, model=DEFAULT_LLM_MODEL, temperature=0.3)
-    except Exception as exc:
-        return {"error": f"Agent chat failed: {exc}"}
+    actions: list[dict[str, Any]] = []
 
-    reply = ""
-    if isinstance(raw, dict):
-        if raw.get("error"):
-            return {"error": str(raw["error"])}
+    for _ in range(4):
+        try:
+            raw = call_llm(messages, model=DEFAULT_LLM_MODEL, tools=tools or None, temperature=0.3)
+        except Exception as exc:
+            return {"error": f"Agent chat failed: {exc}"}
+
+        if not isinstance(raw, dict) or raw.get("error"):
+            return {"error": str((raw or {}).get("error") or "Agent chat failed.")}
+
         choices = raw.get("choices") or []
-        if choices:
-            reply = str((choices[0].get("message") or {}).get("content") or "").strip()
-        if not reply:
-            reply = str(raw.get("reply") or raw.get("content") or "").strip()
-    if not reply:
-        reply = "The agent did not return a reply. Try again."
+        msg = (choices[0].get("message") if choices else raw.get("message")) or {}
+        tool_calls = msg.get("tool_calls") or []
+
+        if not tool_calls:
+            reply = str(msg.get("content") or raw.get("reply") or raw.get("content") or "").strip()
+            if not reply:
+                reply = "The agent did not return a reply. Try again."
+            return {
+                "reply": reply,
+                "session_id": session_id or uuid.uuid4().hex,
+                "actions": actions,
+                "agent": _decorate_agent(agent),
+            }
+
+        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+        for tc in tool_calls:
+            name = tc["function"]["name"]
+            raw_args = tc["function"].get("arguments", {})
+            if isinstance(raw_args, str):
+                try:
+                    import json
+                    raw_args = json.loads(raw_args)
+                except Exception:
+                    raw_args = {}
+            if not isinstance(raw_args, dict):
+                raw_args = {}
+            result = _execute_signal_tool(name, raw_args, agent_id=agent_id)
+            actions.append({"tool": name, "args": raw_args, "result": result})
+            import json as _json
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id") or name,
+                "content": _json.dumps(result, default=str),
+            })
 
     return {
-        "reply": reply,
+        "reply": "Reached the step limit for this turn - try asking again.",
         "session_id": session_id or uuid.uuid4().hex,
-        "actions": [],
+        "actions": actions,
         "agent": _decorate_agent(agent),
     }
 

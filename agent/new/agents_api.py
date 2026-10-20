@@ -1962,6 +1962,11 @@ class LaunchChatRequest(BaseModel):
     history: Optional[list[dict[str, str]]] = None
 
 
+class CreateSignalWatchRequest(BaseModel):
+    symbol: str = Field(default="SOL", max_length=16)
+    profile: str = Field(default="real", pattern="^(real|test|fast_test)$")
+
+
 @app.get("/launch/{agent_id}")
 def launch_get(
     agent_id: str,
@@ -2019,6 +2024,54 @@ def launch_chat(
         status = 403 if result.get("status") in ("payment_required", "private") else 400
         raise HTTPException(status_code=status, detail=result["error"])
     return result
+
+
+@app.post("/launch/{agent_id}/signal-watch")
+def launch_create_signal_watch(
+    agent_id: str,
+    body: CreateSignalWatchRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this agent's watches.")
+    import signal_watcher as sw
+
+    sw.start_sampler()
+    result = sw.create_watch(agent_id=agent_id, symbol=body.symbol, profile=body.profile)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/launch/{agent_id}/signal-watch")
+def launch_list_signal_watches(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's watches.")
+    import signal_watcher as sw
+
+    return {"watches": sw.list_watches_for_agent(agent_id)}
+
+
+@app.get("/launch/{agent_id}/signal-watch/{watch_id}")
+def launch_get_signal_watch(
+    agent_id: str,
+    watch_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's watches.")
+    import signal_watcher as sw
+
+    watch = sw.get_watch(watch_id)
+    if not watch or watch.get("agent_id") != agent_id:
+        raise HTTPException(status_code=404, detail="Watch not found.")
+    return watch
 
 
 @app.post("/launch/{agent_id}/subscribe")

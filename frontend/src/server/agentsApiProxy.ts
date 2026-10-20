@@ -959,6 +959,36 @@ export async function proxyLaunchAgentChat(
   });
 }
 
+export async function proxyCreateSignalWatch(
+  agentId: string,
+  body: { symbol: string; profile: "real" | "test" | "fast_test" },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/signal-watch`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyListSignalWatches(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/signal-watch`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyGetSignalWatch(
+  agentId: string,
+  watchId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/signal-watch/${encodeURIComponent(watchId)}`,
+    { cache: "no-store", headers: buildHeaders(authToken) }
+  );
+}
+
 // ─── Agent launchpad (custom agents) ──────────────────────────────────────
 
 export async function proxyAgentBuilderChat(
