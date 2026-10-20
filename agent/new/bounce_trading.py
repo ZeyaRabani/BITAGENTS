@@ -85,6 +85,11 @@ def open_position(
 ) -> dict[str, Any]:
     """Spend amount_sol buying `symbol`, recording the position and ledger entry.
 
+    Capital is always deposited and withdrawn as SOL (see bounce_ledger.py) --
+    `symbol` is the token this position actually swaps into, and must be a
+    different token. Buying "SOL" with SOL capital isn't a real trade, it's
+    a same-asset swap with nothing to gain and only fees to lose.
+
     Caller must have already obtained explicit human confirmation -- this
     function does not ask for it and will execute immediately.
     """
@@ -102,6 +107,14 @@ def open_position(
     tok = resolve_token(symbol)
     if "error" in tok:
         return tok
+    if tok["symbol"].upper() in ("SOL", "WSOL"):
+        return {
+            "error": (
+                "Can't open a SOL position with SOL capital -- that's a self-swap, not a trade. "
+                "Pick a different token to swap into (e.g. a stablecoin or another token), "
+                "watched for its own dip-then-bounce pattern."
+            )
+        }
 
     import signal_watcher as sw
 

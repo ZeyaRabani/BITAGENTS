@@ -660,7 +660,14 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "symbol": {"type": "string"},
+                        "symbol": {
+                            "type": "string",
+                            "description": (
+                                "The token to swap the SOL capital into. Must NOT be SOL itself -- "
+                                "capital is always SOL, so buying SOL with SOL isn't a real trade. "
+                                "Pick a different token (e.g. the one whose price pattern was watched)."
+                            ),
+                        },
                         "amount_sol": {"type": "number", "description": "SOL to spend opening the position"},
                         "stop_loss_pct": {"type": "number", "description": "Percent below entry price to exit at a loss"},
                         "take_profit_pct": {"type": "number", "description": "Percent above entry price to exit at a profit"},
@@ -822,7 +829,15 @@ def chat_with_launched_agent(
 
     for _ in range(4):
         try:
-            raw = call_llm(messages, model=DEFAULT_LLM_MODEL, tools=tools or None, temperature=0.3)
+            # CapIX is currently returning 401 for every request (confirmed dead,
+            # not a transient issue) and call_llm's default routing always tries
+            # CapIX first whenever it's "configured", even though it can't
+            # actually serve requests -- it never reaches the OpenRouter fallback.
+            # Forcing openrouter here, scoped to just this launched-agent chat
+            # path, not any other agent's LLM routing.
+            raw = call_llm(
+                messages, model=DEFAULT_LLM_MODEL, tools=tools or None, temperature=0.3, provider="openrouter"
+            )
         except Exception as exc:
             return {"error": f"Agent chat failed: {exc}"}
 
