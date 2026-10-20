@@ -294,8 +294,9 @@ def _humanize_hf_swap_error(err: Any) -> str:
     return raw
 
 
-def execute_hf_jupiter_swap(
+def execute_agent_jupiter_swap(
     *,
+    agent_type: str,
     input_mint: str,
     output_mint: str,
     amount: float,
@@ -304,18 +305,25 @@ def execute_hf_jupiter_swap(
     user_wallet: Optional[str] = None,
     sol_reserve: Optional[float] = None,
 ) -> dict[str, Any]:
+    """Execute a real Jupiter swap from a per-(user, agent_type) Circle wallet.
+
+    Generic over agent_type -- originally hedge-fund-only, pulled out so any
+    agent (e.g. the Bounce/signal agent) can reuse the same proven swap path
+    instead of a near-duplicate implementation. See execute_hf_jupiter_swap
+    for the hedge-fund-specific wrapper kept for backward compatibility.
+    """
     import os
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 
     from dca_agent import _build_and_execute_swap, sol_rpc
     from circle_dca_wallets import resolve_agent_signing_context
 
-    signing = resolve_agent_signing_context(user_wallet, "hedge_fund")
+    signing = resolve_agent_signing_context(user_wallet, agent_type)
     keypair = signing.get("keypair") if signing.get("mode") == "local" else None
     circle_wallet_id = signing.get("wallet_id") if signing.get("mode") == "circle" else None
     pubkey = signing.get("pubkey")
     if not pubkey or (signing.get("mode") == "local" and not keypair):
-        return {"error": "Hedge Fund wallet not configured (Circle or HEDGE_FUND_WALLET_PRIVATE_KEY)"}
+        return {"error": f"{agent_type} wallet not configured (Circle or a local private key)"}
     amount = float(amount)
     reserve = float(sol_reserve) if sol_reserve is not None else _sol_operating_reserve(1)
     try:
@@ -324,35 +332,34 @@ def execute_hf_jupiter_swap(
         if sol_balance < MIN_SOL_FOR_FEES:
             return {
                 "error": (
-                    f"HF wallet has only {sol_balance:.6f} SOL — need at least "
+                    f"{agent_type} wallet has only {sol_balance:.6f} SOL -- need at least "
                     f"{MIN_SOL_FOR_FEES} SOL to reliably pay tx fees. Deposit more "
                     f"SOL to {pubkey} before swapping (a low-SOL swap gets signed "
                     "and sent but silently never confirms)."
                 ),
                 "sol_balance": sol_balance,
             }
-        # SOL→token buys must leave rent/fee headroom or Jupiter creates the ATA and fails Custom:1.
+        # SOL to token buys must leave rent/fee headroom or Jupiter creates the ATA and fails Custom:1.
         if input_mint == SOL_MINT and sol_balance - amount < reserve - 1e-12:
             return {
                 "error": (
                     f"Swap of {amount:.6f} SOL would leave only "
-                    f"{max(0.0, sol_balance - amount):.6f} SOL in the HF wallet; "
-                    f"need ≥{reserve:.4f} SOL for token-account rent and fees. "
+                    f"{max(0.0, sol_balance - amount):.6f} SOL in the {agent_type} wallet; "
+                    f"need >={reserve:.4f} SOL for token-account rent and fees. "
                     f"Deposit more SOL (wallet has {sol_balance:.6f}) or use a smaller size."
                 ),
                 "sol_balance": sol_balance,
                 "sol_reserve": reserve,
             }
     except Exception:
-        pass  # Balance check is advisory — don't block the swap on an RPC hiccup here.
+        pass  # Balance check is advisory -- don't block the swap on an RPC hiccup here.
     raw = _raw_amount(amount, input_decimals)
-    # Use a separate Jupiter API key when configured so Hedge Fund swap
+    # Use a separate Jupiter API key when configured so this agent's swap
     # traffic doesn't queue behind DCA/volume-agent calls on the shared key's
     # rate-limit budget (falls back to the default JUPITER_API_KEY if unset).
-    hf_jupiter_api_key = os.environ.get("JUPITER_API_KEY_2", "").strip() or None
+    jupiter_api_key = os.environ.get("JUPITER_API_KEY_2", "").strip() or None
     # Bound each swap so one stuck RPC/Jupiter call cannot hang the whole
-    # deploy request forever — a timed-out swap is treated as a failed leg
-    # (its unspent capital gets refunded by the partial-failure path). Python
+    # request forever -- a timed-out swap is treated as a failed leg. Python
     # threads can't be killed, so on timeout we detach the pool (wait=False)
     # rather than blocking our return on the still-running thread.
     pool = ThreadPoolExecutor(max_workers=1)
@@ -365,7 +372,7 @@ def execute_hf_jupiter_swap(
         keypair,
         slippage_bps=slippage_bps,
         retries=3,
-        api_key=hf_jupiter_api_key,
+        api_key=jupiter_api_key,
         circle_wallet_id=circle_wallet_id,
         compute_unit_price_percentile="veryHigh",
     )
@@ -378,6 +385,29 @@ def execute_hf_jupiter_swap(
     except _FutureTimeout:
         pool.shutdown(wait=False)
         return {"error": f"Swap timed out after {SWAP_TIMEOUT_S}s (RPC/Jupiter unresponsive)"}
+
+
+def execute_hf_jupiter_swap(
+    *,
+    input_mint: str,
+    output_mint: str,
+    amount: float,
+    input_decimals: int,
+    slippage_bps: int = 100,
+    user_wallet: Optional[str] = None,
+    sol_reserve: Optional[float] = None,
+) -> dict[str, Any]:
+    """Hedge-Fund-specific wrapper, unchanged behavior for existing callers."""
+    return execute_agent_jupiter_swap(
+        agent_type="hedge_fund",
+        input_mint=input_mint,
+        output_mint=output_mint,
+        amount=amount,
+        input_decimals=input_decimals,
+        slippage_bps=slippage_bps,
+        user_wallet=user_wallet,
+        sol_reserve=sol_reserve,
+    )
 
 
 def _token_price_usd(mint_or_symbol: str) -> Optional[float]:

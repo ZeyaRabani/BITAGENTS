@@ -568,11 +568,23 @@ def update_user_launched_agent(
     }
 
 
+# Tools that spend real capital. Never executed on the tool call that
+# proposes them -- only when the user's very next message confirms (see
+# BOUNCE_CONFIRM_PHRASES / _user_confirmed below). This mirrors DCA's
+# proven CONFIRMATION_REQUIRED_TOOLS pattern, not a new invention.
+BOUNCE_CONFIRMATION_REQUIRED_TOOLS = frozenset({"open_bounce_position", "close_bounce_position"})
+
+
 def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
-    """Tool definitions for price-pattern signal watches. Only offered when the
-    agent has the price_signal_watch module enabled. Signal-only: these tools
-    can create a watch and check its state, but none of them can execute a
-    trade. Execution wiring is a deliberate separate step, not built here."""
+    """Tool definitions for price-pattern signal watches and (once a watch
+    fires) trading on them. Only offered when the agent has the
+    price_signal_watch module enabled.
+
+    Opening or manually closing a position always requires the user's next
+    message to explicitly confirm -- see BOUNCE_CONFIRMATION_REQUIRED_TOOLS.
+    A stop-loss/take-profit on an already-open position fires on its own
+    without a fresh confirmation each time, because the user already
+    authorized exactly that exit condition when they confirmed the entry."""
     if "price_signal_watch" not in (agent.get("modules") or []):
         return []
     return [
@@ -627,11 +639,70 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
                 "parameters": {"type": "object", "properties": {}},
             },
         },
+        {
+            "type": "function",
+            "function": {
+                "name": "get_bounce_balance",
+                "description": "Show the user's deposited, spent, credited, and withdrawable SOL balance in the Bounce Agent wallet.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "open_bounce_position",
+                "description": (
+                    "Buy `symbol` with `amount_sol` SOL from the user's deposited Bounce Agent "
+                    "balance, setting a stop-loss and take-profit. This spends real capital and "
+                    "is only executed once the user explicitly confirms in their next message -- "
+                    "the first call always just proposes the trade."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {"type": "string"},
+                        "amount_sol": {"type": "number", "description": "SOL to spend opening the position"},
+                        "stop_loss_pct": {"type": "number", "description": "Percent below entry price to exit at a loss"},
+                        "take_profit_pct": {"type": "number", "description": "Percent above entry price to exit at a profit"},
+                        "watch_id": {"type": "string", "description": "The signal watch that fired, if any"},
+                    },
+                    "required": ["symbol", "amount_sol", "stop_loss_pct", "take_profit_pct"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "close_bounce_position",
+                "description": (
+                    "Manually sell an open position back to SOL before its stop or target is hit. "
+                    "Spends real capital (a real swap) and is only executed once the user explicitly "
+                    "confirms in their next message."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {"position_id": {"type": "string"}},
+                    "required": ["position_id"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_bounce_positions",
+                "description": "List this agent's open and closed positions for the user.",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
     ]
 
 
-def _execute_signal_tool(name: str, args: dict[str, Any], *, agent_id: str) -> dict[str, Any]:
+def _execute_signal_tool(
+    name: str, args: dict[str, Any], *, agent_id: str, user_wallet: str, user_confirmed: bool
+) -> dict[str, Any]:
     import signal_watcher as sw
+    import bounce_trading as bt
+    import bounce_ledger as bl
 
     if name == "create_price_signal_watch":
         symbol = str(args.get("symbol") or "SOL").strip().upper()
@@ -646,6 +717,39 @@ def _execute_signal_tool(name: str, args: dict[str, Any], *, agent_id: str) -> d
         return sw.evaluate_watch(watch_id)
     if name == "list_price_signal_watches":
         return {"watches": sw.list_watches_for_agent(agent_id)}
+    if name == "get_bounce_balance":
+        return bl.get_bounce_user_balances(user_wallet)
+    if name == "list_bounce_positions":
+        return {"positions": bt.list_positions_for_user(user_wallet)}
+
+    if name == "open_bounce_position":
+        proposed = {
+            "symbol": str(args.get("symbol") or "SOL").strip().upper(),
+            "amount_sol": float(args.get("amount_sol") or 0),
+            "stop_loss_pct": float(args.get("stop_loss_pct") or 0),
+            "take_profit_pct": float(args.get("take_profit_pct") or 0),
+        }
+        if not user_confirmed:
+            return {"status": "confirmation_required", "proposed_action": "open_bounce_position", **proposed}
+        bt.start_position_monitor()
+        return bt.open_position(
+            user_wallet=user_wallet,
+            agent_id=agent_id,
+            watch_id=str(args.get("watch_id") or "").strip() or None,
+            symbol=proposed["symbol"],
+            amount_sol=proposed["amount_sol"],
+            stop_loss_pct=proposed["stop_loss_pct"],
+            take_profit_pct=proposed["take_profit_pct"],
+        )
+
+    if name == "close_bounce_position":
+        position_id = str(args.get("position_id") or "").strip()
+        if not position_id:
+            return {"error": "position_id is required"}
+        if not user_confirmed:
+            return {"status": "confirmation_required", "proposed_action": "close_bounce_position", "position_id": position_id}
+        return bt.close_position(position_id, reason="manual")
+
     return {"error": f"Unknown tool: {name}"}
 
 
@@ -688,11 +792,19 @@ def chat_with_launched_agent(
     )
     if tools:
         system += (
-            "\n\nYou can watch a token's price for the drop-then-bounce pattern "
-            "using create_price_signal_watch, then check it with check_price_signal. "
-            "These tools only watch and report - you cannot buy or sell anything yet. "
-            "If a watch fires, tell the user clearly and say a human still needs to "
-            "place the actual trade for now."
+            "\n\nYou can watch a token's price for the drop-then-bounce pattern using "
+            "create_price_signal_watch, then check it with check_price_signal. "
+            "If a watch fires, tell the user and ask whether they want to open a position.\n"
+            "open_bounce_position and close_bounce_position spend real money. Calling either "
+            "tool the first time only PROPOSES the trade - it will come back as "
+            "confirmation_required and will not have executed anything. Clearly state the exact "
+            "symbol, amount_sol, stop_loss_pct, and take_profit_pct, and ask the user to confirm. "
+            "Only call the same tool again, with the same arguments, after the user clearly says "
+            "yes/confirm in their next message - do not re-propose or guess new numbers. "
+            "Once a position is open its stop-loss and take-profit are monitored and executed "
+            "automatically without asking again, because the user already authorized that exit "
+            "when they confirmed the entry. Never invent a transaction signature or balance - "
+            "always get it from a tool result."
         )
     messages: list[dict[str, str]] = [{"role": "system", "content": system}]
     for item in history or []:
@@ -701,6 +813,10 @@ def chat_with_launched_agent(
         if role in ("user", "assistant") and content:
             messages.append({"role": role, "content": content})
     messages.append({"role": "user", "content": (message or "").strip()})
+
+    from dca_agent import _user_confirmed, _user_declined
+
+    user_confirmed = _user_confirmed(message) and not _user_declined(message)
 
     actions: list[dict[str, Any]] = []
 
@@ -740,7 +856,9 @@ def chat_with_launched_agent(
                     raw_args = {}
             if not isinstance(raw_args, dict):
                 raw_args = {}
-            result = _execute_signal_tool(name, raw_args, agent_id=agent_id)
+            result = _execute_signal_tool(
+                name, raw_args, agent_id=agent_id, user_wallet=user_wallet, user_confirmed=user_confirmed
+            )
             actions.append({"tool": name, "args": raw_args, "result": result})
             import json as _json
             messages.append({
