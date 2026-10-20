@@ -572,7 +572,9 @@ def update_user_launched_agent(
 # proposes them -- only when the user's very next message confirms (see
 # BOUNCE_CONFIRM_PHRASES / _user_confirmed below). This mirrors DCA's
 # proven CONFIRMATION_REQUIRED_TOOLS pattern, not a new invention.
-BOUNCE_CONFIRMATION_REQUIRED_TOOLS = frozenset({"open_bounce_position", "close_bounce_position"})
+BOUNCE_CONFIRMATION_REQUIRED_TOOLS = frozenset(
+    {"open_bounce_position", "close_bounce_position", "withdraw_bounce_balance"}
+)
 
 
 def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
@@ -643,8 +645,46 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
             "type": "function",
             "function": {
                 "name": "get_bounce_balance",
-                "description": "Show the user's deposited, spent, credited, and withdrawable SOL balance in the Bounce Agent wallet.",
+                "description": "Show the user's deposited, spent, credited, and withdrawable SOL balance in the Bounce Agent wallet, and the wallet's deposit address.",
                 "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "verify_bounce_deposit",
+                "description": (
+                    "Verify an on-chain SOL transfer the user already sent to the Bounce Agent "
+                    "wallet and credit it to their balance. Call get_bounce_balance first if the "
+                    "user doesn't have the deposit address yet. This only records money that has "
+                    "already moved on-chain -- it does not move anything itself."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "signature": {"type": "string", "description": "The deposit transaction signature"},
+                    },
+                    "required": ["signature"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "withdraw_bounce_balance",
+                "description": (
+                    "Send withdrawable SOL from the Bounce Agent wallet back to the user's own "
+                    "wallet. Spends nothing of the user's capital gain beyond what's withdrawable "
+                    "(open positions can't be withdrawn until closed), but it is a real transfer "
+                    "and is only executed once the user explicitly confirms in their next message."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "amount_sol": {"type": "number"},
+                    },
+                    "required": ["amount_sol"],
+                },
             },
         },
         {
@@ -728,6 +768,17 @@ def _execute_signal_tool(
         return bl.get_bounce_user_balances(user_wallet)
     if name == "list_bounce_positions":
         return {"positions": bt.list_positions_for_user(user_wallet)}
+    if name == "verify_bounce_deposit":
+        signature = str(args.get("signature") or "").strip()
+        if not signature:
+            return {"error": "signature is required"}
+        return bl.verify_and_record_bounce_deposit(signature, user_wallet)
+
+    if name == "withdraw_bounce_balance":
+        amount_sol = float(args.get("amount_sol") or 0)
+        if not user_confirmed:
+            return {"status": "confirmation_required", "proposed_action": "withdraw_bounce_balance", "amount_sol": amount_sol}
+        return bl.withdraw_bounce_tokens(user_wallet, "SOL", amount_sol)
 
     if name == "open_bounce_position":
         proposed = {
@@ -799,15 +850,21 @@ def chat_with_launched_agent(
     )
     if tools:
         system += (
-            "\n\nYou can watch a token's price for the drop-then-bounce pattern using "
+            "\n\nIf the user wants to deposit, call get_bounce_balance to give them the wallet "
+            "address, then once they say they've sent SOL, call verify_bounce_deposit with the "
+            "transaction signature they give you.\n"
+            "You can watch a token's price for the drop-then-bounce pattern using "
             "create_price_signal_watch, then check it with check_price_signal. "
-            "If a watch fires, tell the user and ask whether they want to open a position.\n"
-            "open_bounce_position and close_bounce_position spend real money. Calling either "
-            "tool the first time only PROPOSES the trade - it will come back as "
-            "confirmation_required and will not have executed anything. Clearly state the exact "
-            "symbol, amount_sol, stop_loss_pct, and take_profit_pct, and ask the user to confirm. "
-            "Only call the same tool again, with the same arguments, after the user clearly says "
-            "yes/confirm in their next message - do not re-propose or guess new numbers. "
+            "If a watch fires, tell the user and ask whether they want to open a position. "
+            "The symbol being bought must be a different token than SOL - SOL is the deposited "
+            "capital, not a valid trade target.\n"
+            "open_bounce_position, close_bounce_position, and withdraw_bounce_balance all spend "
+            "or move real money. Calling any of them the first time only PROPOSES the action - it "
+            "will come back as confirmation_required and will not have executed anything. Clearly "
+            "state the exact numbers (symbol/amount_sol/stop_loss_pct/take_profit_pct for a trade, "
+            "or amount_sol for a withdrawal) and ask the user to confirm. Only call the same tool "
+            "again, with the same arguments, after the user clearly says yes/confirm in their next "
+            "message - do not re-propose or guess new numbers. "
             "Once a position is open its stop-loss and take-profit are monitored and executed "
             "automatically without asking again, because the user already authorized that exit "
             "when they confirmed the entry. Never invent a transaction signature or balance - "
