@@ -17,6 +17,8 @@ Direction semantics for the underlying user_ledger rows:
 
 from __future__ import annotations
 
+import json
+import os
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -29,10 +31,39 @@ ALLOWED_WITHDRAW_TOKENS = {"SOL"}
 AGENT_TYPE = "bounce"
 
 
+def load_bounce_keypair():
+    """Local-signing fallback, used when Circle isn't configured (the normal
+    case for local dev -- see BOUNCE_WALLET_PRIVATE_KEY in .env.example).
+    Mirrors load_hf_keypair/load_volume_keypair/load_easya_keypair exactly,
+    same pattern Harshal already uses for every other agent's local wallet."""
+    from dca_agent import HAS_SOLDERS, Keypair
+
+    if not HAS_SOLDERS:
+        return None
+    raw = os.environ.get("BOUNCE_WALLET_PRIVATE_KEY", "").strip()
+    if not raw:
+        return None
+    try:
+        import base58
+
+        if raw.startswith("["):
+            return Keypair.from_bytes(bytes(json.loads(raw)))
+        return Keypair.from_bytes(base58.b58decode(raw))
+    except Exception:
+        return None
+
+
 def get_bounce_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
+    """The address ledger rows are scoped to for this user. Must stay in sync
+    with resolve_agent_signing_context's precedence (local key first for
+    bounce, then Circle) -- otherwise balances get tracked against one
+    address while swaps actually sign from another."""
     user_wallet = (user_wallet or "").strip()
     if not user_wallet:
         return None
+    local = load_bounce_keypair()
+    if local:
+        return str(local.pubkey())
     try:
         from circle_dca_wallets import get_agent_wallet_address
 
