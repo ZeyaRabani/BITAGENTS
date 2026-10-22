@@ -58,6 +58,7 @@ type AgentBreakdown = {
   closed_positions: number;
   capital_in_open_positions: number;
   realized_pnl_sol: number;
+  allocation_cap_sol: number | null;
 };
 
 type BounceBalance = {
@@ -91,6 +92,10 @@ export default function SignalTestPage() {
   const [depositSig, setDepositSig] = useState("");
   const [verifyBusy, setVerifyBusy] = useState(false);
   const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
+
+  const [capInput, setCapInput] = useState("");
+  const [capBusy, setCapBusy] = useState(false);
+  const [capMsg, setCapMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (token) void signIn();
@@ -193,6 +198,29 @@ export default function SignalTestPage() {
       setVerifyMsg(err instanceof Error ? err.message : "Could not verify deposit");
     } finally {
       setVerifyBusy(false);
+    }
+  }
+
+  async function setAllocationCap() {
+    if (!token || !agentId.trim()) return;
+    setCapBusy(true);
+    setCapMsg(null);
+    try {
+      const value = capInput.trim() === "" ? null : Number(capInput.trim());
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/allocation-cap`, token, {
+        method: "POST",
+        body: JSON.stringify({ max_allocation_sol: value }),
+      });
+      setCapMsg(
+        data.max_allocation_sol != null
+          ? `Cap set to ${data.max_allocation_sol} SOL for ${agentId.trim()}.`
+          : `Cap cleared for ${agentId.trim()} -- full wallet balance available.`
+      );
+      void refreshBalance();
+    } catch (err) {
+      setCapMsg(err instanceof Error ? err.message : "Could not set allocation cap");
+    } finally {
+      setCapBusy(false);
     }
   }
 
@@ -303,6 +331,30 @@ export default function SignalTestPage() {
                   </button>
                 </div>
                 {verifyMsg && <p className="mt-2 text-xs text-muted-foreground">{verifyMsg}</p>}
+
+                <div className="mt-4 border-t border-grid pt-4">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                    Allocation cap for this agent (SOL, blank = no cap)
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={capInput}
+                      onChange={(e) => setCapInput(e.target.value)}
+                      placeholder="e.g. 0.1"
+                      type="number"
+                      step="any"
+                      className="flex-1 rounded-xl border border-grid bg-background px-3 py-2 text-xs"
+                    />
+                    <button
+                      onClick={setAllocationCap}
+                      disabled={capBusy}
+                      className="shrink-0 rounded-full border border-grid px-4 py-2 font-mono text-[10px] uppercase tracking-[0.1em] hover:border-signal disabled:opacity-40"
+                    >
+                      {capBusy ? "Setting..." : "Set cap"}
+                    </button>
+                  </div>
+                  {capMsg && <p className="mt-2 text-xs text-muted-foreground">{capMsg}</p>}
+                </div>
               </div>
             </div>
 
@@ -323,6 +375,7 @@ export default function SignalTestPage() {
                       </span>
                       <span className="text-muted-foreground">
                         {a.capital_in_open_positions} SOL in open positions
+                        {a.allocation_cap_sol != null ? ` (cap: ${a.allocation_cap_sol} SOL)` : " (no cap)"}
                       </span>
                       <span className={a.realized_pnl_sol >= 0 ? "font-bold text-signal" : "font-bold text-warn"}>
                         {a.realized_pnl_sol >= 0 ? "+" : ""}

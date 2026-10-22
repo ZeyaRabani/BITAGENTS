@@ -37,6 +37,50 @@ from bounce_ledger import (
 MIN_POSITION_SOL = 0.005  # below this, fees/slippage dominate the trade
 
 
+def set_agent_allocation_cap(agent_id: str, max_allocation_sol: Optional[float]) -> dict[str, Any]:
+    """None/0 or a negative number clears the cap (full wallet balance available)."""
+    ensure_bounce_trading_schema()
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        return {"error": "agent_id is required"}
+    cap = float(max_allocation_sol) if max_allocation_sol is not None else None
+    if cap is not None and cap <= 0:
+        cap = None
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO bounce_agent_limits (agent_id, max_allocation_sol, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (agent_id) DO UPDATE SET max_allocation_sol = EXCLUDED.max_allocation_sol, updated_at = NOW()
+                RETURNING *
+                """,
+                (agent_id, cap),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_agent_allocation_cap(agent_id: str) -> Optional[float]:
+    ensure_bounce_trading_schema()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT max_allocation_sol FROM bounce_agent_limits WHERE agent_id = %s", ((agent_id or "").strip(),))
+            row = cur.fetchone()
+    return float(row["max_allocation_sol"]) if row and row["max_allocation_sol"] is not None else None
+
+
+def _capital_in_open_positions(agent_id: str) -> float:
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COALESCE(SUM(entry_sol_amount), 0) AS total FROM bounce_positions WHERE agent_id = %s AND status = 'open'",
+                ((agent_id or "").strip(),),
+            )
+            row = cur.fetchone()
+    return float(row["total"]) if row else 0.0
+
+
 def ensure_bounce_trading_schema() -> None:
     init_db()
     statements = [
@@ -66,6 +110,17 @@ def ensure_bounce_trading_schema() -> None:
         """,
         "CREATE INDEX IF NOT EXISTS idx_bounce_positions_user ON bounce_positions (user_wallet)",
         "CREATE INDEX IF NOT EXISTS idx_bounce_positions_status ON bounce_positions (status)",
+        # Per-agent spending cap. A separate table, not a column on
+        # launched_agents -- that table's own comment warns that an ALTER at
+        # request time can deadlock under concurrent access. Default: no cap,
+        # full wallet balance available, same as before this existed.
+        """
+        CREATE TABLE IF NOT EXISTS bounce_agent_limits (
+            agent_id           VARCHAR(32) PRIMARY KEY,
+            max_allocation_sol DOUBLE PRECISION,
+            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
     ]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -103,6 +158,20 @@ def open_position(
     can_spend = check_bounce_can_spend(user_wallet, amount_sol, "SOL")
     if not can_spend.get("ok"):
         return can_spend
+
+    cap = get_agent_allocation_cap(agent_id) if agent_id else None
+    if cap is not None:
+        already_committed = _capital_in_open_positions(agent_id)
+        if already_committed + amount_sol > cap + 1e-9:
+            return {
+                "error": (
+                    f"This would commit {already_committed + amount_sol:.4f} SOL to agent {agent_id}, "
+                    f"over its {cap} SOL allocation cap ({already_committed:.4f} SOL already in open positions). "
+                    "Close a position first, raise the cap, or use a smaller amount."
+                ),
+                "allocation_cap_sol": cap,
+                "already_committed_sol": already_committed,
+            }
 
     tok = resolve_token(symbol)
     if "error" in tok:
@@ -302,7 +371,10 @@ def get_agent_breakdown(user_wallet: str) -> list[dict[str, Any]]:
                 (user_wallet.strip(),),
             )
             rows = cur.fetchall()
-    return [dict(r) for r in rows]
+    result = [dict(r) for r in rows]
+    for r in result:
+        r["allocation_cap_sol"] = get_agent_allocation_cap(r["agent_id"])
+    return result
 
 
 # ─── Background exit monitor (same in-process scheduler pattern already

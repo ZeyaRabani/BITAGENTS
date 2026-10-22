@@ -1008,6 +1008,18 @@ export async function proxyVerifyBounceDeposit(
   });
 }
 
+export async function proxySetBounceAllocationCap(
+  agentId: string,
+  body: { max_allocation_sol: number | null },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/allocation-cap`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 // ─── Agent launchpad (custom agents) ──────────────────────────────────────
 
 export async function proxyAgentBuilderChat(

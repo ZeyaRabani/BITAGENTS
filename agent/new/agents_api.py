@@ -2112,6 +2112,24 @@ def launch_bounce_verify_deposit(
     return result
 
 
+class SetBounceAllocationRequest(BaseModel):
+    max_allocation_sol: Optional[float] = None  # None or <=0 clears the cap
+
+
+@app.post("/launch/{agent_id}/bounce/allocation-cap")
+def launch_set_bounce_allocation_cap(
+    agent_id: str,
+    body: SetBounceAllocationRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if access.get("reason") != "owner":
+        raise HTTPException(status_code=403, detail="Only the agent's owner can set its allocation cap.")
+    import bounce_trading as bt
+
+    return bt.set_agent_allocation_cap(agent_id, body.max_allocation_sol)
+
+
 @app.post("/launch/{agent_id}/subscribe")
 def launch_subscribe(
     agent_id: str,
