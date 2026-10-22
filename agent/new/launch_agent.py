@@ -576,6 +576,32 @@ BOUNCE_CONFIRMATION_REQUIRED_TOOLS = frozenset(
     {"open_bounce_position", "close_bounce_position", "withdraw_bounce_balance"}
 )
 
+# Deterministic pending-action store, mirroring dca_agent.py's proven
+# _pending_confirmations pattern. Found necessary by actually testing this
+# live: a small/free model does not reliably restate the exact proposed
+# numbers on its own when the user says "yes" -- it can re-decide what to do
+# from scratch, which for a fund-moving tool is a real safety gap, not just
+# a UX one. "Yes" now executes the EXACT last-proposed action with its EXACT
+# stored arguments, never whatever the model chooses to call that turn.
+_BOUNCE_CONFIRMATION_LOCK = threading.Lock()
+_bounce_pending: dict[str, dict[str, Any]] = {}
+
+
+def _bounce_confirmation_key(user_wallet: str, agent_id: str) -> str:
+    return f"{(user_wallet or '').strip()}:{(agent_id or '').strip()}"
+
+
+def _stage_bounce_confirmation(user_wallet: str, agent_id: str, tool_name: str, args: dict[str, Any]) -> None:
+    key = _bounce_confirmation_key(user_wallet, agent_id)
+    with _BOUNCE_CONFIRMATION_LOCK:
+        _bounce_pending[key] = {"tool": tool_name, "args": args}
+
+
+def _pop_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, Any]]:
+    key = _bounce_confirmation_key(user_wallet, agent_id)
+    with _BOUNCE_CONFIRMATION_LOCK:
+        return _bounce_pending.pop(key, None)
+
 
 def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
     """Tool definitions for price-pattern signal watches and (once a watch
@@ -777,6 +803,7 @@ def _execute_signal_tool(
     if name == "withdraw_bounce_balance":
         amount_sol = float(args.get("amount_sol") or 0)
         if not user_confirmed:
+            _stage_bounce_confirmation(user_wallet, agent_id, name, {"amount_sol": amount_sol})
             return {"status": "confirmation_required", "proposed_action": "withdraw_bounce_balance", "amount_sol": amount_sol}
         return bl.withdraw_bounce_tokens(user_wallet, "SOL", amount_sol)
 
@@ -786,14 +813,16 @@ def _execute_signal_tool(
             "amount_sol": float(args.get("amount_sol") or 0),
             "stop_loss_pct": float(args.get("stop_loss_pct") or 0),
             "take_profit_pct": float(args.get("take_profit_pct") or 0),
+            "watch_id": str(args.get("watch_id") or "").strip() or None,
         }
         if not user_confirmed:
+            _stage_bounce_confirmation(user_wallet, agent_id, name, proposed)
             return {"status": "confirmation_required", "proposed_action": "open_bounce_position", **proposed}
         bt.start_position_monitor()
         return bt.open_position(
             user_wallet=user_wallet,
             agent_id=agent_id,
-            watch_id=str(args.get("watch_id") or "").strip() or None,
+            watch_id=proposed["watch_id"],
             symbol=proposed["symbol"],
             amount_sol=proposed["amount_sol"],
             stop_loss_pct=proposed["stop_loss_pct"],
@@ -805,10 +834,38 @@ def _execute_signal_tool(
         if not position_id:
             return {"error": "position_id is required"}
         if not user_confirmed:
+            _stage_bounce_confirmation(user_wallet, agent_id, name, {"position_id": position_id})
             return {"status": "confirmation_required", "proposed_action": "close_bounce_position", "position_id": position_id}
         return bt.close_position(position_id, reason="manual")
 
     return {"error": f"Unknown tool: {name}"}
+
+
+def _execute_pending_bounce_action(pending: dict[str, Any], *, agent_id: str, user_wallet: str) -> tuple[str, dict[str, Any]]:
+    """Deterministically run a staged action with its exact stored args.
+    Bypasses the LLM entirely for this step -- see module note above."""
+    import bounce_trading as bt
+    import bounce_ledger as bl
+
+    tool_name = pending["tool"]
+    args = pending.get("args") or {}
+
+    if tool_name == "withdraw_bounce_balance":
+        return tool_name, bl.withdraw_bounce_tokens(user_wallet, "SOL", float(args.get("amount_sol") or 0))
+    if tool_name == "open_bounce_position":
+        bt.start_position_monitor()
+        return tool_name, bt.open_position(
+            user_wallet=user_wallet,
+            agent_id=agent_id,
+            watch_id=args.get("watch_id"),
+            symbol=args["symbol"],
+            amount_sol=args["amount_sol"],
+            stop_loss_pct=args["stop_loss_pct"],
+            take_profit_pct=args["take_profit_pct"],
+        )
+    if tool_name == "close_bounce_position":
+        return tool_name, bt.close_position(args["position_id"], reason="manual")
+    return tool_name, {"error": f"Unknown pending tool: {tool_name}"}
 
 
 def chat_with_launched_agent(
@@ -859,12 +916,17 @@ def chat_with_launched_agent(
             "The symbol being bought must be a different token than SOL - SOL is the deposited "
             "capital, not a valid trade target.\n"
             "open_bounce_position, close_bounce_position, and withdraw_bounce_balance all spend "
-            "or move real money. Calling any of them the first time only PROPOSES the action - it "
-            "will come back as confirmation_required and will not have executed anything. Clearly "
-            "state the exact numbers (symbol/amount_sol/stop_loss_pct/take_profit_pct for a trade, "
-            "or amount_sol for a withdrawal) and ask the user to confirm. Only call the same tool "
-            "again, with the same arguments, after the user clearly says yes/confirm in their next "
-            "message - do not re-propose or guess new numbers. "
+            "or move real money. Calling any of them only PROPOSES the action - it comes back as "
+            "confirmation_required and nothing executes yet. Clearly state the exact numbers "
+            "(symbol/amount_sol/stop_loss_pct/take_profit_pct for a trade, or amount_sol for a "
+            "withdrawal) and ask the user to confirm. Do NOT call the tool again yourself after "
+            "they say yes - the system executes the exact proposed action automatically the moment "
+            "they confirm, before you are even called again. If the user instead wants to change "
+            "a number, propose a fresh action with the new number; do not try to confirm the old one.\n"
+            "If create_price_signal_watch is called again for the same symbol while a watch is "
+            "already running, it returns the existing watch instead of creating a new one - so "
+            "always check_price_signal or list_price_signal_watches first rather than creating "
+            "several watches for the same thing.\n"
             "Once a position is open its stop-loss and take-profit are monitored and executed "
             "automatically without asking again, because the user already authorized that exit "
             "when they confirmed the entry. Never invent a transaction signature or balance - "
@@ -880,9 +942,38 @@ def chat_with_launched_agent(
 
     from dca_agent import _user_confirmed, _user_declined
 
-    user_confirmed = _user_confirmed(message) and not _user_declined(message)
+    user_declined = _user_declined(message)
+    user_confirmed = _user_confirmed(message) and not user_declined
 
     actions: list[dict[str, Any]] = []
+
+    # Deterministic confirm/decline of a previously staged action, bypassing
+    # the LLM entirely -- see _bounce_pending's module note for why this is
+    # necessary, not optional, for a fund-moving tool.
+    if tools and user_declined:
+        cancelled = _pop_bounce_pending(user_wallet, agent_id)
+        if cancelled:
+            reply = f"Cancelled. {cancelled['tool']} was not executed."
+            return {
+                "reply": reply,
+                "session_id": session_id or uuid.uuid4().hex,
+                "actions": [{"tool": cancelled["tool"], "args": cancelled["args"], "result": {"status": "cancelled"}}],
+                "agent": _decorate_agent(agent),
+            }
+    if tools and user_confirmed:
+        pending = _pop_bounce_pending(user_wallet, agent_id)
+        if pending:
+            tool_name, result = _execute_pending_bounce_action(pending, agent_id=agent_id, user_wallet=user_wallet)
+            if result.get("error"):
+                reply = f"Could not complete {tool_name}: {result['error']}"
+            else:
+                reply = f"Confirmed and executed {tool_name}. {result}"
+            return {
+                "reply": reply,
+                "session_id": session_id or uuid.uuid4().hex,
+                "actions": [{"tool": tool_name, "args": pending["args"], "result": result}],
+                "agent": _decorate_agent(agent),
+            }
 
     for _ in range(4):
         try:

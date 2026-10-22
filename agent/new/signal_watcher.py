@@ -155,6 +155,27 @@ def create_watch(agent_id: Optional[str], symbol: str, profile: str = "real") ->
         return {"error": f"Unknown profile '{profile}'. Use one of {list(SIGNAL_PROFILES)}."}
     ensure_signal_schema()
     cfg = SIGNAL_PROFILES[profile]
+    symbol = symbol.upper()
+
+    # Idempotent: reuse an existing non-fired watch for the same (agent,
+    # symbol, profile) instead of spawning a duplicate. Found necessary by
+    # testing live -- the chat model was asked to check an existing watch and
+    # instead kept creating new ones, which is confusing and wastes sampling.
+    if agent_id:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT * FROM signal_watches
+                    WHERE agent_id = %s AND symbol = %s AND profile = %s AND state != 'fired'
+                    ORDER BY created_at DESC LIMIT 1
+                    """,
+                    (agent_id, symbol, profile),
+                )
+                existing = cur.fetchone()
+        if existing:
+            return dict(existing)
+
     watch_id = f"sw_{uuid_hex()}"
     with get_conn() as conn:
         with conn.cursor() as cur:
