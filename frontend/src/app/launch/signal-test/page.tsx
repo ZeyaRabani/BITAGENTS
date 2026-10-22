@@ -52,6 +52,11 @@ async function apiCall(path: string, token: string, init?: RequestInit) {
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string; actions?: unknown[] };
 
+type BounceBalance = {
+  agent_wallet: string | null;
+  balances: { token: string; deposited: number; withdrawable: number }[];
+};
+
 export default function SignalTestPage() {
   const { token, busy: authBusy, error: authError, signIn } = useDcaWalletAuth();
   const [agentId, setAgentId] = useState("");
@@ -67,6 +72,14 @@ export default function SignalTestPage() {
   const [chatSessionId, setChatSessionId] = useState<string | undefined>();
   const [chatBusy, setChatBusy] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const [balance, setBalance] = useState<BounceBalance | null>(null);
+  const [balanceBusy, setBalanceBusy] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [depositSig, setDepositSig] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (token) void signIn();
@@ -123,6 +136,55 @@ export default function SignalTestPage() {
     }
   }
 
+  const refreshBalance = useCallback(async () => {
+    if (!token || !agentId.trim()) return;
+    setBalanceBusy(true);
+    setBalanceError(null);
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/balance`, token);
+      setBalance(data);
+    } catch (err) {
+      setBalanceError(err instanceof Error ? err.message : "Could not load balance");
+    } finally {
+      setBalanceBusy(false);
+    }
+  }, [token, agentId]);
+
+  useEffect(() => {
+    if (token && agentId.trim()) void refreshBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, agentId]);
+
+  async function copyAddress() {
+    if (!balance?.agent_wallet) return;
+    try {
+      await navigator.clipboard.writeText(balance.agent_wallet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard may be unavailable; address is still shown on screen to copy manually
+    }
+  }
+
+  async function verifyDeposit() {
+    if (!token || !agentId.trim() || !depositSig.trim()) return;
+    setVerifyBusy(true);
+    setVerifyMsg(null);
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/verify-deposit`, token, {
+        method: "POST",
+        body: JSON.stringify({ signature: depositSig.trim() }),
+      });
+      setVerifyMsg(data.message ?? "Deposit verified.");
+      setDepositSig("");
+      void refreshBalance();
+    } catch (err) {
+      setVerifyMsg(err instanceof Error ? err.message : "Could not verify deposit");
+    } finally {
+      setVerifyBusy(false);
+    }
+  }
+
   async function startWatch() {
     if (!token || !agentId.trim()) return;
     setBusy(true);
@@ -145,6 +207,75 @@ export default function SignalTestPage() {
       title="Signal watch -- live test"
       subtitle="Watches a token for a drop-then-bounce price pattern. Signal only -- this does not place any trade."
     >
+      {token && agentId.trim() && (
+        <div className="mb-6">
+          <Panel title="Deposit (Bounce Agent wallet)">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Send SOL here to fund this agent
+                </div>
+                {balanceBusy && !balance ? (
+                  <p className="mt-2 text-sm text-muted-foreground">Loading...</p>
+                ) : balance?.agent_wallet ? (
+                  <div className="mt-2 flex items-center gap-2">
+                    <code className="flex-1 break-all rounded-xl border border-grid bg-background px-3 py-2 text-xs">
+                      {balance.agent_wallet}
+                    </code>
+                    <button
+                      onClick={copyAddress}
+                      className="shrink-0 rounded-full border border-grid px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] hover:border-signal"
+                    >
+                      {copied ? "Copied" : "Copy"}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-sm text-warn">{balanceError ?? "No deposit address yet."}</p>
+                )}
+
+                <div className="mt-3 flex items-center gap-4 font-mono text-xs">
+                  <div>
+                    <span className="text-muted-foreground">Withdrawable: </span>
+                    <span className="font-bold text-signal">
+                      {balance?.balances?.[0]?.withdrawable ?? 0} SOL
+                    </span>
+                  </div>
+                  <button
+                    onClick={refreshBalance}
+                    disabled={balanceBusy}
+                    className="text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:opacity-40"
+                  >
+                    {balanceBusy ? "Refreshing..." : "Refresh"}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Already sent? Paste the transaction signature to credit it
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={depositSig}
+                    onChange={(e) => setDepositSig(e.target.value)}
+                    placeholder="Transaction signature"
+                    className="flex-1 rounded-xl border border-grid bg-background px-3 py-2 text-xs"
+                  />
+                  <button
+                    onClick={verifyDeposit}
+                    disabled={verifyBusy || !depositSig.trim()}
+                    className="shrink-0 rounded-full bg-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-background disabled:opacity-40"
+                  >
+                    {verifyBusy ? "Verifying..." : "Verify"}
+                  </button>
+                </div>
+                {verifyMsg && <p className="mt-2 text-xs text-muted-foreground">{verifyMsg}</p>}
+              </div>
+            </div>
+          </Panel>
+        </div>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <Panel title="Start a watch">
           <div className="space-y-4">

@@ -2074,6 +2074,41 @@ def launch_get_signal_watch(
     return watch
 
 
+@app.get("/launch/{agent_id}/bounce/balance")
+def launch_bounce_balance(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's balance.")
+    import bounce_ledger as bl
+
+    return bl.get_bounce_user_balances(auth_wallet)
+
+
+class VerifyBounceDepositRequest(BaseModel):
+    signature: str = Field(min_length=1)
+
+
+@app.post("/launch/{agent_id}/bounce/verify-deposit")
+def launch_bounce_verify_deposit(
+    agent_id: str,
+    body: VerifyBounceDepositRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this agent's deposits.")
+    import bounce_ledger as bl
+
+    result = bl.verify_and_record_bounce_deposit(body.signature, auth_wallet)
+    if result.get("error"):
+        status = 400 if result.get("status") in ("rejected", "pending") else 400
+        raise HTTPException(status_code=status, detail=result["error"])
+    return result
+
+
 @app.post("/launch/{agent_id}/subscribe")
 def launch_subscribe(
     agent_id: str,

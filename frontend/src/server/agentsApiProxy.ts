@@ -989,6 +989,25 @@ export async function proxyGetSignalWatch(
   );
 }
 
+export async function proxyGetBounceBalance(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/balance`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyVerifyBounceDeposit(
+  agentId: string,
+  body: { signature: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/verify-deposit`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 // ─── Agent launchpad (custom agents) ──────────────────────────────────────
 
 export async function proxyAgentBuilderChat(
