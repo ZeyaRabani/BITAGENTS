@@ -59,7 +59,9 @@ type BounceBalance = {
 
 export default function SignalTestPage() {
   const { token, busy: authBusy, error: authError, signIn } = useDcaWalletAuth();
-  const [agentId, setAgentId] = useState("");
+  // Local test only -- hardcoded so there's nothing to paste. Change this if
+  // you create a different test agent locally.
+  const [agentId, setAgentId] = useState("bounce_18cd4731");
   const [symbol, setSymbol] = useState("SOL");
   const [profile, setProfile] = useState<(typeof PROFILES)[number]["key"]>("fast_test");
   const [watch, setWatch] = useState<Watch | null>(null);
@@ -207,9 +209,31 @@ export default function SignalTestPage() {
       title="Signal watch -- live test"
       subtitle="Watches a token for a drop-then-bounce price pattern. Signal only -- this does not place any trade."
     >
-      {token && agentId.trim() && (
-        <div className="mb-6">
-          <Panel title="Deposit (Bounce Agent wallet)">
+      <div className="mb-6 rounded-xl border-2 border-warn/60 bg-warn/10 px-4 py-3">
+        <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-warn">
+          Local test page -- not part of the real launchpad
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          This page only exists on your machine, on the bounce-agent-signal-engine branch. It is
+          not linked from the real app, not deployed, and not something a real user would ever
+          see. It talks to your local backend on mainnet with real SOL -- there is no sandbox mode
+          here.
+        </p>
+      </div>
+
+      {!token && (
+        <div className="mb-6 rounded-xl border border-grid bg-surface/30 p-4 text-sm">
+          <p className="text-muted-foreground">Connect and sign in with the wallet that owns the agent ({agentId}).</p>
+          <div className="mt-3">
+            <WalletMultiButton />
+          </div>
+          {authBusy && <p className="mt-2 text-xs text-muted-foreground">Signing in...</p>}
+          {authError && <p className="mt-2 text-xs text-warn">{authError}</p>}
+        </div>
+      )}
+
+      <div className="mb-6">
+        <Panel title="Deposit (Bounce Agent wallet)">
             <div className="grid gap-4 md:grid-cols-2">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -274,22 +298,10 @@ export default function SignalTestPage() {
             </div>
           </Panel>
         </div>
-      )}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
         <Panel title="Start a watch">
           <div className="space-y-4">
-            {!token && (
-              <div className="rounded-xl border border-grid bg-surface/30 p-4 text-sm">
-                <p className="text-muted-foreground">Connect and sign in with the wallet that owns the launched agent.</p>
-                <div className="mt-3">
-                  <WalletMultiButton />
-                </div>
-                {authBusy && <p className="mt-2 text-xs text-muted-foreground">Signing in...</p>}
-                {authError && <p className="mt-2 text-xs text-warn">{authError}</p>}
-              </div>
-            )}
-
             <div>
               <label className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
                 Agent ID (must have the price_signal_watch module)
