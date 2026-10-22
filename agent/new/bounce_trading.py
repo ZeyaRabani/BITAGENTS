@@ -277,6 +277,34 @@ def list_positions_for_user(user_wallet: str, *, status: Optional[str] = None) -
     return [dict(r) for r in rows]
 
 
+def get_agent_breakdown(user_wallet: str) -> list[dict[str, Any]]:
+    """Per-agent view into the one shared Bounce wallet: how much capital each
+    individual launched agent currently has tied up in open positions, and
+    its realized profit/loss from closed ones. Organizational visibility
+    without needing a separate wallet per agent -- see the Oct 22 discussion
+    on why per-instance wallets weren't worth the added complexity."""
+    ensure_bounce_trading_schema()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(agent_id, 'unknown') AS agent_id,
+                    COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
+                    COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
+                    COALESCE(SUM(entry_sol_amount) FILTER (WHERE status = 'open'), 0) AS capital_in_open_positions,
+                    COALESCE(SUM(close_sol_amount - entry_sol_amount) FILTER (WHERE status = 'closed'), 0) AS realized_pnl_sol
+                FROM bounce_positions
+                WHERE user_wallet = %s
+                GROUP BY agent_id
+                ORDER BY agent_id
+                """,
+                (user_wallet.strip(),),
+            )
+            rows = cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 # ─── Background exit monitor (same in-process scheduler pattern already
 # proven by signal_watcher.py / DCA / Hedge Fund) ───────────────────────────
 

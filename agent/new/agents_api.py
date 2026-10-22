@@ -2083,8 +2083,11 @@ def launch_bounce_balance(
     if not access.get("allowed"):
         raise HTTPException(status_code=403, detail="Not allowed to view this agent's balance.")
     import bounce_ledger as bl
+    import bounce_trading as bt
 
-    return bl.get_bounce_user_balances(auth_wallet)
+    result = bl.get_bounce_user_balances(auth_wallet)
+    result["agent_breakdown"] = bt.get_agent_breakdown(auth_wallet)
+    return result
 
 
 class VerifyBounceDepositRequest(BaseModel):

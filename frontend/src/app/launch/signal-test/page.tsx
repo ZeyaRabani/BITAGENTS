@@ -52,9 +52,18 @@ async function apiCall(path: string, token: string, init?: RequestInit) {
 
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string; actions?: unknown[] };
 
+type AgentBreakdown = {
+  agent_id: string;
+  open_positions: number;
+  closed_positions: number;
+  capital_in_open_positions: number;
+  realized_pnl_sol: number;
+};
+
 type BounceBalance = {
   agent_wallet: string | null;
   balances: { token: string; deposited: number; withdrawable: number }[];
+  agent_breakdown?: AgentBreakdown[];
 };
 
 export default function SignalTestPage() {
@@ -296,6 +305,34 @@ export default function SignalTestPage() {
                 {verifyMsg && <p className="mt-2 text-xs text-muted-foreground">{verifyMsg}</p>}
               </div>
             </div>
+
+            {!!balance?.agent_breakdown?.length && (
+              <div className="mt-5 border-t border-grid pt-4">
+                <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  Per-agent breakdown (one shared wallet, tracked separately per agent)
+                </div>
+                <div className="mt-2 space-y-2">
+                  {balance.agent_breakdown.map((a) => (
+                    <div
+                      key={a.agent_id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-grid bg-surface/30 px-3 py-2 text-xs"
+                    >
+                      <span className="font-mono">{a.agent_id}</span>
+                      <span className="text-muted-foreground">
+                        {a.open_positions} open &middot; {a.closed_positions} closed
+                      </span>
+                      <span className="text-muted-foreground">
+                        {a.capital_in_open_positions} SOL in open positions
+                      </span>
+                      <span className={a.realized_pnl_sol >= 0 ? "font-bold text-signal" : "font-bold text-warn"}>
+                        {a.realized_pnl_sol >= 0 ? "+" : ""}
+                        {a.realized_pnl_sol} SOL realized
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </Panel>
         </div>
 
