@@ -2114,6 +2114,29 @@ def launch_bounce_verify_deposit(
     return result
 
 
+class ConvertBounceSolRequest(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/launch/{agent_id}/bounce/convert-sol")
+def launch_bounce_convert_sol(
+    agent_id: str,
+    body: ConvertBounceSolRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to manage this agent's balance.")
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="Set confirm: true to actually convert -- this is a real on-chain swap.")
+    import bounce_ledger as bl
+
+    result = bl.convert_idle_sol_to_usdc(auth_wallet)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("error") or "Conversion failed.")
+    return result
+
+
 class SetBounceAllocationRequest(BaseModel):
     max_allocation_usdc: Optional[float] = None  # None or <=0 clears the cap
 

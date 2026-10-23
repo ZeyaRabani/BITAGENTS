@@ -573,7 +573,7 @@ def update_user_launched_agent(
 # BOUNCE_CONFIRM_PHRASES / _user_confirmed below). This mirrors DCA's
 # proven CONFIRMATION_REQUIRED_TOOLS pattern, not a new invention.
 BOUNCE_CONFIRMATION_REQUIRED_TOOLS = frozenset(
-    {"open_bounce_position", "close_bounce_position", "withdraw_bounce_balance"}
+    {"open_bounce_position", "close_bounce_position", "withdraw_bounce_balance", "convert_bounce_sol_to_usdc"}
 )
 
 # Deterministic pending-action store, mirroring dca_agent.py's proven
@@ -722,6 +722,19 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
         {
             "type": "function",
             "function": {
+                "name": "convert_bounce_sol_to_usdc",
+                "description": (
+                    "Convert any idle SOL currently sitting in the Bounce Agent wallet into USDC "
+                    "(e.g. a deposit made before auto-conversion existed). A real on-chain swap -- "
+                    "money stays in the user's own custodial wallet throughout, it just changes from "
+                    "SOL to USDC. Only executed once the user explicitly confirms in their next message."
+                ),
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "withdraw_bounce_balance",
                 "description": (
                     "Send withdrawable USDC from the Bounce Agent wallet back to the user's own "
@@ -825,6 +838,12 @@ def _execute_signal_tool(
             return {"error": "signature is required"}
         return bl.verify_and_record_bounce_deposit(signature, user_wallet)
 
+    if name == "convert_bounce_sol_to_usdc":
+        if not user_confirmed:
+            _stage_bounce_confirmation(user_wallet, agent_id, name, {})
+            return {"status": "confirmation_required", "proposed_action": "convert_bounce_sol_to_usdc"}
+        return bl.convert_idle_sol_to_usdc(user_wallet)
+
     if name == "withdraw_bounce_balance":
         amount_usdc = float(args.get("amount_usdc") or 0)
         if not user_confirmed:
@@ -877,6 +896,8 @@ def _execute_pending_bounce_action(pending: dict[str, Any], *, agent_id: str, us
 
     if tool_name == "withdraw_bounce_balance":
         return tool_name, bl.withdraw_bounce_tokens(user_wallet, "USDC", float(args.get("amount_usdc") or 0))
+    if tool_name == "convert_bounce_sol_to_usdc":
+        return tool_name, bl.convert_idle_sol_to_usdc(user_wallet)
     if tool_name == "open_bounce_position":
         bt.start_position_monitor()
         return tool_name, bt.open_position(

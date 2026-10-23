@@ -1008,6 +1008,18 @@ export async function proxyVerifyBounceDeposit(
   });
 }
 
+export async function proxyConvertBounceSol(
+  agentId: string,
+  body: { confirm: boolean },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/convert-sol`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function proxySetBounceAllocationCap(
   agentId: string,
   body: { max_allocation_usdc: number | null },

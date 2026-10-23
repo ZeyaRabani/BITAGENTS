@@ -455,6 +455,20 @@ def _auto_convert_deposit_to_usdc(user_wallet: str, sol_amount: float) -> dict[s
     return {"status": "success", "sol_converted": convert_amount, "usdc_received": usdc_amount, "signature": swap.get("signature")}
 
 
+def convert_idle_sol_to_usdc(user_wallet: str) -> dict[str, Any]:
+    """Convert whatever SOL is currently sitting withdrawable in this wallet
+    into USDC -- for deposits made before auto-convert-on-deposit existed,
+    or any other SOL that ended up idle here. Reuses the exact same
+    conversion path as a fresh deposit; this is a real on-chain swap, not a
+    simulation, so the caller (chat confirmation / API route) is responsible
+    for getting explicit confirmation before calling this."""
+    balances = get_bounce_user_balances(user_wallet)
+    sol_balance = next((b["withdrawable"] for b in balances.get("balances") or [] if b["token"] == "SOL"), 0.0)
+    if sol_balance <= 0:
+        return {"status": "skipped", "reason": "No idle SOL to convert."}
+    return _auto_convert_deposit_to_usdc(user_wallet, sol_balance)
+
+
 def withdraw_bounce_tokens(user_wallet: str, token: str, amount: float) -> dict[str, Any]:
     from deposit_ledger import _ledger_lock
     from dca_agent import send_tokens_to_user

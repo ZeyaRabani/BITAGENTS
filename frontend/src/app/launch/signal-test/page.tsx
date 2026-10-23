@@ -198,6 +198,26 @@ export default function SignalTestPage() {
     }
   }
 
+  const [convertBusy, setConvertBusy] = useState(false);
+
+  async function convertSolToUsdc() {
+    if (!token || !agentId.trim()) return;
+    if (!window.confirm("Convert your idle SOL to USDC now? This is a real on-chain swap.")) return;
+    setConvertBusy(true);
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/convert-sol`, token, {
+        method: "POST",
+        body: JSON.stringify({ confirm: true }),
+      });
+      void refreshBalance();
+      alert(`Converted: ${JSON.stringify(data)}`);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Conversion failed");
+    } finally {
+      setConvertBusy(false);
+    }
+  }
+
   const pollOnce = useCallback(async () => {
     if (!token || !agentId.trim() || !watch) return;
     try {
@@ -488,11 +508,18 @@ export default function SignalTestPage() {
                     </span>
                   </div>
                   {!!balance?.balances?.find((b) => b.token === "SOL")?.withdrawable && (
-                    <div>
+                    <div className="flex items-center gap-2">
                       <span className="text-muted-foreground">SOL (gas reserve, or a failed conversion): </span>
                       <span className="text-muted-foreground">
                         {balance?.balances?.find((b) => b.token === "SOL")?.withdrawable} SOL
                       </span>
+                      <button
+                        onClick={convertSolToUsdc}
+                        disabled={convertBusy}
+                        className="rounded-full border border-grid px-3 py-1 font-mono text-[9px] uppercase tracking-[0.1em] hover:border-signal disabled:opacity-40"
+                      >
+                        {convertBusy ? "Converting..." : "Convert to USDC"}
+                      </button>
                     </div>
                   )}
                   <button
