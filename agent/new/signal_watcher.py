@@ -231,10 +231,19 @@ def evaluate_watch(watch_id: str) -> dict[str, Any]:
     """
     Pull the latest price, advance the watch's state machine, and return the
     current status. Call this on every sampler tick for every active watch.
-    Does NOT execute any trade -- it only returns {"fired": true, ...} when
-    the pattern completes. The caller (the agent's tool-dispatch loop) is
-    responsible for the actual swap and for calling reset_watch() after.
+    On fired=True, also auto-stages an open_bounce_position proposal if the
+    watch's agent has a default strategy configured with auto_trade on (see
+    _maybe_auto_stage_trade) -- this still only PROPOSES, same confirmation
+    gate as everything else; it just means the user doesn't have to be the
+    one to ask for it in chat.
     """
+    result = _evaluate_watch_inner(watch_id)
+    if result.get("fired"):
+        _maybe_auto_stage_trade(watch_id, result)
+    return result
+
+
+def _evaluate_watch_inner(watch_id: str) -> dict[str, Any]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             watch = _get_watch(cur, watch_id)
@@ -305,6 +314,61 @@ def evaluate_watch(watch_id: str) -> dict[str, Any]:
                 "armed_low_usd": watch.get("armed_low_usd"),
                 "fired": fired,
             }
+
+
+def _maybe_auto_stage_trade(watch_id: str, fired_result: dict[str, Any]) -> None:
+    """On a watch firing, auto-propose opening a position using the agent's
+    preset strategy and its current withdrawable USDC (capped by its
+    allocation cap, if any) -- so the user only has to approve, not compose
+    a trade from scratch. Never raises; a failure here just means no
+    proposal gets staged, the user can still ask in chat."""
+    try:
+        watch = get_watch(watch_id)
+        if not watch or not watch.get("agent_id"):
+            return
+        agent_id = watch["agent_id"]
+
+        import bounce_trading as bt
+
+        strategy = bt.get_agent_strategy(agent_id)
+        if not strategy or not strategy.get("auto_trade"):
+            return
+        if strategy["symbol"] != watch["symbol"] or strategy["profile"] != watch["profile"]:
+            return  # this watch doesn't match the agent's configured strategy
+
+        from db import get_launched_agent
+        import bounce_ledger as bl
+
+        agent = get_launched_agent(agent_id)
+        if not agent:
+            return
+        user_wallet = agent["user_wallet"]
+
+        balances = bl.get_bounce_user_balances(user_wallet)
+        usdc_available = next(
+            (b["withdrawable"] for b in balances.get("balances") or [] if b["token"] == "USDC"), 0.0
+        )
+        cap = bt.get_agent_allocation_cap(agent_id)
+        already_committed = bt._capital_in_open_positions(agent_id)
+        headroom = (cap - already_committed) if cap is not None else usdc_available
+        amount_usdc = round(min(usdc_available, max(0.0, headroom)), 6)
+        if amount_usdc < bt.MIN_POSITION_USDC:
+            return  # not enough funded (or already at its cap) to propose anything
+
+        import launch_agent as la
+
+        la._stage_bounce_confirmation(
+            user_wallet, agent_id, "open_bounce_position",
+            {
+                "symbol": strategy["symbol"],
+                "amount_usdc": amount_usdc,
+                "stop_loss_pct": strategy["stop_loss_pct"],
+                "take_profit_pct": strategy["take_profit_pct"],
+                "watch_id": watch_id,
+            },
+        )
+    except Exception as exc:
+        print(f"  warning: auto-stage-on-fire failed for watch {watch_id}: {exc}")
 
 
 def reset_watch(watch_id: str) -> None:

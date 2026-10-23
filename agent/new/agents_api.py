@@ -60,6 +60,8 @@ from launch_agent import (
     launch_agent,
     list_marketplace_launched_agents,
     list_user_launched_agents,
+    peek_bounce_pending,
+    respond_to_bounce_pending,
     subscribe_to_agent,
     update_user_launched_agent,
     withdraw_creator_agent_earnings,
@@ -2113,7 +2115,7 @@ def launch_bounce_verify_deposit(
 
 
 class SetBounceAllocationRequest(BaseModel):
-    max_allocation_sol: Optional[float] = None  # None or <=0 clears the cap
+    max_allocation_usdc: Optional[float] = None  # None or <=0 clears the cap
 
 
 @app.post("/launch/{agent_id}/bounce/allocation-cap")
@@ -2127,7 +2129,78 @@ def launch_set_bounce_allocation_cap(
         raise HTTPException(status_code=403, detail="Only the agent's owner can set its allocation cap.")
     import bounce_trading as bt
 
-    return bt.set_agent_allocation_cap(agent_id, body.max_allocation_sol)
+    return bt.set_agent_allocation_cap(agent_id, body.max_allocation_usdc)
+
+
+class SetBounceStrategyRequest(BaseModel):
+    symbol: str = Field(min_length=1)
+    profile: str = Field(default="real", pattern="^(real|test|fast_test)$")
+    stop_loss_pct: float = Field(gt=0)
+    take_profit_pct: float = Field(gt=0)
+    auto_trade: bool = True
+
+
+@app.post("/launch/{agent_id}/bounce/strategy")
+def launch_set_bounce_strategy(
+    agent_id: str,
+    body: SetBounceStrategyRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if access.get("reason") != "owner":
+        raise HTTPException(status_code=403, detail="Only the agent's owner can set its default strategy.")
+    import bounce_trading as bt
+
+    result = bt.set_agent_strategy(
+        agent_id, symbol=body.symbol, profile=body.profile,
+        stop_loss_pct=body.stop_loss_pct, take_profit_pct=body.take_profit_pct, auto_trade=body.auto_trade,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/launch/{agent_id}/bounce/strategy")
+def launch_get_bounce_strategy(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's strategy.")
+    import bounce_trading as bt
+
+    return bt.get_agent_strategy(agent_id) or {}
+
+
+@app.get("/launch/{agent_id}/bounce/pending")
+def launch_get_bounce_pending(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's pending actions.")
+    return peek_bounce_pending(auth_wallet, agent_id) or {}
+
+
+class RespondBouncePendingRequest(BaseModel):
+    approve: bool
+
+
+@app.post("/launch/{agent_id}/bounce/pending/respond")
+def launch_respond_bounce_pending(
+    agent_id: str,
+    body: RespondBouncePendingRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to act on this agent's pending actions.")
+    result = respond_to_bounce_pending(auth_wallet, agent_id, approve=body.approve)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 @app.post("/launch/{agent_id}/subscribe")

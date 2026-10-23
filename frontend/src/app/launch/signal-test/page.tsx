@@ -57,14 +57,27 @@ type AgentBreakdown = {
   open_positions: number;
   closed_positions: number;
   capital_in_open_positions: number;
-  realized_pnl_sol: number;
-  allocation_cap_sol: number | null;
+  realized_pnl_usdc: number;
+  allocation_cap_usdc: number | null;
 };
 
 type BounceBalance = {
   agent_wallet: string | null;
   balances: { token: string; deposited: number; withdrawable: number }[];
   agent_breakdown?: AgentBreakdown[];
+};
+
+type Strategy = {
+  symbol: string;
+  profile: string;
+  stop_loss_pct: number;
+  take_profit_pct: number;
+  auto_trade: boolean;
+};
+
+type PendingAction = {
+  tool: string;
+  args: Record<string, unknown>;
 };
 
 export default function SignalTestPage() {
@@ -97,10 +110,93 @@ export default function SignalTestPage() {
   const [capBusy, setCapBusy] = useState(false);
   const [capMsg, setCapMsg] = useState<string | null>(null);
 
+  const [strategy, setStrategy] = useState<Strategy | null>(null);
+  const [strategyForm, setStrategyForm] = useState({ symbol: "SOL", profile: "fast_test", stop_loss_pct: "5", take_profit_pct: "15" });
+  const [strategyBusy, setStrategyBusy] = useState(false);
+
+  const [pending, setPending] = useState<PendingAction | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (token) void signIn();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const refreshStrategy = useCallback(async () => {
+    if (!token || !agentId.trim()) return;
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/strategy`, token);
+      if (data.symbol) {
+        setStrategy(data);
+        setStrategyForm({
+          symbol: data.symbol, profile: data.profile,
+          stop_loss_pct: String(data.stop_loss_pct), take_profit_pct: String(data.take_profit_pct),
+        });
+      }
+    } catch {
+      // no strategy configured yet -- fine, form stays at defaults
+    }
+  }, [token, agentId]);
+
+  const saveStrategy = useCallback(async () => {
+    if (!token || !agentId.trim()) return;
+    setStrategyBusy(true);
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/strategy`, token, {
+        method: "POST",
+        body: JSON.stringify({
+          symbol: strategyForm.symbol, profile: strategyForm.profile,
+          stop_loss_pct: Number(strategyForm.stop_loss_pct), take_profit_pct: Number(strategyForm.take_profit_pct),
+          auto_trade: true,
+        }),
+      });
+      setStrategy(data);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not save strategy");
+    } finally {
+      setStrategyBusy(false);
+    }
+  }, [token, agentId, strategyForm]);
+
+  const pollPending = useCallback(async () => {
+    if (!token || !agentId.trim()) return;
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/pending`, token);
+      setPending(data?.tool ? data : null);
+    } catch {
+      // ignore transient poll failures
+    }
+  }, [token, agentId]);
+
+  useEffect(() => {
+    if (!token || !agentId.trim()) return;
+    void refreshStrategy();
+    void pollPending();
+    pendingPollRef.current = setInterval(() => void pollPending(), 4000);
+    return () => {
+      if (pendingPollRef.current) clearInterval(pendingPollRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, agentId]);
+
+  async function respondPending(approve: boolean) {
+    if (!token || !agentId.trim()) return;
+    setPendingBusy(true);
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/pending/respond`, token, {
+        method: "POST",
+        body: JSON.stringify({ approve }),
+      });
+      setPending(null);
+      void refreshBalance();
+      alert(approve ? `Executed: ${JSON.stringify(data.result)}` : "Rejected -- nothing executed.");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Could not respond");
+    } finally {
+      setPendingBusy(false);
+    }
+  }
 
   const pollOnce = useCallback(async () => {
     if (!token || !agentId.trim() || !watch) return;
@@ -209,11 +305,11 @@ export default function SignalTestPage() {
       const value = capInput.trim() === "" ? null : Number(capInput.trim());
       const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/allocation-cap`, token, {
         method: "POST",
-        body: JSON.stringify({ max_allocation_sol: value }),
+        body: JSON.stringify({ max_allocation_usdc: value }),
       });
       setCapMsg(
-        data.max_allocation_sol != null
-          ? `Cap set to ${data.max_allocation_sol} SOL for ${agentId.trim()}.`
+        data.max_allocation_usdc != null
+          ? `Cap set to ${data.max_allocation_usdc} USDC for ${agentId.trim()}.`
           : `Cap cleared for ${agentId.trim()} -- full wallet balance available.`
       );
       void refreshBalance();
@@ -269,6 +365,96 @@ export default function SignalTestPage() {
         </div>
       )}
 
+      {pending && (
+        <div className="mb-6">
+          <Panel title="Action needs your approval">
+            <div className="rounded-xl border-2 border-signal bg-signal/10 p-4">
+              <div className="font-mono text-xs uppercase tracking-[0.14em] text-signal">{pending.tool}</div>
+              <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+                {JSON.stringify(pending.args, null, 2)}
+              </pre>
+              <p className="mt-2 text-xs text-muted-foreground">
+                This will execute exactly these numbers, nothing else, the moment you approve.
+              </p>
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={() => respondPending(true)}
+                  disabled={pendingBusy}
+                  className="flex-1 rounded-full bg-signal px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-background disabled:opacity-40"
+                >
+                  {pendingBusy ? "Working..." : "Approve"}
+                </button>
+                <button
+                  onClick={() => respondPending(false)}
+                  disabled={pendingBusy}
+                  className="flex-1 rounded-full border border-grid px-4 py-2.5 font-mono text-[11px] font-semibold uppercase tracking-[0.14em] hover:border-warn disabled:opacity-40"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      <div className="mb-6">
+        <Panel title="Default strategy (set once, used every time this agent fires)">
+          <div className="grid gap-3 md:grid-cols-4">
+            <div>
+              <label className="font-mono text-[9px] uppercase text-muted-foreground">Symbol</label>
+              <input
+                value={strategyForm.symbol}
+                onChange={(e) => setStrategyForm((s) => ({ ...s, symbol: e.target.value.toUpperCase() }))}
+                className="mt-1 w-full rounded-xl border border-grid bg-background px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="font-mono text-[9px] uppercase text-muted-foreground">Profile</label>
+              <select
+                value={strategyForm.profile}
+                onChange={(e) => setStrategyForm((s) => ({ ...s, profile: e.target.value }))}
+                className="mt-1 w-full rounded-xl border border-grid bg-background px-3 py-2 text-sm"
+              >
+                {PROFILES.map((p) => (
+                  <option key={p.key} value={p.key}>{p.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="font-mono text-[9px] uppercase text-muted-foreground">Stop-loss %</label>
+              <input
+                value={strategyForm.stop_loss_pct}
+                onChange={(e) => setStrategyForm((s) => ({ ...s, stop_loss_pct: e.target.value }))}
+                type="number" step="any"
+                className="mt-1 w-full rounded-xl border border-grid bg-background px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="font-mono text-[9px] uppercase text-muted-foreground">Take-profit %</label>
+              <input
+                value={strategyForm.take_profit_pct}
+                onChange={(e) => setStrategyForm((s) => ({ ...s, take_profit_pct: e.target.value }))}
+                type="number" step="any"
+                className="mt-1 w-full rounded-xl border border-grid bg-background px-3 py-2 text-sm"
+              />
+            </div>
+          </div>
+          <button
+            onClick={saveStrategy}
+            disabled={strategyBusy}
+            className="mt-3 rounded-full bg-signal px-4 py-2 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-background disabled:opacity-40"
+          >
+            {strategyBusy ? "Saving..." : "Save default strategy"}
+          </button>
+          {strategy && (
+            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+              Currently: watching {strategy.symbol} ({strategy.profile}), {strategy.stop_loss_pct}% stop / {strategy.take_profit_pct}% target.
+              {strategy.auto_trade ? " A matching watch firing will auto-propose a trade above -- just approve or reject." : ""}
+            </p>
+          )}
+        </Panel>
+      </div>
+
       <div className="mb-6">
         <Panel title="Deposit (Bounce Agent wallet)">
             <div className="grid gap-4 md:grid-cols-2">
@@ -294,13 +480,21 @@ export default function SignalTestPage() {
                   <p className="mt-2 text-sm text-warn">{balanceError ?? "No deposit address yet."}</p>
                 )}
 
-                <div className="mt-3 flex items-center gap-4 font-mono text-xs">
+                <div className="mt-3 flex flex-wrap items-center gap-4 font-mono text-xs">
                   <div>
                     <span className="text-muted-foreground">Withdrawable: </span>
                     <span className="font-bold text-signal">
-                      {balance?.balances?.[0]?.withdrawable ?? 0} SOL
+                      {balance?.balances?.find((b) => b.token === "USDC")?.withdrawable ?? 0} USDC
                     </span>
                   </div>
+                  {!!balance?.balances?.find((b) => b.token === "SOL")?.withdrawable && (
+                    <div>
+                      <span className="text-muted-foreground">SOL (gas reserve, or a failed conversion): </span>
+                      <span className="text-muted-foreground">
+                        {balance?.balances?.find((b) => b.token === "SOL")?.withdrawable} SOL
+                      </span>
+                    </div>
+                  )}
                   <button
                     onClick={refreshBalance}
                     disabled={balanceBusy}
@@ -334,13 +528,13 @@ export default function SignalTestPage() {
 
                 <div className="mt-4 border-t border-grid pt-4">
                   <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                    Allocation cap for this agent (SOL, blank = no cap)
+                    Allocation cap for this agent (USDC, blank = no cap)
                   </div>
                   <div className="mt-2 flex gap-2">
                     <input
                       value={capInput}
                       onChange={(e) => setCapInput(e.target.value)}
-                      placeholder="e.g. 0.1"
+                      placeholder="e.g. 50"
                       type="number"
                       step="any"
                       className="flex-1 rounded-xl border border-grid bg-background px-3 py-2 text-xs"
@@ -374,12 +568,12 @@ export default function SignalTestPage() {
                         {a.open_positions} open &middot; {a.closed_positions} closed
                       </span>
                       <span className="text-muted-foreground">
-                        {a.capital_in_open_positions} SOL in open positions
-                        {a.allocation_cap_sol != null ? ` (cap: ${a.allocation_cap_sol} SOL)` : " (no cap)"}
+                        {a.capital_in_open_positions} USDC in open positions
+                        {a.allocation_cap_usdc != null ? ` (cap: ${a.allocation_cap_usdc} USDC)` : " (no cap)"}
                       </span>
-                      <span className={a.realized_pnl_sol >= 0 ? "font-bold text-signal" : "font-bold text-warn"}>
-                        {a.realized_pnl_sol >= 0 ? "+" : ""}
-                        {a.realized_pnl_sol} SOL realized
+                      <span className={a.realized_pnl_usdc >= 0 ? "font-bold text-signal" : "font-bold text-warn"}>
+                        {a.realized_pnl_usdc >= 0 ? "+" : ""}
+                        {a.realized_pnl_usdc} USDC realized
                       </span>
                     </div>
                   ))}

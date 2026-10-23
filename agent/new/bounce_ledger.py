@@ -10,9 +10,19 @@ required here, not optional.
 
 Direction semantics for the underlying user_ledger rows:
   deposit  -- user sends SOL into the Bounce Agent wallet
-  spend    -- agent buys (SOL -> token) on a fired signal
-  acquire  -- agent sells (token -> SOL) closing a position, crediting proceeds
-  withdraw -- user pulls SOL back out
+  spend    -- agent buys (BASE_TOKEN -> token) on a fired signal, or the
+              auto-conversion of a fresh SOL deposit into BASE_TOKEN
+  acquire  -- agent sells (token -> BASE_TOKEN) closing a position, or the
+              USDC side of a deposit auto-conversion, crediting proceeds
+  withdraw -- user pulls BASE_TOKEN back out
+
+Resting capital is USDC, not SOL. The user only ever deposits native SOL
+(zero extra setup -- same as every other agent), but the instant a deposit
+is verified, it's auto-converted to USDC (see verify_and_record_bounce_deposit).
+This is also what makes SOL a valid trade target again: capital and the
+thing being traded can't be the same asset (see open_position's SOL
+self-swap guard in bounce_trading.py), and with USDC as the resting
+currency, watching and trading SOL itself -- the original ask -- works.
 """
 
 from __future__ import annotations
@@ -26,8 +36,12 @@ from typing import Any, Optional
 from db import insert_ledger_entry, load_ledger_for_user
 from dca_agent import SOL_ADDRESS_FULL, resolve_token, sol_rpc
 
-ALLOWED_DEPOSIT_TOKENS = {"SOL"}
-ALLOWED_WITHDRAW_TOKENS = {"SOL"}
+ALLOWED_DEPOSIT_TOKENS = {"SOL"}  # what the user sends in, on-chain
+# USDC is the normal resting currency; SOL stays withdrawable too so a failed
+# or partial auto-conversion (see verify_and_record_bounce_deposit) never
+# strands funds with no way to get them back out.
+ALLOWED_WITHDRAW_TOKENS = {"USDC", "SOL"}
+BASE_TOKEN = "USDC"
 AGENT_TYPE = "bounce"
 
 
@@ -370,12 +384,75 @@ def verify_and_record_bounce_deposit(signature: str, user_wallet: str) -> dict[s
             records.append(record)
         if not records:
             return {"error": "No SOL transfer to the Bounce Agent wallet found.", "status": "rejected"}
+
+        conversion = _auto_convert_deposit_to_usdc(
+            user_wallet, sum(float(r["amount"]) for r in records)
+        )
+
         return {
             "status": "confirmed",
             "deposits": records,
+            "conversion": conversion,
             "balances": get_bounce_user_balances(user_wallet),
-            "message": "Deposit verified. The agent can now trade with this capital once you confirm a signal.",
+            "message": (
+                "Deposit verified and converted to USDC. The agent can now trade with this "
+                "capital once you confirm a signal."
+                if conversion.get("status") == "success"
+                else "Deposit verified, but auto-conversion to USDC failed -- your SOL is safe "
+                "and withdrawable as SOL. "
+                + str(conversion.get("error") or "")
+            ),
         }
+
+
+def _auto_convert_deposit_to_usdc(user_wallet: str, sol_amount: float) -> dict[str, Any]:
+    """Immediately swap a fresh SOL deposit into USDC, the resting currency.
+    Never raises -- a failed conversion just leaves the SOL as SOL, still
+    fully withdrawable (see ALLOWED_WITHDRAW_TOKENS), not stranded."""
+    from hedge_fund_live import execute_agent_jupiter_swap, _sol_operating_reserve, MIN_SOL_FOR_FEES
+    from dca_agent import TOKEN_MINTS
+
+    # execute_agent_jupiter_swap separately enforces MIN_SOL_FOR_FEES against
+    # the wallet's total balance (every swap needs SOL for gas, regardless of
+    # what's being swapped) -- make sure what we leave behind clears both
+    # that absolute floor and the ATA-rent/fee headroom, with a little margin.
+    reserve = max(_sol_operating_reserve(1), MIN_SOL_FOR_FEES) + 0.002
+    convert_amount = round(sol_amount - reserve, 9)
+    if convert_amount <= 0:
+        return {"status": "skipped", "reason": "Deposit too small to leave fee/rent headroom after converting."}
+
+    usdc = TOKEN_MINTS["USDC"]
+    try:
+        swap = execute_agent_jupiter_swap(
+            agent_type=AGENT_TYPE,
+            input_mint=SOL_ADDRESS_FULL,
+            output_mint=usdc["mint"],
+            amount=convert_amount,
+            input_decimals=9,
+            user_wallet=user_wallet,
+        )
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
+
+    if swap.get("error") or swap.get("status") != "success":
+        return {"status": "error", "error": swap.get("error") or "Conversion swap failed."}
+
+    out_raw = int(swap.get("output_amount_raw") or 0)
+    usdc_amount = out_raw / (10 ** usdc["decimals"]) if out_raw > 0 else 0.0
+    if usdc_amount <= 0:
+        return {"status": "error", "error": "Conversion swap reported success but returned no USDC amount."}
+
+    record_bounce_spend(
+        user_wallet, convert_amount,
+        reference_id=swap.get("signature") or uuid.uuid4().hex,
+        token="SOL", signature=swap.get("signature"), explorer_url=swap.get("explorer_url"),
+    )
+    record_bounce_credit(
+        user_wallet, usdc_amount,
+        reference_id=swap.get("signature") or uuid.uuid4().hex,
+        token="USDC", signature=swap.get("signature"), explorer_url=swap.get("explorer_url"),
+    )
+    return {"status": "success", "sol_converted": convert_amount, "usdc_received": usdc_amount, "signature": swap.get("signature")}
 
 
 def withdraw_bounce_tokens(user_wallet: str, token: str, amount: float) -> dict[str, Any]:

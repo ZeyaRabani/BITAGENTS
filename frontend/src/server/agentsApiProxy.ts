@@ -1010,10 +1010,48 @@ export async function proxyVerifyBounceDeposit(
 
 export async function proxySetBounceAllocationCap(
   agentId: string,
-  body: { max_allocation_sol: number | null },
+  body: { max_allocation_usdc: number | null },
   authToken: string
 ): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/allocation-cap`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyGetBounceStrategy(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/strategy`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxySetBounceStrategy(
+  agentId: string,
+  body: { symbol: string; profile: string; stop_loss_pct: number; take_profit_pct: number; auto_trade: boolean },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/strategy`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyGetBouncePending(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/pending`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyRespondBouncePending(
+  agentId: string,
+  body: { approve: boolean },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/pending/respond`, {
     method: "POST",
     headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
     body: JSON.stringify(body),

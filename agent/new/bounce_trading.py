@@ -4,11 +4,17 @@ agents). This is the only module that actually spends real capital -- every
 other piece (signal_watcher.py detection, bounce_ledger.py accounting) is
 read-only or pure bookkeeping.
 
+Capital is USDC (see bounce_ledger.BASE_TOKEN) -- the user deposits native
+SOL, which gets auto-converted on arrival, so a position always swaps
+USDC -> target token on entry and back to USDC on exit. This is also why
+SOL is a valid, even expected, target token here: it's no longer the same
+asset as the capital it's bought with.
+
 Safety model, deliberate and not accidental:
   - Opening a position (committing new capital) always requires the caller
     to have already gotten explicit human confirmation. This module does
     not decide whether to open a position -- see launch_agent.py's
-    CONFIRMATION_REQUIRED_TOOLS gating, which must happen before
+    BOUNCE_CONFIRMATION_REQUIRED_TOOLS gating, which must happen before
     open_position() is ever called.
   - Closing a position on a stop-loss or take-profit does NOT require a
     fresh confirmation each time it fires -- the user already authorized
@@ -20,39 +26,40 @@ Safety model, deliberate and not accidental:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from db import get_conn, init_db
-from dca_agent import SOL_ADDRESS_FULL, resolve_token
+from dca_agent import TOKEN_MINTS, resolve_token
 from hedge_fund_live import execute_agent_jupiter_swap
 from bounce_ledger import (
     AGENT_TYPE,
+    BASE_TOKEN,
     check_bounce_can_spend,
-    get_bounce_wallet_pubkey,
     record_bounce_credit,
     record_bounce_spend,
 )
 
-MIN_POSITION_SOL = 0.005  # below this, fees/slippage dominate the trade
+USDC_MINT = TOKEN_MINTS["USDC"]["mint"]
+USDC_DECIMALS = TOKEN_MINTS["USDC"]["decimals"]
+MIN_POSITION_USDC = 1.0  # below this, fees/slippage dominate the trade
 
 
-def set_agent_allocation_cap(agent_id: str, max_allocation_sol: Optional[float]) -> dict[str, Any]:
+def set_agent_allocation_cap(agent_id: str, max_allocation_usdc: Optional[float]) -> dict[str, Any]:
     """None/0 or a negative number clears the cap (full wallet balance available)."""
     ensure_bounce_trading_schema()
     agent_id = (agent_id or "").strip()
     if not agent_id:
         return {"error": "agent_id is required"}
-    cap = float(max_allocation_sol) if max_allocation_sol is not None else None
+    cap = float(max_allocation_usdc) if max_allocation_usdc is not None else None
     if cap is not None and cap <= 0:
         cap = None
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO bounce_agent_limits (agent_id, max_allocation_sol, updated_at)
+                INSERT INTO bounce_agent_limits (agent_id, max_allocation_usdc, updated_at)
                 VALUES (%s, %s, NOW())
-                ON CONFLICT (agent_id) DO UPDATE SET max_allocation_sol = EXCLUDED.max_allocation_sol, updated_at = NOW()
+                ON CONFLICT (agent_id) DO UPDATE SET max_allocation_usdc = EXCLUDED.max_allocation_usdc, updated_at = NOW()
                 RETURNING *
                 """,
                 (agent_id, cap),
@@ -65,16 +72,56 @@ def get_agent_allocation_cap(agent_id: str) -> Optional[float]:
     ensure_bounce_trading_schema()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT max_allocation_sol FROM bounce_agent_limits WHERE agent_id = %s", ((agent_id or "").strip(),))
+            cur.execute("SELECT max_allocation_usdc FROM bounce_agent_limits WHERE agent_id = %s", ((agent_id or "").strip(),))
             row = cur.fetchone()
-    return float(row["max_allocation_sol"]) if row and row["max_allocation_sol"] is not None else None
+    return float(row["max_allocation_usdc"]) if row and row["max_allocation_usdc"] is not None else None
+
+
+def set_agent_strategy(
+    agent_id: str, *, symbol: str, profile: str = "real",
+    stop_loss_pct: float, take_profit_pct: float, auto_trade: bool = True,
+) -> dict[str, Any]:
+    """Default strategy for an agent instance -- set once, not re-asked per
+    user. Drives both what signal_watcher watches and the trade proposal
+    auto-staged when it fires (see signal_watcher.py)."""
+    ensure_bounce_trading_schema()
+    agent_id = (agent_id or "").strip()
+    if not agent_id:
+        return {"error": "agent_id is required"}
+    if stop_loss_pct <= 0 or take_profit_pct <= 0:
+        return {"error": "stop_loss_pct and take_profit_pct must both be positive percentages."}
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO bounce_agent_strategy (agent_id, symbol, profile, stop_loss_pct, take_profit_pct, auto_trade, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (agent_id) DO UPDATE SET
+                    symbol = EXCLUDED.symbol, profile = EXCLUDED.profile,
+                    stop_loss_pct = EXCLUDED.stop_loss_pct, take_profit_pct = EXCLUDED.take_profit_pct,
+                    auto_trade = EXCLUDED.auto_trade, updated_at = NOW()
+                RETURNING *
+                """,
+                (agent_id, symbol.strip().upper(), profile.strip().lower(), stop_loss_pct, take_profit_pct, auto_trade),
+            )
+            row = cur.fetchone()
+    return dict(row)
+
+
+def get_agent_strategy(agent_id: str) -> Optional[dict[str, Any]]:
+    ensure_bounce_trading_schema()
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM bounce_agent_strategy WHERE agent_id = %s", ((agent_id or "").strip(),))
+            row = cur.fetchone()
+    return dict(row) if row else None
 
 
 def _capital_in_open_positions(agent_id: str) -> float:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT COALESCE(SUM(entry_sol_amount), 0) AS total FROM bounce_positions WHERE agent_id = %s AND status = 'open'",
+                "SELECT COALESCE(SUM(entry_usdc_amount), 0) AS total FROM bounce_positions WHERE agent_id = %s AND status = 'open'",
                 ((agent_id or "").strip(),),
             )
             row = cur.fetchone()
@@ -93,7 +140,7 @@ def ensure_bounce_trading_schema() -> None:
             symbol               VARCHAR(16) NOT NULL,
             token_mint           VARCHAR(64) NOT NULL,
             token_decimals       INTEGER NOT NULL,
-            entry_sol_amount     DOUBLE PRECISION NOT NULL,
+            entry_usdc_amount    DOUBLE PRECISION NOT NULL,
             entry_token_amount   DOUBLE PRECISION NOT NULL,
             entry_price_usd      DOUBLE PRECISION,
             entry_signature      VARCHAR(128),
@@ -101,7 +148,7 @@ def ensure_bounce_trading_schema() -> None:
             target_price_usd     DOUBLE PRECISION NOT NULL,
             status               VARCHAR(16) NOT NULL DEFAULT 'open',
             close_reason         VARCHAR(32),
-            close_sol_amount     DOUBLE PRECISION,
+            close_usdc_amount    DOUBLE PRECISION,
             close_price_usd      DOUBLE PRECISION,
             close_signature      VARCHAR(128),
             created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -116,9 +163,25 @@ def ensure_bounce_trading_schema() -> None:
         # full wallet balance available, same as before this existed.
         """
         CREATE TABLE IF NOT EXISTS bounce_agent_limits (
-            agent_id           VARCHAR(32) PRIMARY KEY,
-            max_allocation_sol DOUBLE PRECISION,
-            updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            agent_id            VARCHAR(32) PRIMARY KEY,
+            max_allocation_usdc DOUBLE PRECISION,
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """,
+        # Per-agent default strategy, set once (by whoever configures the
+        # agent), so a user picking it up only ever answers "how much" --
+        # not which token, what thresholds, what stop/target. See
+        # set_agent_strategy / get_agent_strategy and signal_watcher.py's
+        # auto-stage-on-fire hook, which reads this.
+        """
+        CREATE TABLE IF NOT EXISTS bounce_agent_strategy (
+            agent_id         VARCHAR(32) PRIMARY KEY,
+            symbol           VARCHAR(16) NOT NULL,
+            profile          VARCHAR(16) NOT NULL DEFAULT 'real',
+            stop_loss_pct    DOUBLE PRECISION NOT NULL,
+            take_profit_pct  DOUBLE PRECISION NOT NULL,
+            auto_trade       BOOLEAN NOT NULL DEFAULT TRUE,
+            updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
     ]
@@ -134,56 +197,49 @@ def open_position(
     agent_id: Optional[str],
     watch_id: Optional[str],
     symbol: str,
-    amount_sol: float,
+    amount_usdc: float,
     stop_loss_pct: float,
     take_profit_pct: float,
 ) -> dict[str, Any]:
-    """Spend amount_sol buying `symbol`, recording the position and ledger entry.
+    """Spend amount_usdc buying `symbol`, recording the position and ledger entry.
 
-    Capital is always deposited and withdrawn as SOL (see bounce_ledger.py) --
-    `symbol` is the token this position actually swaps into, and must be a
-    different token. Buying "SOL" with SOL capital isn't a real trade, it's
-    a same-asset swap with nothing to gain and only fees to lose.
+    Capital is always deposited (as SOL, auto-converted) and withdrawn as
+    USDC -- see bounce_ledger.py. `symbol` is the token this position
+    actually swaps into, and must be a different token than USDC itself.
 
     Caller must have already obtained explicit human confirmation -- this
     function does not ask for it and will execute immediately.
     """
     ensure_bounce_trading_schema()
-    amount_sol = round(float(amount_sol), 9)
-    if amount_sol < MIN_POSITION_SOL:
-        return {"error": f"Position size must be at least {MIN_POSITION_SOL} SOL (fees/slippage dominate below that)."}
+    amount_usdc = round(float(amount_usdc), 6)
+    if amount_usdc < MIN_POSITION_USDC:
+        return {"error": f"Position size must be at least {MIN_POSITION_USDC} USDC (fees/slippage dominate below that)."}
     if stop_loss_pct <= 0 or take_profit_pct <= 0:
         return {"error": "stop_loss_pct and take_profit_pct must both be positive percentages."}
 
-    can_spend = check_bounce_can_spend(user_wallet, amount_sol, "SOL")
+    can_spend = check_bounce_can_spend(user_wallet, amount_usdc, BASE_TOKEN)
     if not can_spend.get("ok"):
         return can_spend
 
     cap = get_agent_allocation_cap(agent_id) if agent_id else None
     if cap is not None:
         already_committed = _capital_in_open_positions(agent_id)
-        if already_committed + amount_sol > cap + 1e-9:
+        if already_committed + amount_usdc > cap + 1e-9:
             return {
                 "error": (
-                    f"This would commit {already_committed + amount_sol:.4f} SOL to agent {agent_id}, "
-                    f"over its {cap} SOL allocation cap ({already_committed:.4f} SOL already in open positions). "
+                    f"This would commit {already_committed + amount_usdc:.4f} USDC to agent {agent_id}, "
+                    f"over its {cap} USDC allocation cap ({already_committed:.4f} USDC already in open positions). "
                     "Close a position first, raise the cap, or use a smaller amount."
                 ),
-                "allocation_cap_sol": cap,
-                "already_committed_sol": already_committed,
+                "allocation_cap_usdc": cap,
+                "already_committed_usdc": already_committed,
             }
 
     tok = resolve_token(symbol)
     if "error" in tok:
         return tok
-    if tok["symbol"].upper() in ("SOL", "WSOL"):
-        return {
-            "error": (
-                "Can't open a SOL position with SOL capital -- that's a self-swap, not a trade. "
-                "Pick a different token to swap into (e.g. a stablecoin or another token), "
-                "watched for its own dip-then-bounce pattern."
-            )
-        }
+    if tok["symbol"].upper() in ("USDC",):
+        return {"error": "Can't open a USDC position with USDC capital -- that's a self-swap, not a trade."}
 
     import signal_watcher as sw
 
@@ -193,11 +249,12 @@ def open_position(
 
     swap = execute_agent_jupiter_swap(
         agent_type=AGENT_TYPE,
-        input_mint=SOL_ADDRESS_FULL,
+        input_mint=USDC_MINT,
         output_mint=tok["mint"],
-        amount=amount_sol,
-        input_decimals=9,
+        amount=amount_usdc,
+        input_decimals=USDC_DECIMALS,
         user_wallet=user_wallet,
+        sol_reserve=0.0,  # the swap spends USDC, not SOL -- no SOL headroom needed from this leg
     )
     if swap.get("error") or swap.get("status") != "success":
         return {"error": swap.get("error") or "Buy swap failed.", "swap": swap}
@@ -208,8 +265,9 @@ def open_position(
         return {"error": "Swap reported success but no output amount was returned. Not recording a position.", "swap": swap}
 
     record_bounce_spend(
-        user_wallet, amount_sol,
+        user_wallet, amount_usdc,
         reference_id=swap.get("signature") or uuid.uuid4().hex,
+        token=BASE_TOKEN,
         signature=swap.get("signature"),
         explorer_url=swap.get("explorer_url"),
     )
@@ -224,14 +282,14 @@ def open_position(
                 """
                 INSERT INTO bounce_positions (
                     position_id, user_wallet, agent_id, watch_id, symbol, token_mint, token_decimals,
-                    entry_sol_amount, entry_token_amount, entry_price_usd, entry_signature,
+                    entry_usdc_amount, entry_token_amount, entry_price_usd, entry_signature,
                     stop_price_usd, target_price_usd, status
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open')
                 RETURNING *
                 """,
                 (
                     position_id, user_wallet.strip(), agent_id, watch_id, tok["symbol"], tok["mint"], tok["decimals"],
-                    amount_sol, entry_token_amount, entry_price, swap.get("signature"),
+                    amount_usdc, entry_token_amount, entry_price, swap.get("signature"),
                     stop_price, target_price,
                 ),
             )
@@ -240,7 +298,7 @@ def open_position(
 
 
 def close_position(position_id: str, *, reason: str) -> dict[str, Any]:
-    """Sell the full position back to SOL and record the ledger credit."""
+    """Sell the full position back to USDC and record the ledger credit."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM bounce_positions WHERE position_id = %s", (position_id,))
@@ -254,20 +312,22 @@ def close_position(position_id: str, *, reason: str) -> dict[str, Any]:
     swap = execute_agent_jupiter_swap(
         agent_type=AGENT_TYPE,
         input_mint=pos["token_mint"],
-        output_mint=SOL_ADDRESS_FULL,
+        output_mint=USDC_MINT,
         amount=pos["entry_token_amount"],
         input_decimals=pos["token_decimals"],
         user_wallet=pos["user_wallet"],
+        sol_reserve=0.0,
     )
     if swap.get("error") or swap.get("status") != "success":
         return {"error": swap.get("error") or "Sell swap failed. Position left open.", "swap": swap}
 
     out_raw = int(swap.get("output_amount_raw") or 0)
-    sol_received = out_raw / 1e9 if out_raw > 0 else 0.0
+    usdc_received = out_raw / (10 ** USDC_DECIMALS) if out_raw > 0 else 0.0
 
     record_bounce_credit(
-        pos["user_wallet"], sol_received,
+        pos["user_wallet"], usdc_received,
         reference_id=swap.get("signature") or uuid.uuid4().hex,
+        token=BASE_TOKEN,
         signature=swap.get("signature"),
         explorer_url=swap.get("explorer_url"),
     )
@@ -280,12 +340,12 @@ def close_position(position_id: str, *, reason: str) -> dict[str, Any]:
             cur.execute(
                 """
                 UPDATE bounce_positions
-                SET status = 'closed', close_reason = %s, close_sol_amount = %s,
+                SET status = 'closed', close_reason = %s, close_usdc_amount = %s,
                     close_price_usd = %s, close_signature = %s, closed_at = NOW()
                 WHERE position_id = %s
                 RETURNING *
                 """,
-                (reason, sol_received, close_price, swap.get("signature"), position_id),
+                (reason, usdc_received, close_price, swap.get("signature"), position_id),
             )
             row = cur.fetchone()
     return dict(row)
@@ -361,8 +421,8 @@ def get_agent_breakdown(user_wallet: str) -> list[dict[str, Any]]:
                     COALESCE(agent_id, 'unknown') AS agent_id,
                     COUNT(*) FILTER (WHERE status = 'open') AS open_positions,
                     COUNT(*) FILTER (WHERE status = 'closed') AS closed_positions,
-                    COALESCE(SUM(entry_sol_amount) FILTER (WHERE status = 'open'), 0) AS capital_in_open_positions,
-                    COALESCE(SUM(close_sol_amount - entry_sol_amount) FILTER (WHERE status = 'closed'), 0) AS realized_pnl_sol
+                    COALESCE(SUM(entry_usdc_amount) FILTER (WHERE status = 'open'), 0) AS capital_in_open_positions,
+                    COALESCE(SUM(close_usdc_amount - entry_usdc_amount) FILTER (WHERE status = 'closed'), 0) AS realized_pnl_usdc
                 FROM bounce_positions
                 WHERE user_wallet = %s
                 GROUP BY agent_id
@@ -373,7 +433,7 @@ def get_agent_breakdown(user_wallet: str) -> list[dict[str, Any]]:
             rows = cur.fetchall()
     result = [dict(r) for r in rows]
     for r in result:
-        r["allocation_cap_sol"] = get_agent_allocation_cap(r["agent_id"])
+        r["allocation_cap_usdc"] = get_agent_allocation_cap(r["agent_id"])
     return result
 
 

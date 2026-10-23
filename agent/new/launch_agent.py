@@ -603,6 +603,31 @@ def _pop_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, A
         return _bounce_pending.pop(key, None)
 
 
+def peek_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, Any]]:
+    """Read the pending action without consuming it -- for a frontend to poll
+    and render an Approve/Reject card, same underlying store the chat path
+    uses, so a button click and a typed 'yes' are equally deterministic."""
+    key = _bounce_confirmation_key(user_wallet, agent_id)
+    with _BOUNCE_CONFIRMATION_LOCK:
+        return _bounce_pending.get(key)
+
+
+def respond_to_bounce_pending(user_wallet: str, agent_id: str, *, approve: bool) -> dict[str, Any]:
+    """Approve or reject the pending action directly -- bypasses chat and the
+    LLM entirely, same deterministic execution the chat 'yes' path uses."""
+    if not approve:
+        cancelled = _pop_bounce_pending(user_wallet, agent_id)
+        if not cancelled:
+            return {"error": "No pending action to reject."}
+        return {"status": "cancelled", "tool": cancelled["tool"], "args": cancelled["args"]}
+
+    pending = _pop_bounce_pending(user_wallet, agent_id)
+    if not pending:
+        return {"error": "No pending action to approve."}
+    tool_name, result = _execute_pending_bounce_action(pending, agent_id=agent_id, user_wallet=user_wallet)
+    return {"tool": tool_name, "args": pending["args"], "result": result}
+
+
 def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
     """Tool definitions for price-pattern signal watches and (once a watch
     fires) trading on them. Only offered when the agent has the
@@ -699,7 +724,7 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
             "function": {
                 "name": "withdraw_bounce_balance",
                 "description": (
-                    "Send withdrawable SOL from the Bounce Agent wallet back to the user's own "
+                    "Send withdrawable USDC from the Bounce Agent wallet back to the user's own "
                     "wallet. Spends nothing of the user's capital gain beyond what's withdrawable "
                     "(open positions can't be withdrawn until closed), but it is a real transfer "
                     "and is only executed once the user explicitly confirms in their next message."
@@ -707,9 +732,9 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "amount_sol": {"type": "number"},
+                        "amount_usdc": {"type": "number"},
                     },
-                    "required": ["amount_sol"],
+                    "required": ["amount_usdc"],
                 },
             },
         },
@@ -718,7 +743,7 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
             "function": {
                 "name": "open_bounce_position",
                 "description": (
-                    "Buy `symbol` with `amount_sol` SOL from the user's deposited Bounce Agent "
+                    "Buy `symbol` with `amount_usdc` USDC from the user's deposited Bounce Agent "
                     "balance, setting a stop-loss and take-profit. This spends real capital and "
                     "is only executed once the user explicitly confirms in their next message -- "
                     "the first call always just proposes the trade."
@@ -729,17 +754,17 @@ def _signal_tools_for_agent(agent: dict[str, Any]) -> list[dict[str, Any]]:
                         "symbol": {
                             "type": "string",
                             "description": (
-                                "The token to swap the SOL capital into. Must NOT be SOL itself -- "
-                                "capital is always SOL, so buying SOL with SOL isn't a real trade. "
-                                "Pick a different token (e.g. the one whose price pattern was watched)."
+                                "The token to swap the USDC capital into -- SOL is the normal, "
+                                "expected choice, since that's what this agent watches. Must NOT be "
+                                "USDC itself, that would be a self-swap, not a trade."
                             ),
                         },
-                        "amount_sol": {"type": "number", "description": "SOL to spend opening the position"},
+                        "amount_usdc": {"type": "number", "description": "USDC to spend opening the position"},
                         "stop_loss_pct": {"type": "number", "description": "Percent below entry price to exit at a loss"},
                         "take_profit_pct": {"type": "number", "description": "Percent above entry price to exit at a profit"},
                         "watch_id": {"type": "string", "description": "The signal watch that fired, if any"},
                     },
-                    "required": ["symbol", "amount_sol", "stop_loss_pct", "take_profit_pct"],
+                    "required": ["symbol", "amount_usdc", "stop_loss_pct", "take_profit_pct"],
                 },
             },
         },
@@ -801,16 +826,16 @@ def _execute_signal_tool(
         return bl.verify_and_record_bounce_deposit(signature, user_wallet)
 
     if name == "withdraw_bounce_balance":
-        amount_sol = float(args.get("amount_sol") or 0)
+        amount_usdc = float(args.get("amount_usdc") or 0)
         if not user_confirmed:
-            _stage_bounce_confirmation(user_wallet, agent_id, name, {"amount_sol": amount_sol})
-            return {"status": "confirmation_required", "proposed_action": "withdraw_bounce_balance", "amount_sol": amount_sol}
-        return bl.withdraw_bounce_tokens(user_wallet, "SOL", amount_sol)
+            _stage_bounce_confirmation(user_wallet, agent_id, name, {"amount_usdc": amount_usdc})
+            return {"status": "confirmation_required", "proposed_action": "withdraw_bounce_balance", "amount_usdc": amount_usdc}
+        return bl.withdraw_bounce_tokens(user_wallet, "USDC", amount_usdc)
 
     if name == "open_bounce_position":
         proposed = {
             "symbol": str(args.get("symbol") or "SOL").strip().upper(),
-            "amount_sol": float(args.get("amount_sol") or 0),
+            "amount_usdc": float(args.get("amount_usdc") or 0),
             "stop_loss_pct": float(args.get("stop_loss_pct") or 0),
             "take_profit_pct": float(args.get("take_profit_pct") or 0),
             "watch_id": str(args.get("watch_id") or "").strip() or None,
@@ -824,7 +849,7 @@ def _execute_signal_tool(
             agent_id=agent_id,
             watch_id=proposed["watch_id"],
             symbol=proposed["symbol"],
-            amount_sol=proposed["amount_sol"],
+            amount_usdc=proposed["amount_usdc"],
             stop_loss_pct=proposed["stop_loss_pct"],
             take_profit_pct=proposed["take_profit_pct"],
         )
@@ -851,7 +876,7 @@ def _execute_pending_bounce_action(pending: dict[str, Any], *, agent_id: str, us
     args = pending.get("args") or {}
 
     if tool_name == "withdraw_bounce_balance":
-        return tool_name, bl.withdraw_bounce_tokens(user_wallet, "SOL", float(args.get("amount_sol") or 0))
+        return tool_name, bl.withdraw_bounce_tokens(user_wallet, "USDC", float(args.get("amount_usdc") or 0))
     if tool_name == "open_bounce_position":
         bt.start_position_monitor()
         return tool_name, bt.open_position(
@@ -859,7 +884,7 @@ def _execute_pending_bounce_action(pending: dict[str, Any], *, agent_id: str, us
             agent_id=agent_id,
             watch_id=args.get("watch_id"),
             symbol=args["symbol"],
-            amount_sol=args["amount_sol"],
+            amount_usdc=args["amount_usdc"],
             stop_loss_pct=args["stop_loss_pct"],
             take_profit_pct=args["take_profit_pct"],
         )
@@ -909,20 +934,22 @@ def chat_with_launched_agent(
         system += (
             "\n\nIf the user wants to deposit, call get_bounce_balance to give them the wallet "
             "address, then once they say they've sent SOL, call verify_bounce_deposit with the "
-            "transaction signature they give you.\n"
+            "transaction signature they give you. The deposit is automatically converted to USDC "
+            "the moment it's verified - that's the agent's resting capital, not SOL.\n"
             "You can watch a token's price for the drop-then-bounce pattern using "
             "create_price_signal_watch, then check it with check_price_signal. "
             "If a watch fires, tell the user and ask whether they want to open a position. "
-            "The symbol being bought must be a different token than SOL - SOL is the deposited "
-            "capital, not a valid trade target.\n"
+            "The symbol being bought must be a different token than USDC - USDC is the capital, "
+            "not a valid trade target. SOL is the normal, expected target (it's what this agent "
+            "watches).\n"
             "open_bounce_position, close_bounce_position, and withdraw_bounce_balance all spend "
             "or move real money. If the user asks to open or close a position or withdraw WITHOUT "
-            "giving you the specific numbers it needs (amount_sol, and for opening also "
+            "giving you the specific numbers it needs (amount_usdc, and for opening also "
             "stop_loss_pct and take_profit_pct), do NOT call the tool and do NOT guess - just ask "
             "them for the missing numbers in plain text. Only call the tool once you actually have "
             "them. Calling any of these tools only PROPOSES the action - it comes back as "
             "confirmation_required and nothing executes yet. Clearly state the exact numbers "
-            "(symbol/amount_sol/stop_loss_pct/take_profit_pct for a trade, or amount_sol for a "
+            "(symbol/amount_usdc/stop_loss_pct/take_profit_pct for a trade, or amount_usdc for a "
             "withdrawal) and ask the user to confirm. Do NOT call the tool again yourself after "
             "they say yes - the system executes the exact proposed action automatically the moment "
             "they confirm, before you are even called again. If the user instead wants to change "
