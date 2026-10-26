@@ -612,6 +612,35 @@ def peek_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, A
         return _bounce_pending.get(key)
 
 
+# Separate store for the fast_test diagnostic profile, which skips the
+# approval gate above entirely (see _maybe_auto_stage_trade in
+# signal_watcher.py) -- there's nothing to approve, but the frontend still
+# needs to know a trade just happened on its own, so it can show the result
+# instead of implying something is awaiting a click.
+_BOUNCE_AUTO_TRADE_LOCK = threading.Lock()
+_bounce_last_auto_trade: dict[str, dict[str, Any]] = {}
+
+
+def _record_bounce_auto_trade(user_wallet: str, agent_id: str, *, args: dict[str, Any], result: dict[str, Any]) -> None:
+    key = _bounce_confirmation_key(user_wallet, agent_id)
+    with _BOUNCE_AUTO_TRADE_LOCK:
+        _bounce_last_auto_trade[key] = {
+            "tool": "open_bounce_position",
+            "args": args,
+            "result": result,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+
+
+def peek_bounce_last_auto_trade(user_wallet: str, agent_id: str) -> Optional[dict[str, Any]]:
+    """Read (without consuming) the most recent fast_test auto-trade, for the
+    frontend to poll. Unlike pending confirmations this isn't awaiting a
+    decision, so nothing pops it -- it just gets overwritten by the next one."""
+    key = _bounce_confirmation_key(user_wallet, agent_id)
+    with _BOUNCE_AUTO_TRADE_LOCK:
+        return _bounce_last_auto_trade.get(key)
+
+
 def respond_to_bounce_pending(user_wallet: str, agent_id: str, *, approve: bool) -> dict[str, Any]:
     """Approve or reject the pending action directly -- bypasses chat and the
     LLM entirely, same deterministic execution the chat 'yes' path uses."""

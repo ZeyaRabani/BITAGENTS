@@ -316,12 +316,46 @@ def _evaluate_watch_inner(watch_id: str) -> dict[str, Any]:
             }
 
 
+def _volatility_adjusted_sl_tp(strategy: dict[str, Any], fired_result: dict[str, Any]) -> tuple[float, float]:
+    """Size the stop/target off the volatility actually observed in this
+    watch's lookback window, instead of applying the configured % blindly --
+    a fixed 5% stop is too tight in a genuinely choppy window (stops out on
+    noise that isn't a real reversal) and needlessly wide in a calm one.
+    Uses the watch's own rolling high/low range (already sampled for the
+    signal itself, no extra data needed) as the basis, scaled to preserve
+    the stop:target ratio the strategy was configured with, and bounded to
+    0.5x-3x the configured stop so a dead-flat or freak-spike window can't
+    produce a degenerate size in either direction."""
+    base_stop = float(strategy.get("stop_loss_pct") or 0) or 1.0
+    base_target = float(strategy.get("take_profit_pct") or 0) or (base_stop * 3)
+    reward_ratio = base_target / base_stop if base_stop else 3.0
+
+    price = fired_result.get("price_usd")
+    high = fired_result.get("rolling_high")
+    low = fired_result.get("rolling_low")
+    if not price or not high or not low or high <= low:
+        return round(base_stop, 4), round(base_target, 4)
+
+    range_pct = (high - low) / price * 100
+    stop_pct = max(base_stop * 0.5, min(range_pct, base_stop * 3.0))
+    return round(stop_pct, 4), round(stop_pct * reward_ratio, 4)
+
+
 def _maybe_auto_stage_trade(watch_id: str, fired_result: dict[str, Any]) -> None:
-    """On a watch firing, auto-propose opening a position using the agent's
+    """On a watch firing, propose -- or for the `fast_test` diagnostic
+    profile, directly execute -- opening a position using the agent's
     preset strategy and its current withdrawable USDC (capped by its
-    allocation cap, if any) -- so the user only has to approve, not compose
-    a trade from scratch. Never raises; a failure here just means no
-    proposal gets staged, the user can still ask in chat."""
+    allocation cap, if any).
+
+    fast_test is documented above (see SIGNAL_PROFILES) as pipeline-test
+    only, never offered to a real launched agent a user depends on -- that's
+    what makes it safe to skip the human approval step specifically for it:
+    it's the one profile where "the agent trades on its own" can't put
+    meaningful capital at risk. The `test` and `real` profiles still stage a
+    confirmation card for the user to approve or reject, same as before.
+
+    Never raises; a failure here just means no trade happens, the user can
+    still ask in chat."""
     try:
         watch = get_watch(watch_id)
         if not watch or not watch.get("agent_id"):
@@ -355,18 +389,25 @@ def _maybe_auto_stage_trade(watch_id: str, fired_result: dict[str, Any]) -> None
         if amount_usdc < bt.MIN_POSITION_USDC:
             return  # not enough funded (or already at its cap) to propose anything
 
+        stop_loss_pct, take_profit_pct = _volatility_adjusted_sl_tp(strategy, fired_result)
+        args = {
+            "symbol": strategy["symbol"],
+            "amount_usdc": amount_usdc,
+            "stop_loss_pct": stop_loss_pct,
+            "take_profit_pct": take_profit_pct,
+            "watch_id": watch_id,
+        }
+
         import launch_agent as la
 
-        la._stage_bounce_confirmation(
-            user_wallet, agent_id, "open_bounce_position",
-            {
-                "symbol": strategy["symbol"],
-                "amount_usdc": amount_usdc,
-                "stop_loss_pct": strategy["stop_loss_pct"],
-                "take_profit_pct": strategy["take_profit_pct"],
-                "watch_id": watch_id,
-            },
-        )
+        if watch["profile"] == "fast_test":
+            bt.start_position_monitor()
+            result = bt.open_position(user_wallet=user_wallet, agent_id=agent_id, **args)
+            reset_watch(watch_id)
+            la._record_bounce_auto_trade(user_wallet, agent_id, args=args, result=result)
+            return
+
+        la._stage_bounce_confirmation(user_wallet, agent_id, "open_bounce_position", args)
     except Exception as exc:
         print(f"  warning: auto-stage-on-fire failed for watch {watch_id}: {exc}")
 

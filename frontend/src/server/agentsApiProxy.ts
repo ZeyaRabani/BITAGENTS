@@ -1070,6 +1070,20 @@ export async function proxyRespondBouncePending(
   });
 }
 
+export async function proxyGetBounceLastAutoTrade(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/last-auto-trade`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyGetBouncePositions(agentId: string, authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/launch/${encodeURIComponent(agentId)}/bounce/positions`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
 // ─── Agent launchpad (custom agents) ──────────────────────────────────────
 
 export async function proxyAgentBuilderChat(

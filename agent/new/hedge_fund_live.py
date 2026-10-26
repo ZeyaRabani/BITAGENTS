@@ -280,6 +280,12 @@ def _humanize_hf_swap_error(err: Any) -> str:
             f"Keep at least ~{_sol_operating_reserve(1):.4f} SOL in the Hedge Fund wallet "
             "beyond the strategy size, then retry."
         )
+    if "6024" in raw:
+        return (
+            "Jupiter's route went stale between quote and confirmation (Custom:6024, "
+            "InsufficientFunds inside the swap program itself -- not your wallet balance). "
+            "Already retried with fresh quotes and still failed; wait a few seconds and try again."
+        )
     if "no routes found" in lower:
         return (
             "Jupiter has no swap route for this mint (often an illiquid Ondo *on token). "
@@ -339,12 +345,20 @@ def execute_agent_jupiter_swap(
                 ),
                 "sol_balance": sol_balance,
             }
-        # SOL to token buys must leave rent/fee headroom or Jupiter creates the ATA and fails Custom:1.
-        if input_mint == SOL_MINT and sol_balance - amount < reserve - 1e-12:
+        # Rent/fee headroom must survive this swap regardless of which side is
+        # SOL: a SOL->token buy spends SOL directly as `amount`, but a
+        # token->SOL (or token->token) swap still needs the wallet's SOL to
+        # cover a newly-created destination ATA's rent plus the tx/priority
+        # fee -- skipping this check for non-SOL-input swaps previously let
+        # trades through that Jupiter's own program then rejected on-chain
+        # with Custom:6024 (InsufficientFunds) once priority fees ate into a
+        # thin balance.
+        spend_from_sol = amount if input_mint == SOL_MINT else 0.0
+        if sol_balance - spend_from_sol < reserve - 1e-12:
             return {
                 "error": (
-                    f"Swap of {amount:.6f} SOL would leave only "
-                    f"{max(0.0, sol_balance - amount):.6f} SOL in the {agent_type} wallet; "
+                    f"This swap would leave only "
+                    f"{max(0.0, sol_balance - spend_from_sol):.6f} SOL in the {agent_type} wallet; "
                     f"need >={reserve:.4f} SOL for token-account rent and fees. "
                     f"Deposit more SOL (wallet has {sol_balance:.6f}) or use a smaller size."
                 ),

@@ -16,13 +16,15 @@ Direction semantics for the underlying user_ledger rows:
               USDC side of a deposit auto-conversion, crediting proceeds
   withdraw -- user pulls BASE_TOKEN back out
 
-Resting capital is USDC, not SOL. The user only ever deposits native SOL
-(zero extra setup -- same as every other agent), but the instant a deposit
-is verified, it's auto-converted to USDC (see verify_and_record_bounce_deposit).
+Resting capital is USDC. The normal path is depositing native SOL (zero
+extra setup -- same as every other agent); the instant that deposit is
+verified, it's auto-converted to USDC (see verify_and_record_bounce_deposit).
 This is also what makes SOL a valid trade target again: capital and the
 thing being traded can't be the same asset (see open_position's SOL
 self-swap guard in bounce_trading.py), and with USDC as the resting
 currency, watching and trading SOL itself -- the original ask -- works.
+A direct USDC deposit is also accepted and skips the conversion step
+entirely, since it's already in the resting currency.
 """
 
 from __future__ import annotations
@@ -36,7 +38,7 @@ from typing import Any, Optional
 from db import insert_ledger_entry, load_ledger_for_user
 from dca_agent import SOL_ADDRESS_FULL, resolve_token, sol_rpc
 
-ALLOWED_DEPOSIT_TOKENS = {"SOL"}  # what the user sends in, on-chain
+ALLOWED_DEPOSIT_TOKENS = {"SOL", "USDC"}  # what the user sends in, on-chain
 # USDC is the normal resting currency; SOL stays withdrawable too so a failed
 # or partial auto-conversion (see verify_and_record_bounce_deposit) never
 # strands funds with no way to get them back out.
@@ -364,7 +366,7 @@ def verify_and_record_bounce_deposit(signature: str, user_wallet: str) -> dict[s
                 continue
             token = str(tok.get("symbol") or "").upper()
             if token not in ALLOWED_DEPOSIT_TOKENS:
-                return {"error": f"Deposits must be SOL (got {token}).", "status": "rejected"}
+                return {"error": f"Deposits must be SOL or USDC (got {token}).", "status": "rejected"}
             record = {
                 "id": uuid.uuid4().hex[:16],
                 "user_wallet": user_wallet,
@@ -383,25 +385,33 @@ def verify_and_record_bounce_deposit(signature: str, user_wallet: str) -> dict[s
             insert_ledger_entry(record)
             records.append(record)
         if not records:
-            return {"error": "No SOL transfer to the Bounce Agent wallet found.", "status": "rejected"}
+            return {"error": "No SOL or USDC transfer to the Bounce Agent wallet found.", "status": "rejected"}
 
-        conversion = _auto_convert_deposit_to_usdc(
-            user_wallet, sum(float(r["amount"]) for r in records)
-        )
+        sol_amount = sum(float(r["amount"]) for r in records if r["token"] == "SOL")
+        usdc_amount = sum(float(r["amount"]) for r in records if r["token"] == "USDC")
+        # Only SOL needs converting -- a direct USDC deposit is already in
+        # the resting currency and shows up as withdrawable immediately via
+        # its own ledger row, no swap required.
+        conversion = _auto_convert_deposit_to_usdc(user_wallet, sol_amount) if sol_amount > 0 else None
+
+        if usdc_amount > 0 and sol_amount == 0:
+            message = f"Deposit of {usdc_amount:.6f} USDC verified and credited -- ready to trade."
+        elif conversion and conversion.get("status") == "success":
+            message = "Deposit verified and converted to USDC. The agent can now trade with this capital once you confirm a signal."
+        elif conversion:
+            message = (
+                "Deposit verified, but auto-conversion to USDC failed -- your SOL is safe "
+                "and withdrawable as SOL. " + str(conversion.get("error") or "")
+            )
+        else:
+            message = "Deposit verified."
 
         return {
             "status": "confirmed",
             "deposits": records,
             "conversion": conversion,
             "balances": get_bounce_user_balances(user_wallet),
-            "message": (
-                "Deposit verified and converted to USDC. The agent can now trade with this "
-                "capital once you confirm a signal."
-                if conversion.get("status") == "success"
-                else "Deposit verified, but auto-conversion to USDC failed -- your SOL is safe "
-                "and withdrawable as SOL. "
-                + str(conversion.get("error") or "")
-            ),
+            "message": message,
         }
 
 
@@ -415,8 +425,13 @@ def _auto_convert_deposit_to_usdc(user_wallet: str, sol_amount: float) -> dict[s
     # execute_agent_jupiter_swap separately enforces MIN_SOL_FOR_FEES against
     # the wallet's total balance (every swap needs SOL for gas, regardless of
     # what's being swapped) -- make sure what we leave behind clears both
-    # that absolute floor and the ATA-rent/fee headroom, with a little margin.
-    reserve = max(_sol_operating_reserve(1), MIN_SOL_FOR_FEES) + 0.002
+    # that absolute floor and the ATA-rent/fee headroom, with margin.
+    # A 0.002 margin proved too tight in practice: real priority fees on the
+    # conversion swap itself ate into it, leaving a wallet with ~0.009 SOL --
+    # just under MIN_SOL_FOR_FEES -- so the very next swap (e.g. opening a
+    # position right after an auto-fired signal) failed outright. 0.008
+    # leaves enough room for that follow-on swap's own fee variance too.
+    reserve = max(_sol_operating_reserve(1), MIN_SOL_FOR_FEES) + 0.008
     convert_amount = round(sol_amount - reserve, 9)
     if convert_amount <= 0:
         return {"status": "skipped", "reason": "Deposit too small to leave fee/rent headroom after converting."}

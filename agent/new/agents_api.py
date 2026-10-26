@@ -60,6 +60,7 @@ from launch_agent import (
     launch_agent,
     list_marketplace_launched_agents,
     list_user_launched_agents,
+    peek_bounce_last_auto_trade,
     peek_bounce_pending,
     respond_to_bounce_pending,
     subscribe_to_agent,
@@ -2196,6 +2197,22 @@ def launch_get_bounce_strategy(
     return bt.get_agent_strategy(agent_id) or {}
 
 
+@app.get("/launch/{agent_id}/bounce/positions")
+def launch_get_bounce_positions(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """Full position history (open + closed) for this agent, newest first --
+    for a transaction-history list with Solscan links on the frontend."""
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's positions.")
+    import bounce_trading as bt
+
+    positions = [p for p in bt.list_positions_for_user(auth_wallet) if p.get("agent_id") == agent_id]
+    return {"positions": positions}
+
+
 @app.get("/launch/{agent_id}/bounce/pending")
 def launch_get_bounce_pending(
     agent_id: str,
@@ -2224,6 +2241,20 @@ def launch_respond_bounce_pending(
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
+
+@app.get("/launch/{agent_id}/bounce/last-auto-trade")
+def launch_get_bounce_last_auto_trade(
+    agent_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    """The most recent fast_test auto-executed trade, if any -- see
+    peek_bounce_last_auto_trade. Unlike /bounce/pending this never needs a
+    response; it's just the latest result for the frontend to display."""
+    access = check_agent_access(agent_id, auth_wallet)
+    if not access.get("allowed"):
+        raise HTTPException(status_code=403, detail="Not allowed to view this agent's trades.")
+    return peek_bounce_last_auto_trade(auth_wallet, agent_id) or {}
 
 
 @app.post("/launch/{agent_id}/subscribe")

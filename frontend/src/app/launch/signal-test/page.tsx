@@ -20,6 +20,8 @@ type Watch = {
   rolling_low?: number;
 };
 
+const MIN_POSITION_USDC = 1.0; // keep in sync with agent/new/bounce_trading.py MIN_POSITION_USDC
+
 const PROFILES = [
   { key: "fast_test", label: "Fast test (fires in minutes)", hint: "0.05% drop / 0.03% bounce, 2 min lookback -- pipeline test only" },
   { key: "test", label: "Test", hint: "0.3% drop / 0.2% bounce, 15 min lookback" },
@@ -80,6 +82,33 @@ type PendingAction = {
   args: Record<string, unknown>;
 };
 
+type LastAutoTrade = {
+  tool: string;
+  args: Record<string, unknown>;
+  result: Record<string, unknown>;
+  at: string;
+};
+
+type Position = {
+  position_id: string;
+  symbol: string;
+  status: "open" | "closed";
+  entry_usdc_amount: number;
+  entry_token_amount: number;
+  entry_price_usd: number;
+  entry_signature: string | null;
+  stop_price_usd: number;
+  target_price_usd: number;
+  close_reason: string | null;
+  close_usdc_amount: number | null;
+  close_price_usd: number | null;
+  close_signature: string | null;
+  created_at: string;
+  closed_at: string | null;
+};
+
+const SOLSCAN_TX = (sig: string) => `https://solscan.io/tx/${sig}`;
+
 export default function SignalTestPage() {
   const { token, busy: authBusy, error: authError, signIn } = useDcaWalletAuth();
   // Local test only -- hardcoded so there's nothing to paste. Change this if
@@ -113,10 +142,16 @@ export default function SignalTestPage() {
   const [strategy, setStrategy] = useState<Strategy | null>(null);
   const [strategyForm, setStrategyForm] = useState({ symbol: "SOL", profile: "fast_test", stop_loss_pct: "5", take_profit_pct: "15" });
   const [strategyBusy, setStrategyBusy] = useState(false);
+  const [strategyMsg, setStrategyMsg] = useState<string | null>(null);
 
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [pendingBusy, setPendingBusy] = useState(false);
+  const [pendingMsg, setPendingMsg] = useState<string | null>(null);
   const pendingPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const [lastAutoTrade, setLastAutoTrade] = useState<LastAutoTrade | null>(null);
+
+  const [positions, setPositions] = useState<Position[]>([]);
 
   useEffect(() => {
     if (token) void signIn();
@@ -142,6 +177,7 @@ export default function SignalTestPage() {
   const saveStrategy = useCallback(async () => {
     if (!token || !agentId.trim()) return;
     setStrategyBusy(true);
+    setStrategyMsg(null);
     try {
       const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/strategy`, token, {
         method: "POST",
@@ -152,8 +188,9 @@ export default function SignalTestPage() {
         }),
       });
       setStrategy(data);
+      setStrategyMsg("Default strategy saved.");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not save strategy");
+      setStrategyMsg(err instanceof Error ? err.message : "Could not save strategy");
     } finally {
       setStrategyBusy(false);
     }
@@ -164,6 +201,24 @@ export default function SignalTestPage() {
     try {
       const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/pending`, token);
       setPending(data?.tool ? data : null);
+    } catch {
+      // ignore transient poll failures
+    }
+    try {
+      const auto = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/last-auto-trade`, token);
+      if (auto?.tool) {
+        setLastAutoTrade((prev) => {
+          if (prev && prev.at === auto.at) return prev;
+          void refreshBalance();
+          return auto;
+        });
+      }
+    } catch {
+      // ignore transient poll failures
+    }
+    try {
+      const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/positions`, token);
+      if (Array.isArray(data?.positions)) setPositions(data.positions);
     } catch {
       // ignore transient poll failures
     }
@@ -183,6 +238,7 @@ export default function SignalTestPage() {
   async function respondPending(approve: boolean) {
     if (!token || !agentId.trim()) return;
     setPendingBusy(true);
+    setPendingMsg(null);
     try {
       const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/pending/respond`, token, {
         method: "POST",
@@ -190,29 +246,31 @@ export default function SignalTestPage() {
       });
       setPending(null);
       void refreshBalance();
-      alert(approve ? `Executed: ${JSON.stringify(data.result)}` : "Rejected -- nothing executed.");
+      setPendingMsg(approve ? `Executed: ${JSON.stringify(data.result)}` : "Rejected -- nothing executed.");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Could not respond");
+      setPendingMsg(err instanceof Error ? err.message : "Could not respond");
     } finally {
       setPendingBusy(false);
     }
   }
 
   const [convertBusy, setConvertBusy] = useState(false);
+  const [convertMsg, setConvertMsg] = useState<string | null>(null);
 
   async function convertSolToUsdc() {
     if (!token || !agentId.trim()) return;
     if (!window.confirm("Convert your idle SOL to USDC now? This is a real on-chain swap.")) return;
     setConvertBusy(true);
+    setConvertMsg(null);
     try {
       const data = await apiCall(`/api/agents/launch/${agentId.trim()}/bounce/convert-sol`, token, {
         method: "POST",
         body: JSON.stringify({ confirm: true }),
       });
       void refreshBalance();
-      alert(`Converted: ${JSON.stringify(data)}`);
+      setConvertMsg(`Converted: ${JSON.stringify(data)}`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Conversion failed");
+      setConvertMsg(err instanceof Error ? err.message : "Conversion failed");
     } finally {
       setConvertBusy(false);
     }
@@ -412,8 +470,18 @@ export default function SignalTestPage() {
                   Reject
                 </button>
               </div>
+              {pendingMsg && (
+                <p className="mt-3 whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+                  {pendingMsg}
+                </p>
+              )}
             </div>
           </Panel>
+        </div>
+      )}
+      {!pending && pendingMsg && (
+        <div className="mb-6">
+          <p className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{pendingMsg}</p>
         </div>
       )}
 
@@ -466,10 +534,15 @@ export default function SignalTestPage() {
           >
             {strategyBusy ? "Saving..." : "Save default strategy"}
           </button>
+          {strategyMsg && <p className="mt-2 font-mono text-[10px] text-signal">{strategyMsg}</p>}
           {strategy && (
             <p className="mt-2 font-mono text-[10px] text-muted-foreground">
               Currently: watching {strategy.symbol} ({strategy.profile}), {strategy.stop_loss_pct}% stop / {strategy.take_profit_pct}% target.
-              {strategy.auto_trade ? " A matching watch firing will auto-propose a trade above -- just approve or reject." : ""}
+              {strategy.auto_trade
+                ? strategy.profile === "fast_test"
+                  ? " fast_test auto-EXECUTES with no approval step when it fires -- SL/TP are volatility-sized, not fixed at the % above."
+                  : " A matching watch firing will auto-propose a trade above -- just approve or reject. SL/TP are volatility-sized, not fixed at the % above."
+                : ""}
             </p>
           )}
         </Panel>
@@ -521,6 +594,11 @@ export default function SignalTestPage() {
                         {convertBusy ? "Converting..." : "Convert to USDC"}
                       </button>
                     </div>
+                  )}
+                  {convertMsg && (
+                    <p className="w-full whitespace-pre-wrap break-all text-[10px] text-muted-foreground">
+                      {convertMsg}
+                    </p>
                   )}
                   <button
                     onClick={refreshBalance}
@@ -704,12 +782,68 @@ export default function SignalTestPage() {
                 </div>
               </div>
 
-              {watch.state === "fired" && (
-                <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
-                  Signal fired. This is where execution would happen -- not wired yet, so nothing was
-                  bought or sold. A human still needs to place the trade.
+              {lastAutoTrade && (
+                <div className="rounded-xl border-2 border-signal bg-signal/10 p-4">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-signal">
+                    Auto-executed (fast_test -- no approval needed for this profile)
+                  </div>
+                  <p className="mt-1 font-mono text-[10px] text-muted-foreground">
+                    {new Date(lastAutoTrade.at).toLocaleTimeString()} -- {String(lastAutoTrade.args.symbol)},{" "}
+                    {String(lastAutoTrade.args.amount_usdc)} USDC, {String(lastAutoTrade.args.stop_loss_pct)}%
+                    stop / {String(lastAutoTrade.args.take_profit_pct)}% target (volatility-sized)
+                  </p>
+                  <pre className="mt-2 whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">
+                    {JSON.stringify(lastAutoTrade.result, null, 2)}
+                  </pre>
                 </div>
               )}
+
+              {watch.state === "fired" && (() => {
+                const usdcAvailable = balance?.balances.find((b) => b.token === "USDC")?.withdrawable ?? 0;
+                const strategyMatches = !!strategy && strategy.auto_trade
+                  && strategy.symbol === watch.symbol && strategy.profile === watch.profile;
+
+                if (pending) {
+                  return (
+                    <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
+                      Signal fired, and a trade has been proposed -- see the Pending Action card above to
+                      approve or reject it.
+                    </div>
+                  );
+                }
+                if (!strategyMatches) {
+                  return (
+                    <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
+                      Signal fired, but no Default Strategy with auto-trade is set for {watch.symbol} /{" "}
+                      {watch.profile}, so nothing was proposed automatically. Set one above, or ask the
+                      agent in chat to open a position.
+                    </div>
+                  );
+                }
+                if (usdcAvailable < MIN_POSITION_USDC) {
+                  return (
+                    <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
+                      Signal fired, but your available balance ({usdcAvailable.toFixed(4)} USDC) is below the{" "}
+                      {MIN_POSITION_USDC} USDC minimum trade size, so nothing was proposed. Deposit more or
+                      convert idle SOL to USDC above.
+                    </div>
+                  );
+                }
+                if (watch.profile === "fast_test") {
+                  return (
+                    <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
+                      Signal fired. fast_test auto-executes with no approval step -- the trade should
+                      already be done, see the result above (or wait a moment for it to appear).
+                    </div>
+                  );
+                }
+                return (
+                  <div className="rounded-xl bg-signal/10 p-4 text-sm text-signal">
+                    Signal fired. A trade should be proposed shortly -- if nothing appears above within a
+                    few seconds, ask the agent in chat to open a position directly.
+                  </div>
+                );
+              })()}
 
               <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-muted-foreground">
                 Watch ID: {watch.watch_id}
@@ -771,6 +905,70 @@ export default function SignalTestPage() {
               Send
             </button>
           </form>
+        </Panel>
+      </div>
+
+      <div className="mt-6">
+        <Panel title="Position history (open + closed)">
+          {positions.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No positions yet -- they&apos;ll show up here once a trade executes.</p>
+          ) : (
+            <div className="space-y-2">
+              {positions.map((p) => (
+                <div
+                  key={p.position_id}
+                  className="grid grid-cols-2 gap-x-4 gap-y-1 rounded-xl border border-grid bg-surface/30 p-3 text-xs md:grid-cols-5"
+                >
+                  <div>
+                    <div className="font-mono text-[9px] uppercase text-muted-foreground">Status</div>
+                    <div className={`mt-0.5 font-mono font-bold uppercase ${p.status === "open" ? "text-signal" : "text-muted-foreground"}`}>
+                      {p.status}{p.status === "closed" && p.close_reason ? ` (${p.close_reason})` : ""}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase text-muted-foreground">Symbol / size</div>
+                    <div className="mt-0.5">{p.symbol} -- {p.entry_usdc_amount} USDC</div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase text-muted-foreground">Entry / close price</div>
+                    <div className="mt-0.5">
+                      ${p.entry_price_usd?.toFixed(4)}
+                      {p.close_price_usd != null ? ` -> $${p.close_price_usd.toFixed(4)}` : ""}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase text-muted-foreground">Stop / target</div>
+                    <div className="mt-0.5">${p.stop_price_usd?.toFixed(4)} / ${p.target_price_usd?.toFixed(4)}</div>
+                  </div>
+                  <div>
+                    <div className="font-mono text-[9px] uppercase text-muted-foreground">Transactions</div>
+                    <div className="mt-0.5 flex flex-wrap gap-2">
+                      {p.entry_signature && (
+                        <a
+                          href={SOLSCAN_TX(p.entry_signature)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-grid px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-signal hover:border-signal"
+                        >
+                          Entry tx
+                        </a>
+                      )}
+                      {p.close_signature && (
+                        <a
+                          href={SOLSCAN_TX(p.close_signature)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-grid px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-signal hover:border-signal"
+                        >
+                          Close tx
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
     </AppShell>

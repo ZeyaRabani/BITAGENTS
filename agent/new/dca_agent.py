@@ -99,6 +99,19 @@ JUPITER_BUILD_API  = os.environ.get("JUPITER_BUILD_API", "https://api.jup.ag/swa
 JUPITER_TOKENS_API = os.environ.get("JUPITER_TOKENS_API", "https://api.jup.ag/tokens/v2")
 JUPITER_PRICE_API  = os.environ.get("JUPITER_PRICE_API", "https://api.jup.ag/price/v3")
 
+# Allowlist passed as /build's `dexes` param -- restricts routing to
+# established, deep-liquidity venues only. See the comment in
+# _build_and_execute_swap for why: smaller/newer AMMs in Jupiter's full
+# routing universe were observed live failing on-chain with Custom:6024
+# (InsufficientFunds) even though the wallet/pools looked healthy, because
+# their state apparently drifts from the quote by execution time more often
+# than it should. Labels must match /program-id-to-label exactly (case
+# sensitive).
+JUPITER_TRUSTED_DEXES = os.environ.get(
+    "JUPITER_TRUSTED_DEXES",
+    "Raydium,Raydium CLMM,Raydium CP,Whirlpool,Phoenix,Meteora DLMM,Meteora DAMM v2",
+)
+
 COINGECKO_API = "https://api.coingecko.com/api/v3"
 
 _plans_path = os.environ.get("DCA_PLANS_FILE", "").strip()
@@ -1057,6 +1070,67 @@ def _execute_jupiter_swap_v2(
     return {"error": f"Swap failed after blockhash retries: {last_error}"}
 
 
+def _settled_output_amount(signature: str, wallet_pubkey: str, output_mint: str) -> Optional[int]:
+    """The amount of output_mint actually received in a confirmed swap, read
+    from the transaction's own pre/post balances -- not the pre-execution
+    quote's `outAmount`. Found necessary live: the quote is only an
+    estimate, the real settled amount can differ by up to the slippage
+    tolerance, and crediting the quoted figure instead of what actually
+    landed lets a ledger drift away from the real on-chain balance over
+    repeated trades. A real, confirmed trade against the live system
+    produced exactly this: ledger showed 1.011897 USDC withdrawable while
+    the wallet's real token account held 1.011401 -- a ~0.0005 USDC drift
+    that was enough to make the next trade's "insufficient funds" rejection
+    genuinely correct, not a bug in Jupiter's routing (which is what it
+    looked like at first).
+
+    Returns None if the lookup fails for any reason -- callers fall back to
+    the quote. This is a correctness improvement on top of a swap that
+    already succeeded, never something that should block or fail it."""
+    try:
+        tx = sol_rpc(
+            "getTransaction",
+            [signature, {"encoding": "jsonParsed", "commitment": "confirmed", "maxSupportedTransactionVersion": 0}],
+        )
+        if not tx:
+            return None
+        meta = tx.get("meta") or {}
+        if meta.get("err"):
+            return None
+
+        if output_mint == SOL_ADDRESS_FULL:
+            keys = [
+                (k.get("pubkey") if isinstance(k, dict) else k)
+                for k in (tx.get("transaction", {}).get("message", {}).get("accountKeys") or [])
+            ]
+            if wallet_pubkey not in keys:
+                return None
+            idx = keys.index(wallet_pubkey)
+            pre = meta.get("preBalances") or []
+            post = meta.get("postBalances") or []
+            if idx >= len(pre) or idx >= len(post):
+                return None
+            # The wallet is also the fee payer, so its own lamport delta has
+            # the tx fee subtracted out of it -- add it back to isolate the
+            # actual swap proceeds (wrapAndUnwrapSol reclaims the temp wSOL
+            # account's rent on close, so that nets out on its own).
+            delta = (post[idx] - pre[idx]) + int(meta.get("fee") or 0)
+            return delta if delta > 0 else None
+
+        pre_amt = 0
+        post_amt = 0
+        for b in meta.get("preTokenBalances") or []:
+            if b.get("owner") == wallet_pubkey and b.get("mint") == output_mint:
+                pre_amt = int((b.get("uiTokenAmount") or {}).get("amount") or 0)
+        for b in meta.get("postTokenBalances") or []:
+            if b.get("owner") == wallet_pubkey and b.get("mint") == output_mint:
+                post_amt = int((b.get("uiTokenAmount") or {}).get("amount") or 0)
+        delta = post_amt - pre_amt
+        return delta if delta > 0 else None
+    except Exception:
+        return None
+
+
 def _build_and_execute_swap(
     input_mint: str,
     output_mint: str,
@@ -1092,6 +1166,18 @@ def _build_and_execute_swap(
             "computeUnitPricePercentile": percentile,
             "maxAccounts":                "54",
             "skipUserAccountsRpcCalls":   "true",
+            # /build's real, documented routing restriction is `dexes` (an
+            # allowlist) -- confirmed live multiple failed swaps routed
+            # through smaller/newer AMMs (Kipseli, Byreal, Manifest,
+            # Obsidian, Invariant, 1DEX via /program-id-to-label) whose
+            # on-chain state apparently drifts from the quote often enough
+            # to trip the swap program's own Custom:6024 (InsufficientFunds)
+            # check. `restrictIntermediateTokens` and `onlyDirectRoutes`,
+            # tried first, are NOT real params of this endpoint (not in its
+            # documented schema) and were silently ignored. Repeated direct
+            # /build queries restricted to JUPITER_TRUSTED_DEXES came back
+            # consistently stable and have never shown this failure.
+            "dexes": JUPITER_TRUSTED_DEXES,
         }
 
         try:
@@ -1132,7 +1218,11 @@ def _build_and_execute_swap(
             )
 
             if result.get("status") == "success":
-                out_raw = int(build_data.get("outAmount") or 0)
+                out_raw = _settled_output_amount(result.get("signature"), wallet_pubkey, output_mint)
+                if not out_raw:
+                    # Lookup failed (RPC hiccup, etc) -- fall back to the
+                    # quote's estimate rather than crediting nothing.
+                    out_raw = int(build_data.get("outAmount") or 0)
                 if out_raw > 0:
                     result["output_amount_raw"] = out_raw
 
@@ -1143,6 +1233,14 @@ def _build_and_execute_swap(
                     for k in ("block height exceeded", "expired", "timed out", "confirmation timed out")
                 )
                 is_too_large = "too large" in err_str.lower()
+                # Jupiter Swap program Custom:6024 (InsufficientFunds) can fire
+                # on-chain even with a healthy wallet and healthy pools: it's
+                # the quote going stale by the time the signed tx lands (pool
+                # reserves shifted a hair between /build and confirmation).
+                # The fix the on-chain data itself points to is simply a fresh
+                # quote -- re-looping here calls /build again from scratch,
+                # same as the expiry retry path below.
+                is_stale_route = "6024" in err_str
 
                 if is_too_large:
                     if slippage_bps < 200:
@@ -1156,8 +1254,9 @@ def _build_and_execute_swap(
                     print("    ↳ Transaction too large even with higher slippage, skipping")
                     return result
 
-                if is_expiry and attempt < retries:
-                    print(f"    ↳ Transaction expired, retrying (attempt {attempt}/{retries})...")
+                if (is_expiry or is_stale_route) and attempt < retries:
+                    reason = "Transaction expired" if is_expiry else "Route went stale on-chain (Custom:6024)"
+                    print(f"    ↳ {reason}, retrying with a fresh quote (attempt {attempt}/{retries})...")
                     time.sleep(1)
                     continue
 

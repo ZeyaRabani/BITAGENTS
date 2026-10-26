@@ -41,7 +41,13 @@ from bounce_ledger import (
 
 USDC_MINT = TOKEN_MINTS["USDC"]["mint"]
 USDC_DECIMALS = TOKEN_MINTS["USDC"]["decimals"]
-MIN_POSITION_USDC = 1.0  # below this, fees/slippage dominate the trade
+MIN_POSITION_USDC = 1.0  # below this, Jupiter's multi-hop routing gets unreliable
+# (confirmed live: a 0.1 USDC trade twice failed on-chain with Jupiter's own
+# Custom:6024 InsufficientFunds -- not a balance problem, a routing one. At
+# that size Jupiter sometimes picks a thin multi-hop path whose on-chain
+# reserves don't match the quote by execution time; a plain quote for the
+# same pair/amount seconds later came back as one direct hop with no issue.
+# 1.0 USDC routes as a single hop far more consistently.
 
 
 def set_agent_allocation_cap(agent_id: str, max_allocation_usdc: Optional[float]) -> dict[str, Any]:
@@ -254,7 +260,9 @@ def open_position(
         amount=amount_usdc,
         input_decimals=USDC_DECIMALS,
         user_wallet=user_wallet,
-        sol_reserve=0.0,  # the swap spends USDC, not SOL -- no SOL headroom needed from this leg
+        # Buying with USDC still needs SOL headroom: a new destination ATA
+        # (e.g. wrapped SOL, if buying SOL) costs real rent, paid in SOL --
+        # let execute_agent_jupiter_swap apply its default reserve.
     )
     if swap.get("error") or swap.get("status") != "success":
         return {"error": swap.get("error") or "Buy swap failed.", "swap": swap}
@@ -316,7 +324,8 @@ def close_position(position_id: str, *, reason: str) -> dict[str, Any]:
         amount=pos["entry_token_amount"],
         input_decimals=pos["token_decimals"],
         user_wallet=pos["user_wallet"],
-        sol_reserve=0.0,
+        # Selling back to USDC still needs SOL headroom for tx/priority fees
+        # (and ATA rent if USDC isn't already held) -- use the default reserve.
     )
     if swap.get("error") or swap.get("status") != "success":
         return {"error": swap.get("error") or "Sell swap failed. Position left open.", "swap": swap}
