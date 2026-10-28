@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthToken, proxyMyLaunchedAgents } from "@/server/agentsApiProxy";
+import { getAuthToken, mapRealAgentToRecord, proxyMyLaunchedAgents } from "@/server/agentsApiProxy";
 
 export async function GET(request: Request) {
   const authToken = getAuthToken(request);
@@ -9,7 +9,8 @@ export async function GET(request: Request) {
   try {
     const res = await proxyMyLaunchedAgents(authToken);
     const data = await res.json().catch(() => ({ agents: [] }));
-    return NextResponse.json(data, { status: res.status });
+    const agents = Array.isArray(data.agents) ? data.agents.map(mapRealAgentToRecord) : [];
+    return NextResponse.json({ agents }, { status: res.status });
   } catch {
     return NextResponse.json({ agents: [] }, { status: 503 });
   }

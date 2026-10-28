@@ -1097,23 +1097,61 @@ export async function proxyAgentBuilderChat(
   });
 }
 
+// NOTE: these used to point at /agents/custom[...] -- a richer AI-builder
+// agent model (handles, categories, revenue share, notify channels) that was
+// scaffolded on the frontend but never got a backend. Every call 404'd, so
+// the public Launchpad (browse/launch/mine) never showed anything. Pointed
+// at the real launched-agent endpoints instead; see mapRealAgentToRecord for
+// how the simpler real shape fills in for the richer one the frontend types
+// still expect.
 export async function proxyListLaunchedAgents(status: "live" | "testing" = "live"): Promise<Response> {
-  return fetch(`${getAgentsBaseUrl()}/agents/custom?status=${status}`, {
+  void status; // the real backend has no draft/testing/live split -- /launch/public is just public+active
+  return fetch(`${getAgentsBaseUrl()}/launch/public`, {
     cache: "no-store",
+    headers: buildHeaders(),
   });
 }
 
 export async function proxyMyLaunchedAgents(authToken: string): Promise<Response> {
-  return fetch(`${getAgentsBaseUrl()}/agents/custom/mine`, {
+  return fetch(`${getAgentsBaseUrl()}/launch`, {
     cache: "no-store",
     headers: buildHeaders(authToken),
   });
 }
 
 export async function proxyGetLaunchedAgent(agentId: string): Promise<Response> {
-  return fetch(`${getAgentsBaseUrl()}/agents/custom/${agentId}`, {
+  return fetch(`${getAgentsBaseUrl()}/launch/public/${agentId}`, {
     cache: "no-store",
+    headers: buildHeaders(),
   });
+}
+
+/** Real launched-agent rows (id, user_wallet, name, description, task,
+ * modules, status: active, created_at, ...) don't have the richer fields
+ * (handle, category, volume_usd, runs, ...) the frontend's LaunchedAgentRecord
+ * type was designed for -- that AI-builder data model never got built. Fill
+ * in sensible defaults rather than leaving the frontend to choke on
+ * `undefined`. */
+export function mapRealAgentToRecord(agent: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: agent.id,
+    creator_wallet: agent.user_wallet,
+    name: agent.name ?? null,
+    handle: null,
+    category: null,
+    description: agent.description ?? null,
+    system_prompt: null,
+    model_tier: "",
+    tool_scope: "",
+    creator_fee_share_pct: 0,
+    status: "live",
+    runs: 0,
+    volume_usd: 0,
+    created_at: agent.created_at,
+    notify_channel: null,
+    notify_destination: null,
+    notify_verified_at: null,
+  };
 }
 
 export async function proxyUpdateLaunchedAgent(
