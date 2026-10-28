@@ -27,23 +27,56 @@ know what to expect.
 
 ## Setup
 
-1. **Postgres.** A local Postgres instance must be running and reachable via
-   `DATABASE_URL` in `agent/new/.env`.
+Every step below runs from a clean checkout. If you already have the repo cloned,
+skip to step 2.
+
+0. **Clone and get the branch**, if you don't already have the repo locally:
+   ```
+   git clone https://github.com/ZeyaRabani/BITAGENTS.git
+   cd BITAGENTS
+   git fetch origin
+   git checkout bounce-agent-signal-engine
+   ```
+   If you already have the repo cloned, just update it instead:
+   ```
+   git fetch origin
+   git checkout bounce-agent-signal-engine
+   git pull origin bounce-agent-signal-engine
+   ```
+1. **Database.** This is a cloud Neon Postgres database, not something you install or
+   run locally -- `agent/new/db.py` connects straight to a Neon connection string via
+   `DATABASE_URL` in `agent/new/.env`. Don't try to stand up your own local Postgres
+   server for this; that's not what the code expects, and it's the most likely reason
+   the backend looked "offline" last time. Two ways to get a connection string:
+   - **Simplest: your own free Neon project.** Sign up at
+     [neon.tech](https://neon.tech) (free tier is plenty for this), create a project,
+     and copy the connection string it gives you (starts `postgresql://...`) into
+     `DATABASE_URL`. Fully isolated from my data -- nothing you do here can affect
+     my test agents or vice versa.
+   - **Or: ask me for the shared dev connection string** over a secure channel (not
+     git, not Slack/Telegram in plaintext) if you'd rather share one with me.
 2. **Solana mainnet config**, in `agent/new/.env`:
    ```
    SOLANA_CLUSTER=mainnet
    SOLANA_RPC_URL=<a real mainnet RPC endpoint>
    ```
-3. **A wallet for the agent to trade from.** For local dev, set
-   `BOUNCE_WALLET_PRIVATE_KEY` directly (a throwaway keypair you hold, with zero
-   connection to BIT10's live Circle account -- same pattern already used for the
-   Hedge Fund and Volume agents). Easiest way to generate one:
-   ```
-   solana-keygen new -o bounce-wallet.json --no-bip39-passphrase
-   ```
-   Paste the full contents of `bounce-wallet.json` (the `[12,34,...]` byte array) as
-   the value of `BOUNCE_WALLET_PRIVATE_KEY`. A base58-encoded private key string also
-   works if you already have one in that format.
+3. **A wallet for the agent to trade from -- and a note on secrets.** `agent/new/.env`
+   is gitignored. It never gets committed, pushed, or pulled -- when I push code and
+   you pull it, you only get code, never my `.env` file or anything in it. That means:
+   - You do **not** need, and should **not** use, my `CIRCLE_API_KEY` or any of BIT10's
+     live Circle credentials for this. Leave `CIRCLE_API_KEY` unset in your `.env`
+     entirely.
+   - Instead, set `BOUNCE_WALLET_PRIVATE_KEY` directly -- a throwaway keypair *you*
+     generate and hold locally, with zero connection to BIT10's live Circle account
+     (same pattern already used for the Hedge Fund and Volume agents). Easiest way to
+     generate one:
+     ```
+     solana-keygen new -o bounce-wallet.json --no-bip39-passphrase
+     ```
+     Paste the full contents of `bounce-wallet.json` (the `[12,34,...]` byte array) as
+     the value of `BOUNCE_WALLET_PRIVATE_KEY`. A base58-encoded private key string also
+     works if you already have one in that format. This key stays on your machine only
+     -- never paste it into a commit, a chat, or anywhere else.
 4. **Fund that wallet** with a small amount of real SOL (0.05 SOL is plenty to start --
    see "Gas" below for why).
 5. Install dependencies and start both halves:
@@ -52,8 +85,10 @@ know what to expect.
    cd agent/new && pip install -r requirements.txt && python agents_api.py
 
    # frontend
-   cd frontend && npm install && npm run dev
+   cd frontend && npm install && npm run dev -- -p 3001
    ```
+   The backend prints `🗄️ Neon database ready` on a clean start -- if you don't see
+   that line, `DATABASE_URL` isn't set correctly and nothing past this point will work.
 6. **Create your own test agent.** The page needs an `agent_id` that has the
    `price_signal_watch` module enabled and is owned by *your* wallet (not mine --
    you can't use `bounce_18cd4731`, that one's owned by a different wallet and you
@@ -160,6 +195,13 @@ bit more SOL to the agent's deposit address shown on the page.
   ledger verified to match the real on-chain balance exactly afterward.
 - The full `fast_test` auto-execute pipeline (watch fires -> trade opens -> position
   monitored -> closes on stop/target) tested live, unattended, end to end.
+- The stop-loss/take-profit monitor now resumes automatically on backend startup
+  (previously it only started the first time a *new* position was opened after a
+  restart, so any already-open position just sat unmonitored until something else
+  happened to start it).
+- Closing a position through chat ("close my open position") now resolves the real
+  position id itself instead of relying on the model to pass it through correctly --
+  it previously could hallucinate a placeholder id and fail with "Position not found."
 
 ## Known gaps / things to be aware of
 
@@ -167,6 +209,3 @@ bit more SOL to the agent's deposit address shown on the page.
 - Once a `fast_test` watch exists with auto-trade on, it keeps re-arming and trading
   indefinitely as long as the backend process is running, since its thresholds are
   noise-level and its cooldown is only 1 minute. It is not a one-shot.
-- If the backend process is stopped while a position is open, that position's
-  stop-loss/take-profit stops being monitored until the backend is restarted (the
-  monitor is an in-process background thread).

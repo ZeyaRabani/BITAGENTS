@@ -603,6 +603,32 @@ def _pop_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, A
         return _bounce_pending.pop(key, None)
 
 
+def _describe_bounce_proposal(result: dict[str, Any]) -> str:
+    """Human-readable confirmation prompt for a staged fund-moving action,
+    built deterministically from the tool result rather than the LLM, so the
+    user always sees the exact numbers that will execute if they confirm."""
+    action = result.get("proposed_action")
+    if action == "open_bounce_position":
+        return (
+            f"Proposed: buy {result.get('symbol')} with {result.get('amount_usdc')} USDC, "
+            f"stop-loss {result.get('stop_loss_pct')}% / take-profit {result.get('take_profit_pct')}%. "
+            "Confirm to execute, or tell me to cancel."
+        )
+    if action == "close_bounce_position":
+        return (
+            f"Proposed: close position {result.get('position_id')} at the current market price. "
+            "Confirm to execute, or tell me to cancel."
+        )
+    if action == "withdraw_bounce_balance":
+        return (
+            f"Proposed: withdraw {result.get('amount_usdc')} USDC. "
+            "Confirm to execute, or tell me to cancel."
+        )
+    if action == "convert_bounce_sol_to_usdc":
+        return "Proposed: convert idle SOL in this wallet to USDC. Confirm to execute, or tell me to cancel."
+    return f"Proposed action: {action}. Confirm to execute, or tell me to cancel."
+
+
 def peek_bounce_pending(user_wallet: str, agent_id: str) -> Optional[dict[str, Any]]:
     """Read the pending action without consuming it -- for a frontend to poll
     and render an Approve/Reject card, same underlying store the chat path
@@ -903,9 +929,33 @@ def _execute_signal_tool(
         )
 
     if name == "close_bounce_position":
-        position_id = str(args.get("position_id") or "").strip()
+        # Never trust the LLM's position_id string at face value -- it has no
+        # real way to know the exact id and, observed in practice, sometimes
+        # fabricates one (e.g. a placeholder-looking "position_id_from_..."
+        # instead of the real value) even when told to copy it from
+        # list_bounce_positions. Resolve the real open position deterministically
+        # instead: if the given id is genuinely one of the user's open
+        # positions use it, otherwise fall back to the only open position (or
+        # the only one matching a symbol hint) so a valid id is never required
+        # from the model for the single-position case, which is the common one.
+        requested_id = str(args.get("position_id") or "").strip()
+        symbol_hint = str(args.get("symbol") or "").strip().upper() or None
+        open_positions = bt.list_positions_for_user(user_wallet, status="open")
+        position_id = requested_id if any(p["position_id"] == requested_id for p in open_positions) else None
         if not position_id:
-            return {"error": "position_id is required"}
+            candidates = (
+                [p for p in open_positions if str(p.get("symbol") or "").upper() == symbol_hint]
+                if symbol_hint else open_positions
+            )
+            if len(candidates) == 1:
+                position_id = candidates[0]["position_id"]
+            elif not candidates:
+                return {"error": "No open position found to close."}
+            else:
+                return {
+                    "error": "Multiple open positions match - say which symbol, or ask me to list them.",
+                    "open_positions": [{"position_id": p["position_id"], "symbol": p.get("symbol")} for p in candidates],
+                }
         if not user_confirmed:
             _stage_bounce_confirmation(user_wallet, agent_id, name, {"position_id": position_id})
             return {"status": "confirmation_required", "proposed_action": "close_bounce_position", "position_id": position_id}
@@ -1004,6 +1054,11 @@ def chat_with_launched_agent(
             "they say yes - the system executes the exact proposed action automatically the moment "
             "they confirm, before you are even called again. If the user instead wants to change "
             "a number, propose a fresh action with the new number; do not try to confirm the old one.\n"
+            "close_bounce_position needs the position's exact position_id, which you do not know "
+            "and must never guess or invent - always call list_bounce_positions first to find the "
+            "real id of the open position the user means (match it by symbol if they named one), "
+            "and use that id. If the user wants to close more than one open position, propose and "
+            "confirm them one at a time rather than trying to close several in a single call.\n"
             "If create_price_signal_watch is called again for the same symbol while a watch is "
             "already running, it returns the existing watch instead of creating a new one - so "
             "always check_price_signal or list_price_signal_watches first rather than creating "
@@ -1110,6 +1165,19 @@ def chat_with_launched_agent(
                 "tool_call_id": tc.get("id") or name,
                 "content": _json.dumps(result, default=str),
             })
+
+            # A fund-moving tool proposing an action is a terminal state for this
+            # turn -- return it directly instead of looping back to the LLM,
+            # which (observed in practice) sometimes re-calls the same tool
+            # instead of stopping to ask for confirmation, burning the step
+            # budget without ever replying to the user.
+            if isinstance(result, dict) and result.get("status") == "confirmation_required":
+                return {
+                    "reply": _describe_bounce_proposal(result),
+                    "session_id": session_id or uuid.uuid4().hex,
+                    "actions": actions,
+                    "agent": _decorate_agent(agent),
+                }
 
     return {
         "reply": "Reached the step limit for this turn - try asking again.",

@@ -441,6 +441,13 @@ def _startup() -> None:
     if start_yield_scheduler():
         print(f"  📈 Yield Agent scheduler started (every {YIELD_SCHEDULER_POLL_SECONDS}s)")
     try:
+        import bounce_trading as _bt
+
+        if _bt.start_position_monitor():
+            print("  🪃 Bounce Agent position monitor resumed (any open positions, every 15s)")
+    except Exception as exc:
+        print(f"  ⚠️  Bounce Agent position monitor not started: {exc}")
+    try:
         from platform_payments import (
             ensure_payments_schema,
             start_platform_payments_scheduler,
