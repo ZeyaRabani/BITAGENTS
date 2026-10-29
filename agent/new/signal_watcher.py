@@ -7,12 +7,9 @@ price-pattern agent (breakout, mean-reversion, etc.) reuses the same sampling
 table and state machine by registering a different rule. The dip-then-bounce
 rule is the first concrete implementation.
 
-Price source: Jupiter's price API (JUPITER_PRICE_API, already used for spot
-lookups in dca_agent.py) sampled on a timer. This is the right tool for
-*live* minute-to-minute watching; Yahoo daily bars (yahoo_market_data.py)
-remain the right tool for the backtest gate, which needs a year of history,
-not real-time resolution. Both are keyless -- no new API key required for
-either piece.
+Price source: Binance spot ticker (keyless public REST), sampled every 1s by
+default. Yahoo daily bars (yahoo_market_data.py) remain the right tool for
+the backtest gate, which needs a year of history, not real-time resolution.
 
 State machine per watched (symbol, rule) pair:
 
@@ -28,12 +25,13 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+import requests
+
 from db import get_conn, init_db
-from dca_agent import JUPITER_PRICE_API, TOKEN_MINTS, _jupiter_get
+from dca_agent import TOKEN_MINTS
 
 # ─── Threshold profiles ────────────────────────────────────────────────────
 # "real" is the actual strategy as described in the Oct 16 handoff meeting.
@@ -41,17 +39,38 @@ from dca_agent import JUPITER_PRICE_API, TOKEN_MINTS, _jupiter_get
 # -> arm -> fire -> execute -> close) can be proven end-to-end within an
 # hour instead of waiting days for a genuine 10% move. Never used for an
 # agent a real user is relying on -- only for our own pipeline testing.
+# All profiles poll Binance every 1 second so bounce detection stays tight.
 SIGNAL_PROFILES: dict[str, dict[str, float]] = {
-    "real": {"drop_pct": 10.0, "bounce_pct": 5.0, "lookback_minutes": 60, "cooldown_minutes": 60, "sample_interval_seconds": 60},
-    "test": {"drop_pct": 0.3, "bounce_pct": 0.2, "lookback_minutes": 15, "cooldown_minutes": 5, "sample_interval_seconds": 60},
+    "real": {"drop_pct": 10.0, "bounce_pct": 5.0, "lookback_minutes": 60, "cooldown_minutes": 60, "sample_interval_seconds": 1},
+    "test": {"drop_pct": 0.3, "bounce_pct": 0.2, "lookback_minutes": 15, "cooldown_minutes": 5, "sample_interval_seconds": 1},
     # "fast_test": for proving the full in-and-out pipeline in a couple of
     # minutes. Thresholds are set at roughly SOL's normal noise level over a
     # 2-minute window -- this is NOT a trading edge, it's a pipeline test.
     # Never offer this profile to a real launched agent a user depends on.
-    "fast_test": {"drop_pct": 0.05, "bounce_pct": 0.03, "lookback_minutes": 2, "cooldown_minutes": 1, "sample_interval_seconds": 10},
+    "fast_test": {"drop_pct": 0.05, "bounce_pct": 0.03, "lookback_minutes": 2, "cooldown_minutes": 1, "sample_interval_seconds": 1},
 }
 
-DEFAULT_SAMPLE_INTERVAL_SECONDS = int(os.environ.get("SIGNAL_SAMPLE_INTERVAL_SECONDS", "60") or "60")
+DEFAULT_SAMPLE_INTERVAL_SECONDS = int(os.environ.get("SIGNAL_SAMPLE_INTERVAL_SECONDS", "1") or "1")
+BINANCE_TICKER_URL = os.environ.get(
+    "BINANCE_TICKER_URL",
+    "https://api.binance.com/api/v3/ticker/price",
+).strip() or "https://api.binance.com/api/v3/ticker/price"
+
+# Map our Solana trade symbols to Binance USDT spot pairs.
+BINANCE_SYMBOL_MAP: dict[str, str] = {
+    "SOL": "SOLUSDT",
+    "WSOL": "SOLUSDT",
+    "BTC": "BTCUSDT",
+    "ETH": "ETHUSDT",
+    "JUP": "JUPUSDT",
+    "BONK": "BONKUSDT",
+    "WIF": "WIFUSDT",
+    "RAY": "RAYUSDT",
+    "ORCA": "ORCAUSDT",
+    "PYTH": "PYTHUSDT",
+    "JTO": "JTOUSDT",
+    "RENDER": "RENDERUSDT",
+}
 
 _scheduler_stop = None  # set lazily to a threading.Event in start_sampler()
 _scheduler_thread = None
@@ -65,7 +84,7 @@ def ensure_signal_schema() -> None:
             id          BIGSERIAL PRIMARY KEY,
             symbol      VARCHAR(16) NOT NULL,
             price_usd   DOUBLE PRECISION NOT NULL,
-            source      VARCHAR(16) NOT NULL DEFAULT 'jupiter',
+            source      VARCHAR(16) NOT NULL DEFAULT 'binance',
             sampled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )
         """,
@@ -80,7 +99,7 @@ def ensure_signal_schema() -> None:
             bounce_pct          DOUBLE PRECISION NOT NULL,
             lookback_minutes    INTEGER NOT NULL,
             cooldown_minutes    INTEGER NOT NULL,
-            sample_interval_seconds INTEGER NOT NULL DEFAULT 60,
+            sample_interval_seconds INTEGER NOT NULL DEFAULT 1,
             state               VARCHAR(16) NOT NULL DEFAULT 'neutral',
             armed_high_usd      DOUBLE PRECISION,
             armed_low_usd       DOUBLE PRECISION,
@@ -91,7 +110,7 @@ def ensure_signal_schema() -> None:
         )
         """,
         "CREATE INDEX IF NOT EXISTS idx_signal_watches_agent ON signal_watches (agent_id)",
-        "ALTER TABLE signal_watches ADD COLUMN IF NOT EXISTS sample_interval_seconds INTEGER NOT NULL DEFAULT 60",
+        "ALTER TABLE signal_watches ADD COLUMN IF NOT EXISTS sample_interval_seconds INTEGER NOT NULL DEFAULT 1",
     ]
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -101,23 +120,32 @@ def ensure_signal_schema() -> None:
 
 # ─── Price sampling ─────────────────────────────────────────────────────────
 
+def _binance_pair_for(symbol: str) -> Optional[str]:
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return None
+    if sym in BINANCE_SYMBOL_MAP:
+        return BINANCE_SYMBOL_MAP[sym]
+    # Allow callers to pass a raw Binance pair (e.g. SOLUSDT).
+    if sym.endswith("USDT") and len(sym) > 4:
+        return sym
+    # Unknown Solana-only tokens (e.g. BITAGENTS) have no Binance spot pair.
+    if sym in TOKEN_MINTS:
+        return None
+    return f"{sym}USDT"
+
+
 def sample_price(symbol: str) -> Optional[float]:
-    """Fetch one spot price from Jupiter's price API and store it. Returns the price or None."""
-    tok = TOKEN_MINTS.get(symbol.upper())
-    if not tok:
+    """Fetch one spot price from Binance and store it. Returns the price or None."""
+    pair = _binance_pair_for(symbol)
+    if not pair:
         return None
     try:
-        resp = _jupiter_get(JUPITER_PRICE_API, {"ids": tok["mint"]})
+        resp = requests.get(BINANCE_TICKER_URL, params={"symbol": pair}, timeout=5)
         if resp.status_code != 200:
             return None
         body = resp.json()
-        # Jupiter price/v3 keys the response directly by mint (no "data" wrapper)
-        # and uses "usdPrice", not "price" -- dca_agent.py's own fallback at
-        # the same endpoint assumes the older shape and is silently dead too.
-        data = body.get(tok["mint"]) or (body.get("data") or {}).get(tok["mint"])
-        price = None
-        if isinstance(data, dict):
-            price = data.get("usdPrice", data.get("price"))
+        price = body.get("price") if isinstance(body, dict) else None
         if price is None:
             return None
         price = float(price)
@@ -127,7 +155,7 @@ def sample_price(symbol: str) -> Optional[float]:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO price_samples (symbol, price_usd, source) VALUES (%s, %s, 'jupiter')",
+                "INSERT INTO price_samples (symbol, price_usd, source) VALUES (%s, %s, 'binance')",
                 (symbol.upper(), price),
             )
     return price
@@ -174,6 +202,22 @@ def create_watch(agent_id: Optional[str], symbol: str, profile: str = "real") ->
                 )
                 existing = cur.fetchone()
         if existing:
+            # Keep sample interval in sync with current profile defaults (1s Binance poll).
+            desired_interval = int(cfg.get("sample_interval_seconds", DEFAULT_SAMPLE_INTERVAL_SECONDS))
+            if int(existing.get("sample_interval_seconds") or 0) != desired_interval:
+                with get_conn() as conn2:
+                    with conn2.cursor() as cur2:
+                        cur2.execute(
+                            """
+                            UPDATE signal_watches
+                            SET sample_interval_seconds = %s, updated_at = NOW()
+                            WHERE watch_id = %s
+                            RETURNING *
+                            """,
+                            (desired_interval, existing["watch_id"]),
+                        )
+                        updated = cur2.fetchone()
+                return dict(updated) if updated else dict(existing)
             return dict(existing)
 
     watch_id = f"sw_{uuid_hex()}"
@@ -189,7 +233,7 @@ def create_watch(agent_id: Optional[str], symbol: str, profile: str = "real") ->
                 (
                     watch_id, agent_id, symbol.upper(), profile,
                     cfg["drop_pct"], cfg["bounce_pct"], int(cfg["lookback_minutes"]), int(cfg["cooldown_minutes"]),
-                    int(cfg.get("sample_interval_seconds", 60)),
+                    int(cfg.get("sample_interval_seconds", DEFAULT_SAMPLE_INTERVAL_SECONDS)),
                 ),
             )
             row = cur.fetchone()
@@ -426,7 +470,7 @@ def reset_watch(watch_id: str) -> None:
 # ─── Background sampler (same in-process scheduler-thread pattern already
 # proven by DCA/Volume/Hedge Fund/Yield/platform-payments) ──────────────────
 
-_LOOP_TICK_SECONDS = 5  # how often the loop wakes up to check which watches are due
+_LOOP_TICK_SECONDS = 1  # wake every second so 1s sample intervals can fire on time
 
 
 def _sampler_loop(stop_event) -> None:

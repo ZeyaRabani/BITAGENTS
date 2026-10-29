@@ -23,9 +23,9 @@ type Watch = {
 const MIN_POSITION_USDC = 1.0; // keep in sync with agent/new/bounce_trading.py MIN_POSITION_USDC
 
 const PROFILES = [
-  { key: "fast_test", label: "Fast test (fires in minutes)", hint: "0.05% drop / 0.03% bounce, 2 min lookback -- pipeline test only" },
-  { key: "test", label: "Test", hint: "0.3% drop / 0.2% bounce, 15 min lookback" },
-  { key: "real", label: "Real strategy", hint: "10% drop / 5% bounce, 60 min lookback" },
+  { key: "fast_test", label: "Fast test (fires in minutes)", hint: "0.05% drop / 0.03% bounce, 2 min lookback, Binance 1s poll -- pipeline test only" },
+  { key: "test", label: "Test", hint: "0.3% drop / 0.2% bounce, 15 min lookback, Binance 1s poll" },
+  { key: "real", label: "Real strategy", hint: "10% drop / 5% bounce, 60 min lookback, Binance 1s poll" },
 ] as const;
 
 const STATE_COLOR: Record<Watch["state"], string> = {
@@ -289,7 +289,7 @@ export default function SignalTestPage() {
   useEffect(() => {
     if (!watch) return;
     if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(() => void pollOnce(), 3000);
+    pollRef.current = setInterval(() => void pollOnce(), 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -418,7 +418,7 @@ export default function SignalTestPage() {
   return (
     <AppShell
       title="Signal watch -- live test"
-      subtitle="Watches a token for a drop-then-bounce price pattern. Signal only -- this does not place any trade."
+      subtitle="Watches a token for a drop-then-bounce via Binance (1s poll). Trades from your per-user Circle bounce wallet."
     >
       <div className="mb-6 rounded-xl border-2 border-warn/60 bg-warn/10 px-4 py-3">
         <p className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-warn">
@@ -427,8 +427,8 @@ export default function SignalTestPage() {
         <p className="mt-1 text-xs text-muted-foreground">
           This page only exists on your machine, on the bounce-agent-signal-engine branch. It is
           not linked from the real app, not deployed, and not something a real user would ever
-          see. It talks to your local backend on mainnet with real SOL -- there is no sandbox mode
-          here.
+          see. Prices come from Binance every 1s. Capital sits in your Circle bounce wallet
+          (same pattern as DCA / Yield) on mainnet with real SOL -- there is no sandbox mode here.
         </p>
       </div>
 
@@ -744,7 +744,7 @@ export default function SignalTestPage() {
 
         <Panel title="Live status">
           {!watch ? (
-            <p className="text-sm text-muted-foreground">Start a watch to see it update here every 3 seconds.</p>
+            <p className="text-sm text-muted-foreground">Start a watch to see it update here every 1 second (Binance oracle).</p>
           ) : (
             <div className="space-y-4">
               <div className="rounded-xl border border-grid bg-surface/30 p-4 text-center">

@@ -63,6 +63,20 @@ Start development:
 - Keep business logic out of UI components.
 - Follow the existing project architecture instead of introducing a new pattern without a strong reason.
 
+## Blueprint for Agents
+
+- UI/UX: Follow the design and user experience of the DCA Agent page.
+- Agent Wallets: For agents that require on-chain transactions, create a dedicated Circle wallet for each agent, specific to the user.
+- Transaction Management: Include a transaction verification section alongside the deposit and withdrawal functionalities.
+- Swaps: Use Jupiter for swap transactions.
+- Page Structure: Organize each agent page as follows:
+    1. Agent Header: Display the agent's name and a short description.
+    2. Agent Wallet: Display the agent's wallet details if the agent uses a wallet.
+    3. Chat and Reasoning: Show the chat interface and the agent's thinking or reasoning process.
+    4. Task Results: Display the results of the agent's tasks, with an edit button wherever applicable. For example:
+        - DCA Agent: Show active DCA strategies.
+        - Hedge Fund Agent: Show active strategies and allow users to edit them where supported.
+
 ## Testing
 
 <!-- ToDo: Add some test -->

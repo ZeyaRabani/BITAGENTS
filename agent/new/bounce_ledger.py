@@ -48,10 +48,8 @@ AGENT_TYPE = "bounce"
 
 
 def load_bounce_keypair():
-    """Local-signing fallback, used when Circle isn't configured (the normal
-    case for local dev -- see BOUNCE_WALLET_PRIVATE_KEY in .env.example).
-    Mirrors load_hf_keypair/load_volume_keypair/load_easya_keypair exactly,
-    same pattern Harshal already uses for every other agent's local wallet."""
+    """Local-signing fallback when Circle is unset or unavailable.
+    Same pattern as load_hf_keypair / load_volume_keypair / load_easya_keypair."""
     from dca_agent import HAS_SOLDERS, Keypair
 
     if not HAS_SOLDERS:
@@ -70,43 +68,51 @@ def load_bounce_keypair():
 
 
 def get_bounce_wallet_pubkey(user_wallet: Optional[str] = None) -> Optional[str]:
-    """The address ledger rows are scoped to for this user. Must stay in sync
-    with resolve_agent_signing_context's precedence (local key first for
-    bounce, then Circle) -- otherwise balances get tracked against one
-    address while swaps actually sign from another."""
+    """Address ledger rows are scoped to for this user.
+
+    Same precedence as other agents and resolve_agent_signing_context:
+    Circle per-user bounce wallet first, then BOUNCE_WALLET_PRIVATE_KEY fallback.
+    """
     user_wallet = (user_wallet or "").strip()
     if not user_wallet:
         return None
+    try:
+        from circle_dca_wallets import circle_dca_enabled, get_agent_wallet_address
+
+        if circle_dca_enabled():
+            return get_agent_wallet_address(user_wallet, AGENT_TYPE)
+    except Exception as exc:
+        print(f"  warning: Bounce Circle wallet unavailable: {exc}")
     local = load_bounce_keypair()
     if local:
         return str(local.pubkey())
-    try:
-        from circle_dca_wallets import get_agent_wallet_address
-
-        return get_agent_wallet_address(user_wallet, AGENT_TYPE)
-    except Exception as exc:
-        print(f"  warning: Bounce Circle wallet unavailable: {exc}")
-        return None
+    return None
 
 
 def get_bounce_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
     from dca_agent import SOLANA_CLUSTER, SOLANA_RPC
-    from circle_dca_wallets import circle_dca_enabled
+    from circle_dca_wallets import circle_dca_enabled, resolve_agent_signing_context
 
     user_wallet = (user_wallet or "").strip()
     wallet = get_bounce_wallet_pubkey(user_wallet) if user_wallet else None
-    provider = "circle" if wallet else None
+    provider = None
+    if user_wallet and wallet:
+        ctx = resolve_agent_signing_context(user_wallet, AGENT_TYPE)
+        provider = ctx.get("mode") if ctx.get("mode") in ("circle", "local") else None
     circle_error = None
     if user_wallet and circle_dca_enabled() and not wallet:
         circle_error = "Circle Bounce wallet provisioning failed. Check CIRCLE_API_KEY / CIRCLE_ENTITY_SECRET."
-    elif user_wallet and not circle_dca_enabled():
-        circle_error = "Circle is not configured, so the Bounce Agent cannot hold capital."
+    elif user_wallet and not circle_dca_enabled() and not load_bounce_keypair():
+        circle_error = (
+            "Circle is not configured and BOUNCE_WALLET_PRIVATE_KEY is unset, "
+            "so the Bounce Agent cannot hold capital."
+        )
 
     result = {
         "agent_wallet": wallet,
         "configured": bool(wallet),
         "wallet_provider": provider,
-        "per_user_wallet": bool(wallet),
+        "per_user_wallet": provider == "circle",
         "cluster": SOLANA_CLUSTER,
         "rpc": SOLANA_RPC,
         "allowed_tokens": sorted(ALLOWED_DEPOSIT_TOKENS),

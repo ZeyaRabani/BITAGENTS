@@ -34,18 +34,13 @@ know what to expect.
    SOLANA_CLUSTER=mainnet
    SOLANA_RPC_URL=<a real mainnet RPC endpoint>
    ```
-3. **A wallet for the agent to trade from.** For local dev, set
-   `BOUNCE_WALLET_PRIVATE_KEY` directly (a throwaway keypair you hold, with zero
-   connection to BIT10's live Circle account -- same pattern already used for the
-   Hedge Fund and Volume agents). Easiest way to generate one:
-   ```
-   solana-keygen new -o bounce-wallet.json --no-bip39-passphrase
-   ```
-   Paste the full contents of `bounce-wallet.json` (the `[12,34,...]` byte array) as
-   the value of `BOUNCE_WALLET_PRIVATE_KEY`. A base58-encoded private key string also
-   works if you already have one in that format.
-4. **Fund that wallet** with a small amount of real SOL (0.05 SOL is plenty to start --
-   see "Gas" below for why).
+3. **Circle wallet (same as DCA / Yield).** Configure `CIRCLE_API_KEY`,
+   `CIRCLE_ENTITY_SECRET`, and optionally `CIRCLE_WALLET_SET_ID` in `agent/new/.env`.
+   Bounce provisions a per-user Circle wallet with agent type `bounce`. Optional
+   fallback only if Circle is unset: `BOUNCE_WALLET_PRIVATE_KEY` (throwaway keypair).
+4. **Fund the Bounce deposit address** shown on `/launch/signal-test` with a small
+   amount of real SOL (0.05 SOL is plenty to start -- see "Gas" below for why).
+   Price oracle is **Binance** spot (`SOLUSDT`, etc.), polled every **1 second**.
 5. Install dependencies and start both halves:
    ```
    # backend
@@ -106,7 +101,7 @@ know what to expect.
    used on each trade is sized off the real recent price volatility, not applied
    literally (see "Volatility-sized stops" below).
 5. **Start a watch** (symbol + profile, same panel as step 2). The Live Status panel
-   polls its state every few seconds: `neutral -> armed -> fired -> cooldown`.
+   polls every 1 second (Binance oracle): `neutral -> armed -> fired -> cooldown`.
 
    ![Live Status, chat, and position history panels](images/bounce-agent/04-live-status-chat-history.jpg)
 

@@ -411,28 +411,11 @@ def resolve_agent_signing_context(
 ) -> dict[str, Any]:
     """
     Resolve how to sign agent transactions for a user.
-    Prefers Circle per-user wallet; falls back to shared local keypair for that agent.
-
-    Bounce is the one exception: if BOUNCE_WALLET_PRIVATE_KEY is set, it's used
-    even when Circle is also configured for other agents. This keeps local
-    Bounce testing on a key you hold directly, separate from BIT10's live
-    Circle account, without touching how DCA/Yield/Hedge Fund/etc. sign
-    locally -- those are unaffected either way.
+    Prefers Circle per-user wallet; falls back to shared local keypair for that agent
+    (same order for Bounce as DCA / Yield / Hedge Fund / etc.).
     """
     agent_type = normalize_agent_type(agent_type)
     user_wallet = (user_wallet or "").strip()
-    if agent_type == "bounce":
-        from bounce_ledger import load_bounce_keypair
-
-        local_first = load_bounce_keypair()
-        if local_first:
-            return {
-                "mode": "local",
-                "agent_type": agent_type,
-                "user_wallet": user_wallet or None,
-                "keypair": local_first,
-                "pubkey": str(local_first.pubkey()),
-            }
     if user_wallet and circle_dca_enabled():
         try:
             wallet = ensure_agent_wallet_for_user(user_wallet, agent_type)
