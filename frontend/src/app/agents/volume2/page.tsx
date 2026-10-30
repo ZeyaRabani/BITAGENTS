@@ -9,10 +9,7 @@ export const metadata: Metadata = {
 
 export default function VolumeAgentSimplePage() {
   return (
-    <AppShell
-      title="BITAGENTS Volume"
-      subtitle="Deposit SOL, pick a size, start buying and selling BITAGENTS volume."
-    >
+    <AppShell title="BITAGENTS Volume">
       <VolumeAgentSimpleConsole />
     </AppShell>
   );

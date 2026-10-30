@@ -344,13 +344,6 @@ export function KickstartCopilotConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-          {KICKSTART_COPILOT.description} Connect your wallet (free) and ask about token overview,
-          analytics, health scores, risks, comparisons, and launch operations.
-        </p>
-      </div>
-
       {/* <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         <span className={`inline-flex items-center gap-2 ${agentOnline ? "text-signal" : "text-warn"}`}>
           <span

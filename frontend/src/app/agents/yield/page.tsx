@@ -10,10 +10,7 @@ export const metadata: Metadata = {
 
 export default function YieldAgentPage() {
   return (
-    <AppShell
-      title="Yield Agent"
-      subtitle="Kamino, Jupiter JLP, and Save. Ask in chat or pick a yield type."
-    >
+    <AppShell title="Yield Agent">
       <YieldAgentConsole />
     </AppShell>
   );

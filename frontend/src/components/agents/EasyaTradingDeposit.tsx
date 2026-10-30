@@ -332,13 +332,6 @@ export function EasyaTradingDeposit({
     <Panel>
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Deposit SOL to fund one-time market or limit buys. Platform fee:{" "}
-            <span className="text-foreground">{platformFeePct}</span> per successful swap.
-            Separate from the DCA agent wallet. After you send funds, your deposit is verified
-            automatically and credited to your balance.
-          </p>
-
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="uppercase tracking-[0.16em] text-signal">Deposit address</span>
             <div className="mt-1 break-all text-foreground">
@@ -403,11 +396,6 @@ export function EasyaTradingDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Already sent a deposit? Paste your transaction hash to credit your balance. Each
-              signature can only be used once and must be a SOL transfer you signed to the
-              trading wallet above.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input
                 type="text"
@@ -432,10 +420,6 @@ export function EasyaTradingDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Withdraw unused SOL deposits and tokens acquired from Jupiter buys. Amounts reserved
-              for active limit orders cannot be withdrawn.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
               <select
                 value={withdrawToken}

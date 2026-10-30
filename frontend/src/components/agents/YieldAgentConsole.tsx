@@ -12,7 +12,6 @@ import {
   mapYieldActions,
   sendYieldAgentMessage,
   YIELD_EXAMPLE_PROMPTS,
-  YIELD_TYPE_HELP,
   YIELD_TYPES,
   type YieldDashboard,
   type YieldHealth,
@@ -162,14 +161,6 @@ export function YieldAgentConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Send SOL to your Circle yield wallet, then ask in chat or use the form. The agent
-          deposits into Kamino, Jupiter JLP, or Save. Name a protocol to use that one, or
-          leave the yield type on Any and it deposits into the best match. Not financial advice.
-        </p>
-      </div>
-
       <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         <span className={`inline-flex items-center gap-2 ${online ? "text-signal" : "text-warn"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${online ? "bg-signal animate-pulse-dot" : "bg-warn"}`} />
@@ -203,8 +194,7 @@ export function YieldAgentConsole() {
       <YieldAgentDeposit cluster={health ? "mainnet" : undefined} authToken={token} />
 
       <Panel title="Requirements">
-        <p className="text-sm text-muted-foreground">{YIELD_TYPE_HELP[yieldType]}</p>
-        <form onSubmit={(e) => void onInvest(e)} className="mt-4 flex flex-wrap items-end gap-2">
+        <form onSubmit={(e) => void onInvest(e)} className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
             Yield type
             <select

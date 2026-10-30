@@ -767,13 +767,6 @@ export function DcaPlanPanel({
       >
         {error && <p className="mb-3 font-mono text-[11px] text-warn">{error}</p>}
 
-        <p className="mb-3 text-sm text-muted-foreground">
-          Active and paused plans can be <strong className="text-foreground">edited</strong>,{" "}
-          <strong className="text-foreground">paused/resumed</strong>, or{" "}
-          <strong className="text-foreground">removed</strong> anytime. View per-plan swap history with{" "}
-          <strong className="text-foreground">Tx history</strong>.
-        </p>
-
         <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             value={searchQuery}

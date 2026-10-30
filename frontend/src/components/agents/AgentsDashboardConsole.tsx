@@ -243,13 +243,6 @@ export function AgentsDashboardConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Track agents you launched for sale, private agents you keep for yourself, monthly
-          subscriptions you bought, and sales from buyers.
-        </p>
-      </div>
-
       {authError && (
         <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
           Wallet sign-in: {authError}

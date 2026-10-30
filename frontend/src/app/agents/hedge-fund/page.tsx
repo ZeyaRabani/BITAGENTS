@@ -11,10 +11,7 @@ export const metadata: Metadata = {
 
 export default function HedgeFundPage() {
   return (
-    <AppShell
-      title={HEDGE_FUND.name}
-      subtitle={`${HEDGE_FUND.tagline} · stocks & crypto paper trading`}
-    >
+    <AppShell title={HEDGE_FUND.name}>
       <HedgeFundConsole />
     </AppShell>
   );

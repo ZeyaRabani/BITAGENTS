@@ -21,6 +21,7 @@ import { useDcaWalletAuth } from "@/hooks/useDcaWalletAuth";
 import { useWallet } from "@solana/wallet-adapter-react";
 import type { UserDepositBalances } from "@/lib/dcaWalletClient";
 import { getCustomInstructions, saveCustomInstructions } from "@/lib/customInstructionsClient";
+import { LegalSignInNotice } from "@/components/legal/LegalSignInNotice";
 
 type ChatMessage = {
   id: string;
@@ -461,7 +462,7 @@ export function DcaAgentConsole() {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Panel 
-          title="Command · DCA Agent" 
+          title="Command DCA Agent" 
           className="lg:col-span-2"
           action={
             <button
@@ -559,12 +560,12 @@ export function DcaAgentConsole() {
         </Panel>
 
         <Panel
-          title="Agent actions · live"
-          action={
-            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              {!agentOnline && "Waiting"}
-            </span>
-          }
+          title="Agent action"
+          // action={
+          //   <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+          //     {!agentOnline && "Waiting"}
+          //   </span>
+          // }
         >
           <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1 font-mono text-xs">
             {actions.length === 0 && (
@@ -624,6 +625,8 @@ export function DcaAgentConsole() {
         instructions={customInstructions}
         onSave={onSaveInstructions}
       />
+
+      <LegalSignInNotice />
     </div>
   );
 }

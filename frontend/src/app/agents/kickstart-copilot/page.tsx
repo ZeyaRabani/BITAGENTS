@@ -11,10 +11,7 @@ export const metadata: Metadata = {
 
 export default function KickstartCopilotPage() {
   return (
-    <AppShell
-      title={KICKSTART_COPILOT.name}
-      subtitle={`${KICKSTART_COPILOT.tagline} · ${KICKSTART_COPILOT.description}`}
-    >
+    <AppShell title={KICKSTART_COPILOT.name}>
       <KickstartCopilotConsole />
     </AppShell>
   );

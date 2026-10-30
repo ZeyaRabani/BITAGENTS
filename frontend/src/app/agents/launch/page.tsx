@@ -14,14 +14,7 @@ export default function LaunchAgentsPage({
 }) {
   const editing = Boolean(searchParams?.edit);
   return (
-    <AppShell
-      title={editing ? "Edit agent" : "Launch Agents"}
-      subtitle={
-        editing
-          ? "Update this agent and relaunch it. No extra launch fee."
-          : "Name your agent, define its task, pick modules, then launch."
-      }
-    >
+    <AppShell title={editing ? "Edit agent" : "Launch Agents"}>
       <LaunchAgentConsole editId={searchParams?.edit} />
     </AppShell>
   );

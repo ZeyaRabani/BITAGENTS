@@ -12,10 +12,7 @@ export const metadata: Metadata = {
 
 export default function WalletMonitoringPage() {
   return (
-    <AppShell
-      title={config.name}
-      subtitle={`${config.tagline} · ${config.description}`}
-    >
+    <AppShell title={config.name}>
       <ResearchAgentConsole config={config} />
     </AppShell>
   );

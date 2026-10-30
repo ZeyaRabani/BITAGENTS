@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function HedgeFundPricingRoute() {
   return (
-    <AppShell title="Hedge Fund Pricing" subtitle="1% management · 10% performance · vs 2/20">
+    <AppShell title="Hedge Fund Pricing">
       <HedgeFundPricingPage />
     </AppShell>
   );

@@ -31,7 +31,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur">
+      <div className="sticky top-0 z-30 bg-background/80 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-6 py-6 sm:gap-6 sm:py-8">
           <Link href="/" className="min-w-0 shrink">
             <Wordmark compact />
@@ -82,7 +82,7 @@ export function Nav({ children }: { children: React.ReactNode }) {
             ))}
           </div>
         )}
-      </header>
+      </div>
       <main>{children}</main>
     </div>
   );

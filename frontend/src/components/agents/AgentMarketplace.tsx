@@ -18,11 +18,9 @@ export function AgentMarketplace() {
   );
 
   return (
-    <AppShell
-      title="Agent Marketplace"
-      subtitle="Discover and run BITAGENTS agents. Pay per task on Solana - launch your own from the Launchpad."
-    >
-      <div className="mt-6 flex flex-wrap gap-2">
+    <AppShell title="Agent Marketplace">
+      <div className="flex flex-wrap gap-2 relative">
+      <div className='hidden md:block fixed top-1/4 w-1/2 h-96 bg-primary/10 rounded-full blur-3xl z-[-1]' />
         <button
           type="button"
           onClick={() => setCategory(null)}

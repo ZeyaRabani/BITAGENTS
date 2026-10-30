@@ -342,13 +342,7 @@ export function YieldAgentDeposit({
 
   return (
     <Panel title="Capital">
-      <p className="text-sm text-muted-foreground">
-        Send SOL to your Yield Agent wallet. After you send funds, the deposit is verified and
-        credited automatically. If confirmation expires, paste the transaction hash below and
-        verify it. The agent uses the credited balance when it stakes the best protocol for your
-        requirements.
-      </p>
-      <div className="mt-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
+      <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
         <span className="uppercase tracking-[0.16em] text-signal">Your Yield agent wallet</span>
         <div className="mt-1 break-all text-foreground">
           {agentWallet ??
@@ -413,11 +407,6 @@ export function YieldAgentDeposit({
         <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
           Verify deposit by signature
         </div>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Already sent a deposit? Paste your transaction hash to credit your balance. Each
-          signature can only be used once and must be a SOL transfer you signed to the Yield Agent
-          wallet.
-        </p>
         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
           <input
             type="text"

@@ -337,14 +337,6 @@ export function HedgeFundDeposit({
     <Panel title="Hedge Fund wallet · deposit & withdraw">
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Deposit <span className="text-foreground">SOL only</span> to the Hedge Fund
-            wallet on <span className="text-foreground">{cluster ?? "Solana"}</span>. After you
-            send funds, your deposit is verified automatically and credited. Active strategy
-            capital stays reserved until you liquidate. Leave ~0.01 SOL spare beyond each
-            strategy size so buys can pay token-account rent and fees.
-          </p>
-
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="uppercase tracking-[0.16em] text-signal">Agent wallet</span>
             <div className="mt-1 break-all text-foreground">
@@ -353,9 +345,6 @@ export function HedgeFundDeposit({
                   ? "Provisioning your personal Hedge Fund agent wallet…"
                   : "Sign in to provision your personal agent wallet"
               )}
-            </div>
-            <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-signal">
-              SOL · max $100 sleeve · min $5/asset · 1% start · 10% profit on liquidate
             </div>
           </div>
 
@@ -411,10 +400,6 @@ export function HedgeFundDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Already sent a deposit? Paste your transaction hash to credit your balance. Each
-              signature can only be used once.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input
                 type="text"
@@ -441,10 +426,6 @@ export function HedgeFundDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Withdraw free SOL. Amounts reserved for pending strategies or already deployed
-              cannot be withdrawn until you liquidate.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
               <select
                 value={withdrawToken}

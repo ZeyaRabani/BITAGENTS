@@ -5,7 +5,6 @@ import { LAMPORTS_PER_SOL, PublicKey, SystemProgram, Transaction } from "@solana
 import { useCallback, useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Panel } from "@/components/AppShell";
-import { LegalSignInNotice } from "@/components/legal/LegalSignInNotice";
 import { explorerUrlForSignature } from "@/lib/dcaActionResults";
 import {
   fetchAgentWallet,
@@ -190,9 +189,9 @@ export function DcaAgentDeposit({
       clearPendingDepositSignature();
       setSuccess(
         verified.message ??
-          (verified.status === "already_recorded"
-            ? "Deposit already credited to your balance."
-            : "Deposit verified and credited to your balance.")
+        (verified.status === "already_recorded"
+          ? "Deposit already credited to your balance."
+          : "Deposit verified and credited to your balance.")
       );
       if (options?.clearManualInput) {
         setManualSignature("");
@@ -329,17 +328,9 @@ export function DcaAgentDeposit({
   }
 
   return (
-    <Panel title="AI Agent wallet · deposit & withdraw">
+    <Panel title="AI Agent wallet">
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
-          <p className="text-sm text-muted-foreground">
-            Deposit <strong className="text-foreground">SOL only</strong> to the AI Agent wallet on{" "}
-            <span className="text-foreground">{cluster ?? "Solana"}</span>. After you send
-            funds, your deposit is verified automatically and credited to your balance. You can
-            also paste a transaction signature below if verification was missed. Withdrawals still
-            support any credited token balance.
-          </p>
-
           <div className="font-mono text-[11px] leading-relaxed text-muted-foreground">
             <span className="uppercase tracking-[0.16em] text-signal">Your DCA agent wallet</span>
             <div className="mt-1 break-all text-foreground">
@@ -354,12 +345,7 @@ export function DcaAgentDeposit({
                 {circleError}
               </div>
             )}
-            <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-signal">
-              Deposits · SOL only
-            </div>
           </div>
-
-        <LegalSignInNotice />
 
           <div className="grid gap-3">
             <div className="grid gap-3 sm:grid-cols-[140px_1fr_auto]">
@@ -416,11 +402,6 @@ export function DcaAgentDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Verify deposit by signature
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Already sent a deposit? Paste your transaction hash to credit your balance. Each
-              signature can only be used once and must be a transfer you signed to the agent
-              wallet.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
               <input
                 type="text"
@@ -445,10 +426,6 @@ export function DcaAgentDeposit({
             <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
               Withdraw to your wallet
             </div>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Withdraw unused deposits and tokens bought by your DCA plans. Amounts reserved for
-              active plans cannot be withdrawn.
-            </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
               <select
                 value={withdrawToken}

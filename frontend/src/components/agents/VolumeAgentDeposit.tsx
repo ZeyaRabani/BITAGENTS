@@ -386,13 +386,6 @@ export function VolumeAgentDeposit({
     <Panel title="Volume Agent wallet · deposit & withdraw">
       <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
         <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Deposit <strong className="text-foreground">SOL</strong> (and your token if needed) to the Volume
-          Agent wallet on {cluster ?? "Solana"}. After you send funds, your deposit is verified automatically
-          and credited. You can also paste a transaction signature below if verification was missed.
-          Platform fee is <strong className="text-foreground">0.25% per swap leg</strong>.
-        </p>
-
         {!connected && <WalletMultiButton className="!w-full !justify-center" />}
         {connected && !authToken && <LegalSignInNotice />}
 
@@ -485,11 +478,6 @@ export function VolumeAgentDeposit({
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
             Verify deposit by signature
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Already sent a deposit? Paste your transaction hash to credit your balance. Each
-            signature can only be used once and must be a transfer you signed to the Volume
-            Agent wallet.
-          </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto]">
             <input
               type="text"
@@ -516,12 +504,6 @@ export function VolumeAgentDeposit({
           <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-signal">
             Withdraw to your wallet
           </div>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Withdraw unused deposits and campaign tokens held in the Volume Agent wallet. For
-            tokens bought during volume cycles, you can send them directly or swap back to SOL
-            through Jupiter/Meteora liquidity first. Amounts reserved for active campaigns cannot
-            be withdrawn until those campaigns finish or are cancelled.
-          </p>
           <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_auto]">
             <select
               value={withdrawToken}

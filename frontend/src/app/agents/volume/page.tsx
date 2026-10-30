@@ -11,10 +11,7 @@ export const metadata: Metadata = {
 
 export default function VolumeAgentPage() {
   return (
-    <AppShell
-      title={VOLUME_AGENT.name}
-      subtitle={`${VOLUME_AGENT.tagline} · ${VOLUME_AGENT.description}`}
-    >
+    <AppShell title={VOLUME_AGENT.name}>
       <VolumeAgentConsole />
     </AppShell>
   );

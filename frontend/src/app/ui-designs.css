@@ -1,0 +1,226 @@
+/* =========================================================
+   UI DESIGN VARIANTS — Default (1) + Graphite (5)
+   Fonts: Archivo / Archivo Black / JetBrains Mono
+   ========================================================= */
+
+.ui-design-page {
+  position: relative;
+  isolation: isolate;
+}
+
+.ui-design-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+.ui-cta-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.95rem 1.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: var(--signal);
+  color: var(--primary-foreground);
+  transition: opacity 0.15s ease, filter 0.15s ease;
+}
+.ui-cta-primary:hover {
+  opacity: 0.92;
+  filter: brightness(1.05);
+}
+
+.ui-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.95rem 1.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid var(--grid);
+  color: var(--foreground);
+  background: transparent;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.ui-cta-secondary:hover {
+  border-color: var(--signal);
+  color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 8%, transparent);
+}
+
+html[data-ui-design],
+html:not([data-ui-design]) {
+  --font-sans: "Archivo", ui-sans-serif, system-ui;
+  --font-display: "Archivo Black", "Archivo", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* Keep html.dark for all designs (no light mode) */
+html[data-ui-design] {
+  color-scheme: dark;
+}
+
+/* =========================================================
+   Default
+   ========================================================= */
+
+html[data-ui-design="1"],
+html:not([data-ui-design]) {
+  --radius: 0rem;
+  --background: #0c0a09;
+  --foreground: #f5efe6;
+  --card: #151210;
+  --card-foreground: #f5efe6;
+  --surface: #12100e;
+  --surface-2: #1a1714;
+  --muted-foreground: #b0a090;
+  --border: #2a2520;
+  --grid: #2a2520;
+  --signal: #ff6b4a;
+  --warn: #f4a261;
+  --primary: #ff6b4a;
+  --primary-foreground: #0c0a09;
+  --destructive: #ef4444;
+}
+
+html[data-ui-design="1"] body,
+html:not([data-ui-design]) body {
+  font-family: var(--font-sans);
+}
+
+html[data-ui-design="1"] .ui-cta-primary,
+html[data-ui-design="1"] .ui-cta-secondary,
+html:not([data-ui-design]) .ui-cta-primary,
+html:not([data-ui-design]) .ui-cta-secondary {
+  border-radius: 999px;
+}
+
+/* html[data-ui-design="1"] .ui-hero,
+html:not([data-ui-design]) .ui-hero {
+  background: radial-gradient(ellipse 70% 48% at 50% -8%, rgba(255, 107, 74, 0.16), transparent 62%);
+} */
+
+/* =========================================================
+   Graphite + accent color packs (data-ui-color)
+   Layout/UX stays fixed; only signal/primary colors change.
+   ========================================================= */
+
+html[data-ui-design="5"] {
+  --radius: 0.4rem;
+  --background: #111111;
+  --foreground: #f0eeea;
+  --card: #191919;
+  --card-foreground: #f0eeea;
+  --surface: #151515;
+  --surface-2: #212121;
+  --muted-foreground: #aea9a1;
+  --border: #2c2c2c;
+  --grid: #2c2c2c;
+  --warn: #e0a45a;
+  --destructive: #ef4444;
+  --primary-foreground: #14110f;
+  /* defaults = Coral */
+  --signal: #ff7a59;
+  --primary: #ff7a59;
+  --accent-glow: rgba(255, 122, 89, 0.1);
+}
+
+html[data-ui-design="5"][data-ui-color="1"],
+html[data-ui-design="5"]:not([data-ui-color]) {
+  --signal: #ff7a59;
+  --primary: #ff7a59;
+  --accent-glow: rgba(255, 122, 89, 0.1);
+}
+
+html[data-ui-design="5"][data-ui-color="2"] {
+  --signal: #e8a317;
+  --primary: #e8a317;
+  --accent-glow: rgba(232, 163, 23, 0.12);
+}
+
+html[data-ui-design="5"][data-ui-color="3"] {
+  --signal: #5b9fd4;
+  --primary: #5b9fd4;
+  --accent-glow: rgba(91, 159, 212, 0.14);
+}
+
+html[data-ui-design="5"][data-ui-color="4"] {
+  --signal: #3ecf8e;
+  --primary: #3ecf8e;
+  --accent-glow: rgba(62, 207, 142, 0.12);
+}
+
+html[data-ui-design="5"][data-ui-color="5"] {
+  --signal: #c87a3a;
+  --primary: #c87a3a;
+  --accent-glow: rgba(200, 122, 58, 0.14);
+}
+
+html[data-ui-design="5"] body {
+  font-family: var(--font-sans);
+  background:
+    radial-gradient(ellipse 45% 35% at 75% 0%, var(--accent-glow), transparent 55%),
+    linear-gradient(180deg, #161616 0%, #111111 45%, #111111 100%);
+}
+
+html[data-ui-design="5"] .ui-cta-primary,
+html[data-ui-design="5"] .ui-cta-secondary {
+  border-radius: 0.35rem;
+}
+
+html[data-ui-design="5"] .ui-hero {
+  min-height: min(86vh, 700px);
+  display: flex;
+  align-items: center;
+  /* background:
+    radial-gradient(ellipse 50% 40% at 72% 22%, var(--accent-glow), transparent 55%),
+    linear-gradient(180deg, #171717 0%, #111111 100%); */
+  border-bottom: 1px solid var(--grid);
+}
+
+html[data-ui-design="5"] .ui-hero-badge {
+  background: var(--surface-2);
+  border: 1px solid var(--grid);
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.8rem;
+}
+
+html[data-ui-design="5"] header.sticky {
+  background: rgba(17, 17, 17, 0.92) !important;
+  border-bottom: 1px solid var(--grid);
+}
+
+html[data-ui-design="5"] .bg-card,
+html[data-ui-design="5"] .ui-appshell-panel,
+html[data-ui-design="5"] .bg-surface\/30,
+html[data-ui-design="5"] .bg-surface\/40 {
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+  background: var(--card);
+  box-shadow: none;
+}
+
+html[data-ui-design="5"] .ui-design-banner {
+  border: 1px solid var(--grid);
+  border-radius: 0.5rem;
+  background: var(--surface-2);
+}
+
+html[data-ui-design="5"] a.bg-signal,
+html[data-ui-design="5"] button.bg-signal {
+  border-radius: 0.35rem !important;
+}
+
+html[data-ui-design="5"] ::selection {
+  background: color-mix(in srgb, var(--signal) 30%, transparent);
+  color: #f0eeea;
+}
+
+html[data-ui-design="5"] .ui-design-switcher-label {
+  border-radius: 0.4rem;
+}

@@ -10,10 +10,7 @@ export const metadata: Metadata = {
 
 export default function DcaAgentPage() {
   return (
-    <AppShell
-      title={DCA_AGENT.name}
-      subtitle={`${DCA_AGENT.tagline} · ${DCA_AGENT.description}`}
-    >
+    <AppShell title={DCA_AGENT.name}>
       <DcaAgentConsole />
     </AppShell>
   );

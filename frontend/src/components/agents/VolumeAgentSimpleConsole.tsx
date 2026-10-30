@@ -119,20 +119,6 @@ export function VolumeAgentSimpleConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          Buy and sell volume for the <strong className="text-foreground">BITAGENTS token</strong>, paid for
-          in SOL. Deposit SOL below, then press one button to start. Platform fee is{" "}
-          <strong className="text-foreground">{VOLUME_AGENT.platformFeeLabel}</strong>.
-        </p>
-        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
-          Need any SPL token + Meteora controls?{" "}
-          <a href="/agents/volume" className="text-signal underline hover:text-foreground">
-            Open full Volume Agent
-          </a>
-        </p>
-      </div>
-
       {authError && (
         <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">
           Wallet sign-in: {authError}

@@ -9,10 +9,7 @@ export const metadata: Metadata = {
 
 export default function AgentsDashboardPage() {
   return (
-    <AppShell
-      title="Dashboard"
-      subtitle="Your listings, private agents, purchases, and sales."
-    >
+    <AppShell title="Dashboard">
       <AgentsDashboardConsole />
     </AppShell>
   );

@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { Panel } from "@/components/AppShell";
 import { HedgeFundDeposit } from "@/components/agents/HedgeFundDeposit";
@@ -391,23 +390,11 @@ export function HedgeFundConsole() {
 
   const port = dashboard?.portfolio;
   const positions = port?.positions || [];
-  const hours = Math.round((health?.monitor_interval_seconds || dashboard?.monitor_interval_seconds || 14400) / 3600);
   const freeSol =
     hfBalances?.balances?.find((b) => b.token === "SOL")?.available ?? null;
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">{HEDGE_FUND.description}</p>
-        <p className="mt-2 font-mono text-xs text-signal">
-          18-analyst · live trading · max $100 USD/sleeve · min $5/asset (SOL-funded) · 1% start / 10% profit · monitor every{" "}
-          {hours}h ·{" "}
-          <Link href="/agents/hedge-fund/pricing" className="underline hover:text-foreground">
-            Pricing
-          </Link>
-        </p>
-      </div>
-
       <div className="flex flex-wrap items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
         <span className={`inline-flex items-center gap-2 ${agentOnline ? "text-signal" : "text-warn"}`}>
           <span className={`h-1.5 w-1.5 rounded-full ${agentOnline ? "bg-signal animate-pulse-dot" : "bg-warn"}`} />

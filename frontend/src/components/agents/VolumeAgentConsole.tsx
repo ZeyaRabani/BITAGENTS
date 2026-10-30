@@ -309,21 +309,6 @@ export function VolumeAgentConsole() {
 
   return (
     <div className="space-y-6">
-      <div className="border border-grid bg-surface/40 px-4 py-4">
-        <p className="text-sm leading-relaxed text-muted-foreground">
-          {VOLUME_AGENT.description} Connect your wallet, deposit SOL, then schedule buy/sell
-          volume cycles. Campaigns swap through Jupiter on tokens that already trade — no new
-          pool setup. Defaults to BITAGENTS/SOL (same as BITAGENTS Volume). Platform fee is{" "}
-          <strong className="text-foreground">{VOLUME_AGENT.platformFeeLabel}</strong>.
-        </p>
-        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
-          Just BITAGENTS volume?{" "}
-          <a href="/agents/volume2" className="text-signal underline hover:text-foreground">
-            Use the simplified presets page
-          </a>
-        </p>
-      </div>
-
       {error && (
         <div className="border border-warn/40 bg-warn/10 px-4 py-3 font-mono text-xs text-warn">{error}</div>
       )}
