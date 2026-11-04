@@ -29,7 +29,16 @@ CIRCLE_API_KEY = os.environ.get("CIRCLE_API_KEY", "").strip()
 CIRCLE_ENTITY_SECRET = os.environ.get("CIRCLE_ENTITY_SECRET", "").strip()
 CIRCLE_WALLET_SET_ID = os.environ.get("CIRCLE_WALLET_SET_ID", "").strip()
 
-AGENT_TYPES = ("dca", "easya", "volume", "hedge_fund", "launch", "yield", "creator_pay")
+AGENT_TYPES = (
+    "dca",
+    "easya",
+    "volume",
+    "hedge_fund",
+    "launch",
+    "yield",
+    "creator_pay",
+    "jupiter_trade",
+)
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
     "easya": "EasyA",
@@ -38,6 +47,7 @@ AGENT_TYPE_LABELS = {
     "launch": "Launch",
     "yield": "Yield",
     "creator_pay": "CreatorPay",
+    "jupiter_trade": "JupiterTrade",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -85,6 +95,9 @@ def normalize_agent_type(agent_type: str) -> str:
         "bitagents_volume": "volume",
         "yield_agent": "yield",
         "yield-optimizer": "yield",
+        "jupiter-trade": "jupiter_trade",
+        "jt": "jupiter_trade",
+        "trade": "jupiter_trade",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:
@@ -393,6 +406,10 @@ def _load_fallback_keypair(agent_type: str):
         from hedge_fund_ledger import load_hf_keypair
 
         return load_hf_keypair()
+    if agent_type == "jupiter_trade":
+        from jupiter_trade_ledger import load_jt_keypair
+
+        return load_jt_keypair()
     return None
 
 

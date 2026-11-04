@@ -107,8 +107,13 @@ def _reply_from_tool_result(actions: list[dict[str, Any]]) -> str:
         return str(raw)[:1500]
     if data.get("error"):
         return str(data["error"])
+    if data.get("understanding"):
+        return str(data["understanding"])
     if data.get("message"):
         return str(data["message"])
+    strategy = data.get("strategy")
+    if isinstance(strategy, dict) and strategy.get("understanding"):
+        return str(strategy["understanding"])
     markets = data.get("markets") or data.get("ranked")
     if isinstance(markets, list) and markets:
         lines = []
@@ -254,7 +259,12 @@ def run_tool_agent(
                 }
             )
 
-    reply = "I hit the tool limit. Please ask a narrower question."
+    # Prefer last tool output over a dead-end limit message when we already did work.
+    reply = (
+        _reply_from_tool_result(actions)
+        if actions
+        else "I hit the tool limit. Please ask a narrower question."
+    )
     conversation_history.append({"role": "assistant", "content": reply})
     if TOOL_ROUND_TIMING_LOG:
         total_ms = int((time.time() - run_started) * 1000)

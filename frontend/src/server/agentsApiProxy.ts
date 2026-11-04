@@ -331,6 +331,132 @@ export async function proxyHedgeFundWalletLedger(
   });
 }
 
+export async function proxyJupiterTradeTemplates(params?: {
+  family?: string;
+  query?: string;
+  limit?: number;
+}): Promise<Response> {
+  const search = new URLSearchParams();
+  if (params?.family) search.set("family", params.family);
+  if (params?.query) search.set("query", params.query);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/templates${qs ? `?${qs}` : ""}`, {
+    cache: "no-store",
+  });
+}
+
+export async function proxyJupiterTradeWalletAgent(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/wallet/agent`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyJupiterTradeWalletBalance(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/wallet/balance`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyJupiterTradeDepositVerify(
+  body: { signature: string },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/wallet/deposit/verify`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyJupiterTradeWithdraw(
+  body: { token: string; amount: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/wallet/withdraw`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyJupiterTradeWalletLedger(
+  authToken: string,
+  limit = 50
+): Promise<Response> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/wallet/ledger?${params}`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyJupiterTradeDashboard(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/dashboard`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyJupiterTradeCreateStrategy(
+  body: Record<string, unknown>,
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/strategies`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function proxyJupiterTradeConfirmUnderstanding(
+  strategyId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/jupiter-trade/strategies/${encodeURIComponent(strategyId)}/confirm-understanding`,
+    {
+      method: "POST",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxyJupiterTradeConfirmLive(
+  strategyId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/jupiter-trade/strategies/${encodeURIComponent(strategyId)}/confirm-live`,
+    {
+      method: "POST",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxyJupiterTradeCloseStrategy(
+  strategyId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/jupiter-trade/strategies/${encodeURIComponent(strategyId)}/close`,
+    {
+      method: "POST",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxyJupiterTradeMonitor(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/jupiter-trade/monitor`, {
+    method: "POST",
+    headers: buildHeaders(authToken),
+  });
+}
+
 export async function proxyYieldWalletAgent(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/yield/wallet/agent`, {
     cache: "no-store",

@@ -1,13 +1,24 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Activity,
   ArrowLeftRight,
   Bell,
   Bot,
+  Copy,
+  Crosshair,
+  Droplets,
+  GitCompareArrows,
+  Grid3x3,
+  Landmark,
+  LineChart,
   Radar,
+  Scale,
   Search,
+  Shield,
   TrendingUp,
   Wallet,
 } from "lucide-react";
+import { DEFI_AGENT_LIST } from "@/lib/defiAgentsConfig";
 
 export type AgentCategory = "Monitor" | "Research" | "Alerts" | "Automation" | "Trading";
 
@@ -18,7 +29,17 @@ export type AgentIconId =
   | "bot"
   | "radar"
   | "swap"
-  | "yield";
+  | "yield"
+  | "liquidity"
+  | "copy"
+  | "grid"
+  | "shield"
+  | "perps"
+  | "arb"
+  | "treasury"
+  | "rebalance"
+  | "sniper"
+  | "options";
 
 export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   wallet: Wallet,
@@ -28,6 +49,16 @@ export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   radar: Radar,
   swap: ArrowLeftRight,
   yield: TrendingUp,
+  liquidity: Droplets,
+  copy: Copy,
+  grid: Grid3x3,
+  shield: Shield,
+  perps: Activity,
+  arb: GitCompareArrows,
+  treasury: Landmark,
+  rebalance: Scale,
+  sniper: Crosshair,
+  options: LineChart,
 };
 
 export type MarketplaceAgent = {
@@ -48,7 +79,7 @@ export type MarketplaceAgent = {
 };
 
 export const MARKETPLACE_STATS = {
-  liveAgents: "7",
+  liveAgents: "17",
   tasks24h: "102",
   activeBuilders: "22",
   uptime30d: "99.2%",
@@ -62,13 +93,14 @@ export const AGENT_CATEGORIES: { name: AgentCategory; count: number }[] = [
   { name: "Trading", count: 9 },
 ];
 
-export const FEATURED_AGENTS: MarketplaceAgent[] = [
+const CORE_FEATURED_AGENTS: MarketplaceAgent[] = [
   {
     id: "dca",
     slug: "dca",
     name: "DCA Agent",
     category: "Trading",
-    description: "Set up dollar-cost averaging on Solana. Schedule recurring token buys, preview Jupiter quotes, and manage plans from natural language.",
+    description:
+      "Set up dollar-cost averaging on Solana. Schedule recurring token buys, preview Jupiter quotes, and manage plans from natural language.",
     tagline: "Recurring buys · hosted LLM",
     pricePerTask: "0.5% / tx",
     runs: "-",
@@ -183,6 +215,45 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     model: "meta-llama/llama-3.1-8b-instruct",
     cluster: "mainnet",
   },
+  {
+    id: "jupiter-trade",
+    slug: "jupiter-trade",
+    name: "Jupiter Trade Agent",
+    category: "Trading",
+    description:
+      "Bring or request a strategy. Confirm the agent's understanding, run ≥24h paper on Jupiter spot, then approve live buys/sells. Jupiter Perps are not used yet.",
+    tagline: "Confirm · 24h paper · Jupiter spot",
+    pricePerTask: "0.1% / trade",
+    runs: "-",
+    volumeSol: "-",
+    rating: 4.9,
+    iconId: "swap",
+    available: true,
+    model: "meta-llama/llama-3.1-8b-instruct",
+    cluster: "mainnet",
+  },
+];
+
+const DEFI_FEATURED_AGENTS: MarketplaceAgent[] = DEFI_AGENT_LIST.map((agent) => ({
+  id: agent.slug,
+  slug: agent.slug,
+  name: agent.name,
+  category: agent.category,
+  description: agent.description,
+  tagline: agent.tagline,
+  pricePerTask: agent.pricePerTask,
+  runs: "-",
+  volumeSol: "-",
+  rating: 4.8,
+  iconId: agent.iconId,
+  available: true,
+  model: agent.model,
+  cluster: agent.cluster,
+}));
+
+export const FEATURED_AGENTS: MarketplaceAgent[] = [
+  ...CORE_FEATURED_AGENTS,
+  ...DEFI_FEATURED_AGENTS,
 ];
 
 export function getAgentBySlug(slug: string): MarketplaceAgent | undefined {

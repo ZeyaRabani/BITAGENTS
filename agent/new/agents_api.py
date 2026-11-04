@@ -132,6 +132,38 @@ from due_diligence_agent import (
     get_due_diligence_cache_stats,
     run_due_diligence_agent,
 )
+from defi_strategy_agents import DEFI_AGENT_META, DEFI_MODEL, make_runner
+from jupiter_trade_agent import JT_LLM_PROVIDER, JT_MODEL, run_jupiter_trade_agent
+from jupiter_trade_core import (
+    JT_MONITOR_INTERVAL_SECONDS,
+    JT_PAPER_MIN_HOURS,
+    close_strategy as jt_close_strategy,
+    confirm_live as jt_confirm_live,
+    confirm_understanding as jt_confirm_understanding,
+    dashboard as jt_dashboard,
+    get_strategy as jt_get_strategy,
+    list_trades as jt_list_trades,
+    monitor_cycle as jt_monitor_cycle,
+    paper_gate as jt_paper_gate,
+    propose_strategy as jt_propose_strategy,
+    scheduler_status as jt_scheduler_status,
+    start_jupiter_trade_scheduler,
+    update_strategy_rules as jt_update_strategy_rules,
+)
+from jupiter_trade_ledger import (
+    JT_PLATFORM_FEE_RATE,
+    get_jt_agent_wallet_info,
+    get_jt_user_balances,
+    list_jt_user_ledger,
+    verify_and_record_jt_deposit,
+    withdraw_jt_tokens,
+)
+from jupiter_trade_templates import (
+    STRATEGY_TEMPLATES,
+    get_strategy_template as jt_get_template,
+    list_strategy_templates as jt_list_templates,
+    match_strategy_template as jt_match_template,
+)
 from cache_store import cache_backend
 from hedge_fund_agent import HEDGE_FUND_MODEL, run_hedge_fund_agent
 from hedge_fund_core import get_fee_structure
@@ -437,6 +469,11 @@ def _startup() -> None:
         )
     if start_yield_scheduler():
         print(f"  📈 Yield Agent scheduler started (every {YIELD_SCHEDULER_POLL_SECONDS}s)")
+    if start_jupiter_trade_scheduler():
+        print(
+            f"  📈 Jupiter Trade monitor started "
+            f"(every {JT_MONITOR_INTERVAL_SECONDS}s, paper≥{JT_PAPER_MIN_HOURS:g}h)"
+        )
     try:
         from platform_payments import (
             ensure_payments_schema,
@@ -449,7 +486,10 @@ def _startup() -> None:
     except Exception as exc:
         print(f"  ⚠️  Platform payments scheduler not started: {exc}")
     print(f"  🗄️  Cache backend: {cache_backend()}")
-    print("  🤖 Agents: DCA, Kickstart Token Copilot, Volume Agent, Hedge Fund, Yield")
+    print(
+        "  🤖 Agents: DCA, Kickstart, Volume, Hedge Fund, Yield, Jupiter Trade, + "
+        f"{len(DEFI_AGENT_META)} DeFi strategy agents"
+    )
 
 
 @app.get("/health")
@@ -1459,6 +1499,240 @@ def due_diligence_chat(
     auth_wallet: str = Depends(require_wallet_session),
 ) -> ChatResponse:
     return _run_research_chat(run_due_diligence_agent, body, auth_wallet)
+
+
+def _register_defi_strategy_agent(slug: str, meta: dict[str, str]) -> None:
+    runner = make_runner(slug)
+
+    def health_endpoint() -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "agent": meta["name"],
+            "model": DEFI_MODEL,
+            "llm": llm_provider(),
+            "llm_configured": llm_configured(),
+            "auth_required": True,
+            "cluster": SOLANA_CLUSTER,
+            "pricing": meta.get("pricing", "wallet sign-in required"),
+            "execution_mode": "paper_preview",
+        }
+
+    def chat_endpoint(
+        body: KickstartChatRequest,
+        auth_wallet: str = Depends(require_wallet_session),
+    ) -> ChatResponse:
+        return _run_research_chat(runner, body, auth_wallet)
+
+    health_endpoint.__name__ = f"defi_{slug.replace('-', '_')}_health"
+    chat_endpoint.__name__ = f"defi_{slug.replace('-', '_')}_chat"
+    app.get(f"/{slug}/health")(health_endpoint)
+    app.post(f"/{slug}/chat", response_model=ChatResponse)(chat_endpoint)
+
+
+for _defi_slug, _defi_meta in DEFI_AGENT_META.items():
+    _register_defi_strategy_agent(_defi_slug, _defi_meta)
+
+
+@app.get("/jupiter-trade/health")
+def jupiter_trade_health() -> dict[str, Any]:
+    info = get_jt_agent_wallet_info()
+    return {
+        "status": "ok",
+        "agent": "Jupiter Trade Agent",
+        "model": JT_MODEL,
+        "llm": JT_LLM_PROVIDER or llm_provider(),
+        "llm_configured": llm_configured(),
+        "auth_required": True,
+        "cluster": SOLANA_CLUSTER,
+        "venue": "jupiter_spot",
+        "perps_enabled": False,
+        "paper_min_hours": JT_PAPER_MIN_HOURS,
+        "monitor_interval_seconds": JT_MONITOR_INTERVAL_SECONDS,
+        "trading_wallet": info.get("wallet"),
+        "trading_wallet_configured": bool(info.get("wallet")),
+        "wallet_provider": "circle",
+        "signing": "circle_only",
+        "platform_fee_rate": JT_PLATFORM_FEE_RATE,
+        "platform_fee_pct": JT_PLATFORM_FEE_RATE * 100,
+        "strategy_templates": len(STRATEGY_TEMPLATES),
+        "scheduler": jt_scheduler_status(),
+        "pricing": "0.1% per live trade · paper first · Circle wallet",
+    }
+
+
+@app.get("/jupiter-trade/templates")
+def jupiter_trade_templates(
+    family: str = Query(""),
+    query: str = Query(""),
+    limit: int = Query(150, ge=1, le=200),
+) -> dict[str, Any]:
+    return jt_list_templates(family=family, query=query, limit=limit)
+
+
+@app.get("/jupiter-trade/templates/{template_id}")
+def jupiter_trade_template_detail(template_id: str) -> dict[str, Any]:
+    result = jt_get_template(template_id)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@app.get("/jupiter-trade/templates-match")
+def jupiter_trade_templates_match(q: str = Query(..., min_length=1)) -> dict[str, Any]:
+    return jt_match_template(q)
+
+
+@app.post("/jupiter-trade/chat", response_model=ChatResponse)
+def jupiter_trade_chat(
+    body: KickstartChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    return _run_research_chat(run_jupiter_trade_agent, body, auth_wallet)
+
+
+@app.get("/jupiter-trade/wallet/agent")
+def jupiter_trade_wallet_agent(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_jt_agent_wallet_info(auth_wallet)
+
+
+@app.get("/jupiter-trade/wallet/balance")
+def jupiter_trade_wallet_balance(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return get_jt_user_balances(auth_wallet)
+
+
+@app.post("/jupiter-trade/wallet/deposit/verify")
+def jupiter_trade_deposit_verify(
+    body: DepositVerifyRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = verify_and_record_jt_deposit(body.signature.strip(), auth_wallet)
+    if result.get("error") and result.get("status") != "pending":
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+@app.post("/jupiter-trade/wallet/withdraw")
+def jupiter_trade_wallet_withdraw(
+    body: dict[str, Any],
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = withdraw_jt_tokens(
+        auth_wallet,
+        str(body.get("token") or "SOL"),
+        float(body.get("amount") or 0),
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/jupiter-trade/wallet/ledger")
+def jupiter_trade_wallet_ledger(
+    auth_wallet: str = Depends(require_wallet_session),
+    limit: int = Query(50, ge=1, le=100),
+) -> dict[str, Any]:
+    return {"ledger": list_jt_user_ledger(auth_wallet, limit=limit)}
+
+
+@app.get("/jupiter-trade/dashboard")
+def jupiter_trade_dashboard(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return jt_dashboard(auth_wallet)
+
+
+@app.post("/jupiter-trade/strategies")
+def jupiter_trade_create_strategy(
+    body: dict[str, Any],
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = jt_propose_strategy(
+        auth_wallet,
+        name=str(body.get("name") or ""),
+        symbols=body.get("symbols"),
+        capital_sol=float(body.get("capital_sol") or 1),
+        take_profit_pct=body.get("take_profit_pct"),
+        stop_loss_pct=body.get("stop_loss_pct"),
+        notes=str(body.get("notes") or ""),
+        template_id=str(body.get("template_id") or ""),
+        created_by="user",
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/jupiter-trade/strategies/{strategy_id}/confirm-understanding")
+def jupiter_trade_confirm_understanding(
+    strategy_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = jt_confirm_understanding(strategy_id, auth_wallet)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/jupiter-trade/strategies/{strategy_id}/confirm-live")
+def jupiter_trade_confirm_live(
+    strategy_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = jt_confirm_live(strategy_id, auth_wallet)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.patch("/jupiter-trade/strategies/{strategy_id}")
+def jupiter_trade_update_strategy(
+    strategy_id: str,
+    body: dict[str, Any],
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = jt_update_strategy_rules(
+        strategy_id,
+        auth_wallet,
+        take_profit_pct=body.get("take_profit_pct"),
+        stop_loss_pct=body.get("stop_loss_pct"),
+        notes=body.get("notes"),
+        reset_to_confirm=bool(body.get("reset_to_confirm", True)),
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/jupiter-trade/strategies/{strategy_id}/close")
+def jupiter_trade_close_strategy(
+    strategy_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = jt_close_strategy(strategy_id, auth_wallet)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/jupiter-trade/strategies/{strategy_id}")
+def jupiter_trade_get_strategy(
+    strategy_id: str,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    strategy = jt_get_strategy(strategy_id, auth_wallet)
+    if not strategy:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return {
+        "strategy": strategy,
+        "gate": jt_paper_gate(strategy),
+        "trades": jt_list_trades(strategy_id, limit=40),
+    }
+
+
+@app.post("/jupiter-trade/monitor")
+def jupiter_trade_monitor(
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    _ = auth_wallet
+    return jt_monitor_cycle(force=True)
 
 
 @app.get("/yield/health")

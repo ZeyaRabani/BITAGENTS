@@ -542,6 +542,74 @@ MIGRATION_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_hf_live_trades_strategy ON hf_live_trades (strategy_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_hf_live_trades_user ON hf_live_trades (user_wallet, created_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS jt_strategies (
+        id                  VARCHAR(16) PRIMARY KEY,
+        user_wallet         VARCHAR(64) NOT NULL,
+        name                TEXT NOT NULL,
+        status              VARCHAR(32) NOT NULL DEFAULT 'awaiting_confirm',
+        symbols             JSONB NOT NULL DEFAULT '[]'::jsonb,
+        rules               JSONB NOT NULL DEFAULT '{}'::jsonb,
+        understanding       TEXT NOT NULL DEFAULT '',
+        capital_sol         DOUBLE PRECISION NOT NULL DEFAULT 0,
+        cash_sol            DOUBLE PRECISION NOT NULL DEFAULT 0,
+        paper_started_at    TIMESTAMPTZ,
+        paper_ready_at      TIMESTAMPTZ,
+        live_started_at     TIMESTAMPTZ,
+        created_by          VARCHAR(16) NOT NULL DEFAULT 'user',
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        last_evaluated_at   TIMESTAMPTZ
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_jt_strategies_user ON jt_strategies (user_wallet)",
+    "CREATE INDEX IF NOT EXISTS idx_jt_strategies_status ON jt_strategies (status)",
+    """
+    CREATE TABLE IF NOT EXISTS jt_paper_positions (
+        id                  VARCHAR(16) PRIMARY KEY,
+        strategy_id         VARCHAR(16) NOT NULL REFERENCES jt_strategies(id) ON DELETE CASCADE,
+        user_wallet         VARCHAR(64) NOT NULL,
+        symbol              VARCHAR(32) NOT NULL,
+        mint                VARCHAR(64),
+        units               DOUBLE PRECISION NOT NULL DEFAULT 0,
+        avg_entry_usd       DOUBLE PRECISION NOT NULL DEFAULT 0,
+        mark_price_usd      DOUBLE PRECISION,
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (strategy_id, symbol)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_jt_paper_positions_strategy ON jt_paper_positions (strategy_id)",
+    """
+    CREATE TABLE IF NOT EXISTS jt_paper_trades (
+        id                  VARCHAR(16) PRIMARY KEY,
+        strategy_id         VARCHAR(16) NOT NULL,
+        user_wallet         VARCHAR(64) NOT NULL,
+        symbol              VARCHAR(32) NOT NULL,
+        mint                VARCHAR(64),
+        side                VARCHAR(8) NOT NULL,
+        units               DOUBLE PRECISION NOT NULL,
+        price_usd           DOUBLE PRECISION NOT NULL,
+        notional_usd        DOUBLE PRECISION NOT NULL,
+        reason              TEXT,
+        mode                VARCHAR(8) NOT NULL DEFAULT 'paper',
+        signature           TEXT,
+        explorer_url        TEXT,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_jt_paper_trades_strategy ON jt_paper_trades (strategy_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_jt_paper_trades_user ON jt_paper_trades (user_wallet, created_at DESC)",
+    """
+    CREATE TABLE IF NOT EXISTS jt_events (
+        id                  VARCHAR(16) PRIMARY KEY,
+        strategy_id         VARCHAR(16) NOT NULL,
+        user_wallet         VARCHAR(64) NOT NULL,
+        event_type          VARCHAR(32) NOT NULL,
+        detail              JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_jt_events_strategy ON jt_events (strategy_id, created_at DESC)",
     "ALTER TABLE hf_decisions ADD COLUMN IF NOT EXISTS signals JSONB NOT NULL DEFAULT '[]'::jsonb",
     "ALTER TABLE hf_decisions ADD COLUMN IF NOT EXISTS decision_graph JSONB NOT NULL DEFAULT '{}'::jsonb",
     "ALTER TABLE hf_paper_positions DROP CONSTRAINT IF EXISTS hf_paper_positions_portfolio_id_symbol_key",
