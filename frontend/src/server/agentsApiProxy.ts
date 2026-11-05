@@ -450,6 +450,24 @@ export async function proxyJupiterTradeCloseStrategy(
   );
 }
 
+export async function proxyAomiTestWallet(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/aomi-test/wallet`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyAomiTestSend(
+  body: { destination: string; amount_sol: number },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/aomi-test/send`, {
+    method: "POST",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export async function proxyJupiterTradeMonitor(authToken: string): Promise<Response> {
   return fetch(`${getAgentsBaseUrl()}/jupiter-trade/monitor`, {
     method: "POST",

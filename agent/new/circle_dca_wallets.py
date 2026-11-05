@@ -38,6 +38,7 @@ AGENT_TYPES = (
     "yield",
     "creator_pay",
     "jupiter_trade",
+    "aomi_test",
 )
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
@@ -48,6 +49,7 @@ AGENT_TYPE_LABELS = {
     "yield": "Yield",
     "creator_pay": "CreatorPay",
     "jupiter_trade": "JupiterTrade",
+    "aomi_test": "TestAomi",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -98,6 +100,9 @@ def normalize_agent_type(agent_type: str) -> str:
         "jupiter-trade": "jupiter_trade",
         "jt": "jupiter_trade",
         "trade": "jupiter_trade",
+        "aomi-test": "aomi_test",
+        "aomi_test": "aomi_test",
+        "test-aomi": "aomi_test",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:

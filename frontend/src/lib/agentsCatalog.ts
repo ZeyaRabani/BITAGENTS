@@ -232,6 +232,23 @@ const CORE_FEATURED_AGENTS: MarketplaceAgent[] = [
     model: "meta-llama/llama-3.1-8b-instruct",
     cluster: "mainnet",
   },
+  {
+    id: "aomi-test",
+    slug: "aomi-test",
+    name: "Test Aomi Agent",
+    category: "Trading",
+    description:
+      "Test Aomi as agent infra. Aomi builds a SOL transfer from this agent's Circle wallet, then Circle signs and broadcasts it.",
+    tagline: "Aomi build · Circle send",
+    pricePerTask: "test",
+    runs: "-",
+    volumeSol: "-",
+    rating: 4.5,
+    iconId: "bot",
+    available: true,
+    model: "aomi",
+    cluster: "devnet",
+  },
 ];
 
 const DEFI_FEATURED_AGENTS: MarketplaceAgent[] = DEFI_AGENT_LIST.map((agent) => ({

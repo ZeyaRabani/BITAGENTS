@@ -134,6 +134,14 @@ from due_diligence_agent import (
 )
 from defi_strategy_agents import DEFI_AGENT_META, DEFI_MODEL, make_runner
 from jupiter_trade_agent import JT_LLM_PROVIDER, JT_MODEL, run_jupiter_trade_agent
+from aomi_test_agent import (
+    AOMI_API_URL,
+    AOMI_MAX_SEND_SOL,
+    aomi_configured,
+    run_aomi_test_agent,
+    send_sol as aomi_send_sol,
+    wallet_status as aomi_wallet_status,
+)
 from jupiter_trade_core import (
     JT_MONITOR_INTERVAL_SECONDS,
     JT_PAPER_MIN_HOURS,
@@ -1733,6 +1741,51 @@ def jupiter_trade_monitor(
 ) -> dict[str, Any]:
     _ = auth_wallet
     return jt_monitor_cycle(force=True)
+
+
+@app.get("/aomi-test/health")
+def aomi_test_health() -> dict[str, Any]:
+    from circle_dca_wallets import circle_dca_enabled
+
+    return {
+        "status": "ok",
+        "agent": "Test Aomi Agent",
+        "auth_required": True,
+        "aomi_configured": aomi_configured(),
+        "aomi_api_url": AOMI_API_URL,
+        "circle_configured": circle_dca_enabled(),
+        "cluster": SOLANA_CLUSTER,
+        "max_send_sol": AOMI_MAX_SEND_SOL,
+        "pricing": "Aomi builds · Circle signs",
+    }
+
+
+@app.get("/aomi-test/wallet")
+def aomi_test_wallet(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    return aomi_wallet_status(auth_wallet)
+
+
+@app.post("/aomi-test/send")
+def aomi_test_send(
+    body: dict[str, Any],
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    result = aomi_send_sol(
+        auth_wallet,
+        str(body.get("destination") or ""),
+        float(body.get("amount_sol") or 0),
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result)
+    return result
+
+
+@app.post("/aomi-test/chat", response_model=ChatResponse)
+def aomi_test_chat(
+    body: KickstartChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    return _run_research_chat(run_aomi_test_agent, body, auth_wallet)
 
 
 @app.get("/yield/health")
