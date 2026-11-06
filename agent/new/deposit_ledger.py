@@ -258,7 +258,7 @@ def _parse_inbound_transfers(tx: dict, agent_wallet: str) -> list[dict[str, Any]
 
 
 def get_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
-    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC, load_keypair
+    from dca_agent import SOLANA_CLUSTER, SOLANA_RPC, _redact_rpc_url, load_keypair
     from circle_dca_wallets import circle_dca_enabled, get_dca_agent_wallet_address
 
     user_wallet = (user_wallet or "").strip()
@@ -301,7 +301,7 @@ def get_agent_wallet_info(user_wallet: Optional[str] = None) -> dict[str, Any]:
         "allowed_deposit_tokens": ["SOL"],
         "storage": "neon_postgres",
         "cluster": SOLANA_CLUSTER,
-        "rpc_url": SOLANA_RPC,
+        "rpc_url": _redact_rpc_url(SOLANA_RPC),
     }
     if circle_error and not per_user:
         result["circle_error"] = circle_error

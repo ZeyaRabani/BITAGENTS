@@ -31,7 +31,7 @@ function clearAuth(wallet: string) {
 
 async function fetchChallenge(userWallet: string) {
   const params = new URLSearchParams({ user_wallet: userWallet });
-  const res = await fetch(`/api/agents/kickstart-copilot/auth/challenge?${params}`, {
+  const res = await fetch(`/api/agents/auth/challenge?${params}`, {
     cache: "no-store",
   });
   const data = await res.json();
@@ -46,7 +46,7 @@ async function verifyAuth(body: {
   message: string;
   signature: string;
 }): Promise<AuthSession> {
-  const res = await fetch("/api/agents/kickstart-copilot/auth/verify", {
+  const res = await fetch("/api/agents/auth/verify", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -59,7 +59,7 @@ async function verifyAuth(body: {
 }
 
 async function fetchMe(token: string) {
-  const res = await fetch("/api/agents/kickstart-copilot/auth/me", {
+  const res = await fetch("/api/agents/auth/me", {
     headers: { Authorization: `Bearer ${token}` },
     cache: "no-store",
   });

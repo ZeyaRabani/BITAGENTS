@@ -1,64 +1,14 @@
 import type { LucideIcon } from "lucide-react";
-import {
-  Activity,
-  ArrowLeftRight,
-  Bell,
-  Bot,
-  Copy,
-  Crosshair,
-  Droplets,
-  GitCompareArrows,
-  Grid3x3,
-  Landmark,
-  LineChart,
-  Radar,
-  Scale,
-  Search,
-  Shield,
-  TrendingUp,
-  Wallet,
-} from "lucide-react";
-import { DEFI_AGENT_LIST } from "@/lib/defiAgentsConfig";
+import { ArrowLeftRight, Crosshair, Landmark } from "lucide-react";
 
 export type AgentCategory = "Monitor" | "Research" | "Alerts" | "Automation" | "Trading";
 
-export type AgentIconId =
-  | "wallet"
-  | "search"
-  | "bell"
-  | "bot"
-  | "radar"
-  | "swap"
-  | "yield"
-  | "liquidity"
-  | "copy"
-  | "grid"
-  | "shield"
-  | "perps"
-  | "arb"
-  | "treasury"
-  | "rebalance"
-  | "sniper"
-  | "options";
+export type AgentIconId = "swap" | "fund" | "sniper";
 
 export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
-  wallet: Wallet,
-  search: Search,
-  bell: Bell,
-  bot: Bot,
-  radar: Radar,
   swap: ArrowLeftRight,
-  yield: TrendingUp,
-  liquidity: Droplets,
-  copy: Copy,
-  grid: Grid3x3,
-  shield: Shield,
-  perps: Activity,
-  arb: GitCompareArrows,
-  treasury: Landmark,
-  rebalance: Scale,
+  fund: Landmark,
   sniper: Crosshair,
-  options: LineChart,
 };
 
 export type MarketplaceAgent = {
@@ -78,213 +28,60 @@ export type MarketplaceAgent = {
   cluster?: string;
 };
 
-export const MARKETPLACE_STATS = {
-  liveAgents: "17",
-  tasks24h: "102",
-  activeBuilders: "22",
-  uptime30d: "99.2%",
-};
-
-export const AGENT_CATEGORIES: { name: AgentCategory; count: number }[] = [
-  { name: "Monitor", count: 12 },
-  { name: "Research", count: 9 },
-  { name: "Alerts", count: 7 },
-  { name: "Automation", count: 11 },
-  { name: "Trading", count: 9 },
-];
-
-const CORE_FEATURED_AGENTS: MarketplaceAgent[] = [
+export const FEATURED_AGENTS: MarketplaceAgent[] = [
   {
     id: "dca",
     slug: "dca",
     name: "DCA Agent",
     category: "Trading",
     description:
-      "Set up dollar-cost averaging on Solana. Schedule recurring token buys, preview Jupiter quotes, and manage plans from natural language.",
-    tagline: "Recurring buys · hosted LLM",
+      "Recurring Jupiter buys. Each swap is simulated on Aomi before the Circle wallet signs it.",
+    tagline: "Jupiter buy · Aomi fork · Circle sign",
     pricePerTask: "0.5% / tx",
     runs: "-",
     volumeSol: "-",
     rating: 4.9,
     iconId: "swap",
     available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
+    model: "meta-llama/llama-3.3-70b-instruct",
     cluster: "mainnet",
   },
   {
-    id: "kickstart-copilot",
-    slug: "kickstart-copilot",
-    name: "EasyA Analysis Agent",
-    category: "Research",
-    description:
-      "Solana token analysis - live price, liquidity, holders, health scores, risk checks, and comparisons.",
-    tagline: "Token analysis",
-    rating: 4.9,
-    iconId: "search",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "volume",
-    slug: "volume",
-    name: "Volume Agent",
+    id: "hedge-fund",
+    slug: "hedge-fund",
+    name: "Hedge Fund Agent",
     category: "Trading",
     description:
-      "Run volume campaigns. Deposit your token + SOL, create or reuse a pool, and schedule buy/sell cycles at your chosen frequency.",
-    tagline: "DLMM volume · pool infra",
-    pricePerTask: "0.25% / leg",
+      "Sized Jupiter buys and sells from a dedicated Circle wallet. Aomi simulates each swap before Circle signs.",
+    tagline: "Buy or sell · Aomi fork · Circle sign",
+    pricePerTask: "Aomi gate",
     runs: "-",
     volumeSol: "-",
     rating: 4.8,
-    iconId: "swap",
+    iconId: "fund",
     available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
+    model: "meta-llama/llama-3.3-70b-instruct",
     cluster: "mainnet",
   },
   {
-    id: "whale-tracking",
-    slug: "whale-tracking",
-    name: "Whale Tracking Agent",
+    id: "sniper",
+    slug: "sniper",
+    name: "Sniper Agent",
     category: "Trading",
     description:
-      "Track Solana wallet addresses, monitor smart-money activity, maintain watchlists, and research copy-trade opportunities.",
-    tagline: "Wallet intel · copy-trade research",
-    rating: 4.8,
-    iconId: "radar",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "token-research",
-    slug: "token-research",
-    name: "Token Research Agent",
-    category: "Research",
-    description:
-      "Research any Solana token using on-chain RPC data, Jupiter prices, and Meteora pool metrics.",
-    tagline: "On-chain RPC · Jupiter · Meteora",
-    rating: 4.8,
-    iconId: "search",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "wallet-monitoring",
-    slug: "wallet-monitoring",
-    name: "Wallet Monitoring Agent",
-    category: "Monitor",
-    description:
-      "Monitor your connected wallet — SOL balance, SPL holdings, recent activity, and informational trade suggestions.",
-    tagline: "Portfolio snapshot · trade ideas",
-    rating: 4.9,
-    iconId: "wallet",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "due-diligence",
-    slug: "due-diligence",
-    name: "Due Diligence Agent",
-    category: "Research",
-    description:
-      "Due diligence on tokens and SPL mints — mint/freeze authorities, holder concentration, liquidity, and graded risk.",
-    tagline: "Mint authority · risk score",
+      "SOL entries into a token after a size cap and a mint-authority check. Aomi simulates the swap before Circle signs.",
+    tagline: "SOL entry · renounce check · Aomi fork",
+    pricePerTask: "Aomi gate",
+    runs: "-",
+    volumeSol: "-",
     rating: 4.7,
-    iconId: "bot",
+    iconId: "sniper",
     available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
+    model: "meta-llama/llama-3.3-70b-instruct",
     cluster: "mainnet",
   },
-  {
-    id: "yield",
-    slug: "yield",
-    name: "Yield Agent",
-    category: "Trading",
-    description:
-      "Deposit SOL into Kamino, Jupiter JLP, or Save. Compare yields in chat, then deploy idle capital into the best matching venue. 0.5% fee per invest on top of capital.",
-    tagline: "Kamino · Jupiter JLP · Save",
-    pricePerTask: "0.5% / tx",
-    runs: "-",
-    volumeSol: "-",
-    rating: 4.8,
-    iconId: "yield",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "jupiter-trade",
-    slug: "jupiter-trade",
-    name: "Jupiter Trade Agent",
-    category: "Trading",
-    description:
-      "Bring or request a strategy. Confirm the agent's understanding, run ≥24h paper on Jupiter spot, then approve live buys/sells. Jupiter Perps are not used yet.",
-    tagline: "Confirm · 24h paper · Jupiter spot",
-    pricePerTask: "0.1% / trade",
-    runs: "-",
-    volumeSol: "-",
-    rating: 4.9,
-    iconId: "swap",
-    available: true,
-    model: "meta-llama/llama-3.1-8b-instruct",
-    cluster: "mainnet",
-  },
-  {
-    id: "aomi-test",
-    slug: "aomi-test",
-    name: "Test Aomi Agent",
-    category: "Trading",
-    description:
-      "Test Aomi as agent infra. Aomi builds a SOL transfer from this agent's Circle wallet, then Circle signs and broadcasts it.",
-    tagline: "Aomi build · Circle send",
-    pricePerTask: "test",
-    runs: "-",
-    volumeSol: "-",
-    rating: 4.5,
-    iconId: "bot",
-    available: true,
-    model: "aomi",
-    cluster: "devnet",
-  },
-];
-
-const DEFI_FEATURED_AGENTS: MarketplaceAgent[] = DEFI_AGENT_LIST.map((agent) => ({
-  id: agent.slug,
-  slug: agent.slug,
-  name: agent.name,
-  category: agent.category,
-  description: agent.description,
-  tagline: agent.tagline,
-  pricePerTask: agent.pricePerTask,
-  runs: "-",
-  volumeSol: "-",
-  rating: 4.8,
-  iconId: agent.iconId,
-  available: true,
-  model: agent.model,
-  cluster: agent.cluster,
-}));
-
-export const FEATURED_AGENTS: MarketplaceAgent[] = [
-  ...CORE_FEATURED_AGENTS,
-  ...DEFI_FEATURED_AGENTS,
 ];
 
 export function getAgentBySlug(slug: string): MarketplaceAgent | undefined {
   return FEATURED_AGENTS.find((agent) => agent.slug === slug);
 }
-
-export const DCA_QUICK_ACTIONS = [
-  "List my DCA plans",
-  "Analyze SOL for DCA timing",
-  "Execute plan dry run",
-] as const;
-
-export const VOLUME_QUICK_ACTIONS = [
-  "List my volume campaigns",
-  "Check DLMM pool status",
-  "How does pool creation work?",
-] as const;

@@ -38,7 +38,7 @@ AGENT_TYPES = (
     "yield",
     "creator_pay",
     "jupiter_trade",
-    "aomi_test",
+    "sniper",
 )
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
@@ -49,7 +49,7 @@ AGENT_TYPE_LABELS = {
     "yield": "Yield",
     "creator_pay": "CreatorPay",
     "jupiter_trade": "JupiterTrade",
-    "aomi_test": "TestAomi",
+    "sniper": "Sniper",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -100,9 +100,9 @@ def normalize_agent_type(agent_type: str) -> str:
         "jupiter-trade": "jupiter_trade",
         "jt": "jupiter_trade",
         "trade": "jupiter_trade",
-        "aomi-test": "aomi_test",
-        "aomi_test": "aomi_test",
-        "test-aomi": "aomi_test",
+        "hedge-fund": "hedge_fund",
+        "hedge_fund": "hedge_fund",
+        "sniper": "sniper",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:
@@ -363,6 +363,22 @@ def get_dca_agent_wallet_address(user_wallet: str) -> Optional[str]:
     return get_agent_wallet_address(user_wallet, "dca")
 
 
+def circle_sign_message(wallet_id: str, message: str) -> str:
+    """Sign a UTF-8 message. Returns Circle's hex signature (0x + 128 hex chars)."""
+    data = _circle_post(
+        "/developer/sign/message",
+        {
+            "walletId": wallet_id,
+            "message": message,
+            "encodedByHex": False,
+        },
+    )
+    signature = data.get("signature")
+    if not signature:
+        raise CircleDcaWalletError("Circle sign message returned no signature.")
+    return str(signature)
+
+
 def circle_sign_raw_transaction(wallet_id: str, raw_transaction_b64: str) -> str:
     """Sign a base64 Solana transaction via Circle Signing API."""
     data = _circle_post(
@@ -408,9 +424,13 @@ def _load_fallback_keypair(agent_type: str):
 
         return load_volume_keypair()
     if agent_type == "hedge_fund":
-        from hedge_fund_ledger import load_hf_keypair
-
+        try:
+            from hedge_fund_ledger import load_hf_keypair
+        except Exception:
+            return None
         return load_hf_keypair()
+    if agent_type == "sniper":
+        return None
     if agent_type == "jupiter_trade":
         from jupiter_trade_ledger import load_jt_keypair
 

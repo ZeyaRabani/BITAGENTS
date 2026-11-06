@@ -1,14 +1,15 @@
-import { LAUNCHED_AGENTS, formatUsd } from "@/lib/launchpadMock";
+const TICKER_AGENTS = [{ sym: "DCA", runs: 0, volumeUsd: 0 }];
 
-/** Virtuals' "live trade feed" pattern -- a scrolling strip proving real
- * activity is happening, instead of a static page. Pulls from the same
- * LAUNCHED_AGENTS data the Trending section uses, so it's connected to
- * real agent stats rather than disconnected placeholder copy. */
+function formatUsd(value: number): string {
+  if (value >= 1000) return `$${(value / 1000).toFixed(1)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
 export function Ticker() {
-  const items = LAUNCHED_AGENTS.map((a) => ({
-    sym: a.handle,
-    px: `${a.runs.toLocaleString()} runs`,
-    ch: formatUsd(a.volumeUsd),
+  const items = TICKER_AGENTS.map((agent) => ({
+    sym: agent.sym,
+    px: `${agent.runs.toLocaleString()} runs`,
+    ch: formatUsd(agent.volumeUsd),
   }));
   const row = [...items, ...items];
   return (

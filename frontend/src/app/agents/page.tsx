@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { AgentMarketplace } from "@/components/agents/AgentMarketplace";
+import { AgentDirectory } from "@/components/agents/AgentDirectory";
 
 export const metadata: Metadata = {
   title: "Agent Marketplace - BITAGENTS",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function AgentsPage() {
-  return <AgentMarketplace />;
+  return <AgentDirectory />;
 }

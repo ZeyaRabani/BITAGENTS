@@ -423,43 +423,6 @@ export function DcaAgentConsole() {
         </div>
       )}
 
-      <DcaAgentDeposit
-        cluster={cluster}
-        authToken={token}
-        refreshTick={dataRefreshTick}
-        onBalancesChange={setUserBalances}
-      />
-
-      {!publicKey && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
-          Connect your wallet above to deposit and run DCA plans tied to your balance.
-        </div>
-      )}
-
-      {publicKey && !isAuthenticated && !authBusy && (
-        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
-          Approve the wallet sign-in prompt to use the DCA agent.
-        </div>
-      )}
-
-      {userBalances && userBalances.balances.length > 0 && (
-        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-          <span className="text-foreground">
-            {userBalances.user_wallet.slice(0, 4)}…{userBalances.user_wallet.slice(-4)}
-          </span>
-        </div>
-      )}
-
-      {transactions.length > 0 && (
-        <Panel title="On-chain transactions · session">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {transactions.map((tx) => (
-              <TxLink key={tx.signature} tx={tx} cluster={cluster} />
-            ))}
-          </div>
-        </Panel>
-      )}
-
       <div className="grid gap-6 lg:grid-cols-3">
         <Panel 
           title="Command DCA Agent" 
@@ -561,11 +524,6 @@ export function DcaAgentConsole() {
 
         <Panel
           title="Agent action"
-          // action={
-          //   <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          //     {!agentOnline && "Waiting"}
-          //   </span>
-          // }
         >
           <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1 font-mono text-xs">
             {actions.length === 0 && (
@@ -581,6 +539,43 @@ export function DcaAgentConsole() {
           </div>
         </Panel>
       </div>
+
+      <DcaAgentDeposit
+        cluster={cluster}
+        authToken={token}
+        refreshTick={dataRefreshTick}
+        onBalancesChange={setUserBalances}
+      />
+
+      {!publicKey && (
+        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+          Connect your wallet above to deposit and run DCA plans tied to your balance.
+        </div>
+      )}
+
+      {publicKey && !isAuthenticated && !authBusy && (
+        <div className="border border-grid bg-surface/40 px-4 py-3 font-mono text-xs text-muted-foreground">
+          Approve the wallet sign-in prompt to use the DCA agent.
+        </div>
+      )}
+
+      {userBalances && userBalances.balances.length > 0 && (
+        <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+          <span className="text-foreground">
+            {userBalances.user_wallet.slice(0, 4)}…{userBalances.user_wallet.slice(-4)}
+          </span>
+        </div>
+      )}
+
+      {transactions.length > 0 && (
+        <Panel title="On-chain transactions · session">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {transactions.map((tx) => (
+              <TxLink key={tx.signature} tx={tx} cluster={cluster} />
+            ))}
+          </div>
+        </Panel>
+      )}
 
       <DcaPlanPanel authToken={token} cluster={cluster} refreshTick={dataRefreshTick} />
 

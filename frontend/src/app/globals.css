@@ -45,27 +45,27 @@
    ========================================================= */
 
 :root {
-  --radius: 0rem;
+  --radius: 0.4rem;
 
-  --background: #0c0a09;
-  --foreground: #f5efe6;
+  --background: #111111;
+  --foreground: #f0eeea;
 
-  --card: #151210;
-  --card-foreground: #f5efe6;
+  --card: #191919;
+  --card-foreground: #f0eeea;
 
-  --surface: #12100e;
-  --surface-2: #1a1714;
+  --surface: #151515;
+  --surface-2: #212121;
 
-  --muted-foreground: #9a8b7a;
+  --muted-foreground: #aea9a1;
 
-  --border: #2a2520;
-  --grid: #2a2520;
+  --border: #2c2c2c;
+  --grid: #2c2c2c;
 
-  --signal: #ff6b4a;
-  --warn: #f4a261;
+  --signal: #ff7a59;
+  --warn: #e0a45a;
 
-  --primary: #ff6b4a;
-  --primary-foreground: #0c0a09;
+  --primary: #ff7a59;
+  --primary-foreground: #14110f;
 
   --destructive: #ef4444;
 }
@@ -91,8 +91,8 @@
   }
 
   ::selection {
-    background: rgba(255, 107, 74, 0.35);
-    color: #f5efe6;
+    background: rgba(255, 122, 89, 0.3);
+    color: #f0eeea;
   }
 }
 

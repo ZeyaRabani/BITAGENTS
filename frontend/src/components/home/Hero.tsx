@@ -24,9 +24,6 @@ function Ctas({ center = false }: { center?: boolean }) {
       <a href="/agents" className="ui-cta-primary group">
         Browse Agents <span className="transition group-hover:translate-x-0.5">→</span>
       </a>
-      <a href="/agents/launch" className="ui-cta-secondary">
-        Create Your Own
-      </a>
     </div>
   );
 }

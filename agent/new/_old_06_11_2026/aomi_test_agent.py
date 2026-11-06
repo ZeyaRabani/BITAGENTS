@@ -33,7 +33,7 @@ def aomi_configured() -> bool:
 
 
 def cluster_label() -> str:
-    from dca_agent import SOLANA_CLUSTER
+    from solana_rpc import SOLANA_CLUSTER
 
     raw = (SOLANA_CLUSTER or "devnet").strip().lower()
     if raw in ("mainnet", "mainnet-beta"):
@@ -191,7 +191,7 @@ def _find_unsigned(node: Any, found: list[str]) -> None:
 
 
 def _broadcast_signed(signed_b64: str) -> dict[str, Any]:
-    from dca_agent import _confirm_transaction, _is_mainnet, sol_rpc
+    from solana_rpc import confirm_transaction, is_mainnet, sol_rpc
 
     try:
         sig = sol_rpc(
@@ -208,10 +208,10 @@ def _broadcast_signed(signed_b64: str) -> dict[str, Any]:
         )
     except Exception as exc:
         return {"error": f"sendTransaction failed: {exc}"}
-    confirm = _confirm_transaction(sig, timeout_s=45, encoded_tx=signed_b64)
+    confirm = confirm_transaction(sig, timeout_s=45, encoded_tx=signed_b64)
     if not confirm.get("confirmed"):
         return {"status": "failed", "signature": sig, "error": confirm.get("error") or "not confirmed"}
-    cluster = "mainnet" if _is_mainnet() else "devnet"
+    cluster = "mainnet" if is_mainnet() else "devnet"
     return {
         "status": "success",
         "signature": sig,

@@ -17,6 +17,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -76,10 +77,21 @@ from hosted_llm import (
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
-MODEL = CAPIX_MODEL if use_capix() else os.environ.get(
-    "DCA_MODEL",
-    os.environ.get("OPEN_ROUTER_MODEL", DEFAULT_LLM_MODEL),
-)
+def _openrouter_llama_model() -> str:
+    """DCA chat uses OpenRouter. Ollama tags need a Llama model that can call tools."""
+    raw = (
+        os.environ.get("DCA_MODEL")
+        or os.environ.get("OPEN_ROUTER_MODEL")
+        or "llama3.2:latest"
+    ).strip()
+    if "/" in raw:
+        return raw
+    # llama3.2:latest has no OpenRouter tool endpoint. Llama 3.3 70B does.
+    return "meta-llama/llama-3.3-70b-instruct"
+
+
+DCA_LLM_PROVIDER = "openrouter"
+MODEL = _openrouter_llama_model()
 
 SOLANA_RPC = os.environ.get(
     "SOLANA_RPC_URL",
@@ -89,6 +101,13 @@ SOLANA_CLUSTER = os.environ.get(
     "SOLANA_CLUSTER",
     os.environ.get("NEXT_PUBLIC_SOLANA_CLUSTER", "devnet"),
 )
+
+
+def _redact_rpc_url(rpc_url: str) -> str:
+    parts = urlsplit(rpc_url or "")
+    if not parts.query:
+        return rpc_url
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, "api-key=REDACTED", parts.fragment))
 
 # ── Jupiter v2 build API (replaces deprecated quote-api.jup.ag/v6) ────────────
 JUPITER_API_KEY    = os.environ.get("JUPITER_API_KEY", "")
@@ -580,15 +599,15 @@ def _update_plan(plan_id: str, updates: dict) -> Optional[dict]:
 
 # ─── Solana reads ─────────────────────────────────────────────────────────────
 
-def get_wallet_status() -> dict:
-    pubkey = get_wallet_pubkey()
+def get_wallet_status(user_wallet: Optional[str] = None) -> dict:
+    pubkey = get_wallet_pubkey(user_wallet)
     if not pubkey:
         return {
             "wallet_configured": False,
             "cluster": SOLANA_CLUSTER,
-            "rpc_url": SOLANA_RPC,
+            "rpc_url": _redact_rpc_url(SOLANA_RPC),
             "mainnet": _is_mainnet(),
-            "note": "Set DCA_WALLET_PRIVATE_KEY (base58 or JSON array) to enable live swaps.",
+            "note": "Sign in so the agent can use your Circle DCA wallet.",
         }
     try:
         lamports = _rpc_u64(sol_rpc("getBalance", [pubkey]))
@@ -598,7 +617,7 @@ def get_wallet_status() -> dict:
             "pubkey": pubkey,
             "sol_balance": round(balance, 6),
             "cluster": SOLANA_CLUSTER,
-            "rpc_url": SOLANA_RPC,
+            "rpc_url": _redact_rpc_url(SOLANA_RPC),
             "mainnet": _is_mainnet(),
             "jupiter_swaps": _is_mainnet(),
             "solders_installed": HAS_SOLDERS,
@@ -912,12 +931,21 @@ def _fetch_lookup_tables(addresses_by_table: Optional[dict]) -> list:
     return luts
 
 
+def _unsigned_versioned_tx_b64(msg) -> str:
+    from solders.signature import Signature
+    from solders.transaction import VersionedTransaction
+
+    blank = VersionedTransaction.populate(msg, [Signature.default()])
+    return base64.b64encode(bytes(blank)).decode("utf-8")
+
+
 def _execute_jupiter_swap_v2(
     build_data: dict,
     wallet_pubkey: str,
     keypair: Optional["Keypair"] = None,
     *,
     circle_wallet_id: Optional[str] = None,
+    plan_check: Optional[dict] = None,
 ) -> dict:
     """
     Assemble, sign, and send a Jupiter v2 swap transaction.
@@ -996,15 +1024,40 @@ def _execute_jupiter_swap_v2(
         try:
             payer = SPubkey.from_string(wallet_pubkey)
             msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
-            if circle_wallet_id:
-                from circle_dca_wallets import circle_sign_versioned_message
+            from aomi_pipeline import gate_swap
 
-                encoded = circle_sign_versioned_message(circle_wallet_id, msg)
+            gated = gate_swap(
+                _unsigned_versioned_tx_b64(msg),
+                plan_check,
+                signer_address=wallet_pubkey if circle_wallet_id else None,
+                circle_wallet_id=circle_wallet_id,
+            )
+            if not gated.get("ok"):
+                return {
+                    "status": gated.get("status") or "skipped",
+                    "error": gated.get("error") or "Aomi did not commit this swap.",
+                    "aomi_summary": gated.get("aomi_summary"),
+                    "aomi_digest": gated.get("aomi_digest"),
+                    "aomi_step": gated.get("aomi_step"),
+                }
+            sign_b64 = gated.get("unsigned_transaction_base64")
+            if circle_wallet_id:
+                from circle_dca_wallets import circle_sign_raw_transaction, circle_sign_versioned_message
+
+                if sign_b64:
+                    encoded = circle_sign_raw_transaction(circle_wallet_id, sign_b64)
+                else:
+                    encoded = circle_sign_versioned_message(circle_wallet_id, msg)
             else:
                 if not keypair:
                     return {"error": "No signing key available for Jupiter swap."}
                 tx = VersionedTransaction(msg, [keypair])
                 encoded = base64.b64encode(bytes(tx)).decode("utf-8")
+            aomi_meta = {
+                "aomi_digest": gated.get("aomi_digest"),
+                "aomi_summary": gated.get("aomi_summary"),
+                "aomi_check": gated.get("aomi_check"),
+            }
         except Exception as e:
             last_error = e
             if _is_blockhash_error(e) and attempt < 3:
@@ -1052,6 +1105,7 @@ def _execute_jupiter_swap_v2(
             "status":       "success",
             "signature":    sig,
             "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
+            **aomi_meta,
         }
 
     return {"error": f"Swap failed after blockhash retries: {last_error}"}
@@ -1068,6 +1122,8 @@ def _build_and_execute_swap(
     api_key: Optional[str] = None,
     circle_wallet_id: Optional[str] = None,
     compute_unit_price_percentile: str = "high",
+    plan_id: Optional[str] = None,
+    run_index: Optional[int] = None,
 ) -> dict:
     """
     Build + sign + send a swap via Jupiter v2.
@@ -1114,6 +1170,8 @@ def _build_and_execute_swap(
                             wallet_pubkey, keypair, slippage_bps=200, retries=1, api_key=api_key,
                             circle_wallet_id=circle_wallet_id,
                             compute_unit_price_percentile=percentile,
+                            plan_id=plan_id,
+                            run_index=run_index,
                         )
                     print("    ↳ Transaction too large even with higher slippage, skipping")
                     return {"status": "failed", "error": msg}
@@ -1124,11 +1182,19 @@ def _build_and_execute_swap(
             if "error" in build_data:
                 raise RuntimeError(f"/build error: {build_data['error']}")
 
+            out_raw_quote = int(build_data.get("outAmount") or 0)
+            min_out_raw = out_raw_quote * max(0, 10000 - int(slippage_bps)) // 10000 if out_raw_quote else 0
             result = _execute_jupiter_swap_v2(
                 build_data,
                 wallet_pubkey,
                 keypair,
                 circle_wallet_id=circle_wallet_id,
+                plan_check={
+                    "max_input_raw": int(raw_amount),
+                    "output_mint": output_mint,
+                    "min_out_raw": min_out_raw,
+                    "idempotency_key": f"{plan_id}:{run_index}" if plan_id else None,
+                },
             )
 
             if result.get("status") == "success":
@@ -1152,6 +1218,8 @@ def _build_and_execute_swap(
                             wallet_pubkey, keypair, slippage_bps=200, retries=1, api_key=api_key,
                             circle_wallet_id=circle_wallet_id,
                             compute_unit_price_percentile=percentile,
+                            plan_id=plan_id,
+                            run_index=run_index,
                         )
                     print("    ↳ Transaction too large even with higher slippage, skipping")
                     return result
@@ -1182,6 +1250,8 @@ def execute_swap_buy(
     slippage_bps: int = 100,
     dry_run: bool = False,
     user_wallet: Optional[str] = None,
+    plan_id: Optional[str] = None,
+    run_index: Optional[int] = None,
 ) -> dict:
     """Execute one DCA buy: Jupiter v2 swap on mainnet, SOL self-transfer on devnet."""
     amount       = float(amount)
@@ -1243,6 +1313,8 @@ def execute_swap_buy(
             inp["mint"], out["mint"], raw_amount,
             wallet_pubkey, keypair, slippage_bps,
             circle_wallet_id=circle_wallet_id,
+            plan_id=plan_id,
+            run_index=run_index,
         )
 
         if result.get("status") == "success":
@@ -2396,6 +2468,8 @@ def _run_plan_execution(plan_id: str, dry_run: bool = False, force: bool = False
         int(plan.get("slippage_bps", 100)),
         dry_run=dry_run,
         user_wallet=plan_user or None,
+        plan_id=plan_id,
+        run_index=executions_count + 1,
     )
 
     now         = datetime.now(timezone.utc)
@@ -2533,9 +2607,9 @@ def stop_metrics_scheduler() -> None:
 
 # ─── User deposit ledger (AI Agent wallet) ───────────────────────────────────
 
-def get_agent_wallet() -> dict:
+def get_agent_wallet(user_wallet: Optional[str] = None) -> dict:
     from deposit_ledger import get_agent_wallet_info
-    return get_agent_wallet_info()
+    return get_agent_wallet_info(user_wallet)
 
 
 def get_user_deposit_balance(user_wallet: str) -> dict:
@@ -2870,7 +2944,7 @@ SYSTEM_PROMPT = """You are a Solana DCA (Dollar-Cost Averaging) agent. You help 
 Use any interval the user requests: seconds, minutes, hours, days (e.g. "11 seconds", "12 min", "every 4 hours"). Presets like daily/hourly still work.
 
 ## Network
-- **Mainnet**: real Jupiter v2 token swaps (requires DCA_WALLET_PRIVATE_KEY + mainnet RPC)
+- **Mainnet**: real Jupiter v2 token swaps from the signed-in user's Circle DCA wallet
 - **Devnet** (default): scheduled SOL self-transfers as tx proof; Jupiter unavailable
 
 ## Confirmation required (mandatory - enforced by the server)
@@ -2921,8 +2995,14 @@ SYSTEM_PROMPT = SYSTEM_PROMPT + GOVERNANCE_PROMPT
 
 
 def call_openrouter(messages: list) -> dict[str, Any]:
-    """Call configured LLM (hosted Ollama or OpenRouter fallback) with tool support."""
-    return call_llm(messages, model=MODEL, tools=TOOLS, temperature=0.2)
+    """DCA chat always uses OpenRouter and the configured Llama model."""
+    return call_llm(
+        messages,
+        model=MODEL,
+        tools=TOOLS,
+        temperature=0.2,
+        provider=DCA_LLM_PROVIDER,
+    )
 
 
 CONFIRMATION_REQUIRED_TOOLS = frozenset({
@@ -3390,6 +3470,11 @@ def execute_tool(
             "get_dca_history",
         }
 
+        if tool_name in {"get_agent_wallet", "get_wallet_status"}:
+            if not auth_wallet:
+                return json.dumps({"error": "Wallet authentication required for this action."})
+            args["user_wallet"] = auth_wallet
+
         if tool_name in wallet_scoped_tools:
             if not auth_wallet:
                 return json.dumps({"error": "Wallet authentication required for this action."})
@@ -3470,7 +3555,7 @@ def _parse_create_dca_request(user_input: str) -> Optional[dict[str, Any]]:
     amount_per_buy = float(amount_match.group(1))
 
     interval_match = re.search(
-        r"every\s+(\d+)\s*(second|seconds|sec|secs|s|minute|minutes|min|mins|m|hour|hours|h|day|days|d)\b",
+        r"(?:every|in(?:\s+next)?|next|after)\s+(\d+)\s*(second|seconds|sec|secs|s|minute|minutes|min|mins|m|hour|hours|h|day|days|d)\b",
         lower,
     )
     if not interval_match:
