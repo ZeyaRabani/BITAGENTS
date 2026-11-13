@@ -1,0 +1,594 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Aomi · Strategy studio</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d0e12;
+        --panel: #16171d;
+        --line: #2a2b34;
+        --text: #eeeef5;
+        --muted: #9395a7;
+        --purple: #b5a1fa;
+        --green: #8bd7b1;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          15px/1.6 Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
+      }
+      button,
+      input {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+        border: 1px solid var(--line);
+        color: var(--text);
+        background: #22232c;
+        border-radius: 10px;
+        padding: 10px 17px;
+      }
+      button:hover {
+        border-color: var(--purple);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: wait;
+      }
+      button.primary {
+        background: var(--purple);
+        color: #1b1231;
+        border: 0;
+        font-weight: 650;
+      }
+      aside {
+        position: fixed;
+        width: 220px;
+        height: 100vh;
+        border-right: 1px solid var(--line);
+        padding: 30px 22px;
+        background: #111217;
+      }
+      .logo {
+        font-size: 29px;
+        font-weight: 700;
+        letter-spacing: -2px;
+      }
+      .logo span {
+        color: var(--purple);
+      }
+      .side-label {
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+        color: var(--muted);
+        margin: 43px 12px 12px;
+      }
+      .nav {
+        padding: 10px 12px;
+        color: var(--muted);
+        margin: 5px 0;
+        border-radius: 9px;
+      }
+      .nav.active {
+        background: #24202f;
+        color: #d1c3ff;
+      }
+      .side-bottom {
+        position: absolute;
+        bottom: 26px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .workspace {
+        margin-left: 220px;
+      }
+      header {
+        height: 79px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 42px;
+        border-bottom: 1px solid var(--line);
+      }
+      header small {
+        color: var(--muted);
+      }
+      .badge {
+        font-size: 11px;
+        letter-spacing: 0.4px;
+        padding: 5px 10px;
+        border: 1px solid #3e354d;
+        border-radius: 7px;
+        color: #d1b9ff;
+        background: #201a2a;
+      }
+      .layout {
+        max-width: 1200px;
+        padding: 30px 42px;
+        margin: auto;
+        display: grid;
+        grid-template-columns: minmax(450px, 1fr) 300px;
+        gap: 28px;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 2px;
+        color: var(--purple);
+        text-transform: uppercase;
+      }
+      h1 {
+        font-size: 32px;
+        line-height: 1.2;
+        letter-spacing: -1px;
+        margin: 10px 0 12px;
+        font-weight: 550;
+      }
+      p {
+        margin: 8px 0;
+      }
+      .sub {
+        color: var(--muted);
+        max-width: 550px;
+      }
+      .notice {
+        padding: 11px 15px;
+        margin-bottom: 23px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        color: #aca9bb;
+        font-size: 12px;
+      }
+      .chat {
+        margin-top: 29px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .bubble {
+        max-width: 95%;
+        padding: 16px 19px;
+        border-radius: 13px;
+        background: var(--panel);
+        border: 1px solid var(--line);
+      }
+      .bubble.user {
+        align-self: flex-end;
+        background: #252030;
+        border-color: #3c304f;
+      }
+      .byline {
+        color: var(--purple);
+        font-size: 11px;
+        font-weight: 600;
+        margin-bottom: 7px;
+      }
+      .skill {
+        display: inline-flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 11px;
+        color: var(--green);
+        margin: 2px 0 8px;
+      }
+      .skill:before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        background: var(--green);
+        border-radius: 50%;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .card-top {
+        padding: 19px 22px;
+        border-bottom: 1px solid var(--line);
+      }
+      .card-top h2 {
+        font-size: 18px;
+        font-weight: 550;
+        margin: 0;
+      }
+      .card-top p {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 4px 0 0;
+      }
+      .card-body {
+        padding: 20px 22px;
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+      .fields label {
+        font-size: 11px;
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .fields input {
+        width: 100%;
+        color: var(--text);
+        background: #0f1016;
+        border: 1px solid var(--line);
+        padding: 9px 12px;
+        border-radius: 7px;
+        font-size: 14px;
+      }
+      .metrics {
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 0;
+        font-size: 13px;
+        border-bottom: 1px solid var(--line);
+      }
+      .metrics:last-child {
+        border: 0;
+      }
+      .metrics span {
+        color: var(--muted);
+      }
+      .metrics strong {
+        font-weight: 500;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 9px;
+        margin-top: 18px;
+      }
+      .fine {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 14px;
+      }
+      .pill {
+        display: inline-block;
+        background: #1b3027;
+        color: var(--green);
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 99px;
+      }
+      .pill.paused {
+        background: #332b1e;
+        color: #e2c68c;
+      }
+      .composer {
+        margin-top: 23px;
+        border: 1px solid #3b344d;
+        background: #15141c;
+        border-radius: 13px;
+        padding: 12px;
+        display: flex;
+        gap: 8px;
+      }
+      .composer input {
+        flex: 1;
+        min-width: 0;
+        border: 0;
+        background: none;
+        color: var(--text);
+        padding: 5px;
+        outline: none;
+      }
+      .caption {
+        font-size: 10px;
+        text-align: center;
+        color: var(--muted);
+        margin-top: 8px;
+      }
+      .side-card {
+        padding: 22px;
+        background: #121319;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        margin-bottom: 18px;
+      }
+      .side-card h3 {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--muted);
+        margin: 0 0 13px;
+      }
+      .balance {
+        font-size: 25px;
+        font-weight: 500;
+      }
+      .steps {
+        padding: 0;
+        list-style: none;
+        font-size: 12px;
+      }
+      .steps li {
+        border-left: 1px solid #393343;
+        padding: 0 0 20px 17px;
+        color: var(--muted);
+      }
+      .steps li:last-child {
+        padding-bottom: 0;
+      }
+      .steps b {
+        display: block;
+        color: #ddd6ef;
+        font-weight: 500;
+      }
+      .receipt {
+        border-left: 2px solid var(--green);
+        padding: 8px 14px;
+        margin-top: 12px;
+        font-size: 13px;
+      }
+      .receipt small {
+        color: var(--muted);
+        display: block;
+      }
+      .error {
+        color: #f6b5b5;
+      }
+      .hidden {
+        display: none !important;
+      }
+      a {
+        color: var(--purple);
+      }
+      #event-log {
+        font:
+          10px/1.8 ui-monospace,
+          monospace;
+        color: #858295;
+        overflow-wrap: anywhere;
+      }
+      .toolbar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      @media (max-width: 1000px) {
+        aside {
+          width: 170px;
+        }
+        .workspace {
+          margin-left: 170px;
+        }
+        .layout {
+          grid-template-columns: 1fr;
+          padding: 24px;
+        }
+        .right {
+          display: none;
+        }
+        header {
+          padding: 0 24px;
+        }
+      }
+      @media (max-width: 620px) {
+        aside {
+          display: none;
+        }
+        .workspace {
+          margin-left: 0;
+        }
+        .layout {
+          padding: 18px;
+          display: block;
+        }
+        header {
+          padding: 0 18px;
+        }
+        .badge {
+          font-size: 9px;
+        }
+        h1 {
+          font-size: 27px;
+        }
+        .fields {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: #0d0e12;
+      }
+      .card {
+        scroll-margin-top: 100px;
+      }
+    </style>
+  </head>
+  <body>
+    <aside>
+      <div class="logo">aomi<span>✳</span></div>
+      <div class="side-label">Workspace</div>
+      <div class="nav">New conversation</div>
+      <div class="nav active">◈ &nbsp; My agents</div>
+      <div class="nav">Activity</div>
+      <div class="side-label">Strategy skills</div>
+      <div class="nav" style="color: #d1c3ff">↗ &nbsp; BITAGENTS</div>
+      <div class="side-bottom">
+        Personal workspace<br />Local experience preview
+      </div>
+    </aside>
+    <div class="workspace">
+      <header>
+        <div>Strategy studio &nbsp; <small>/ &nbsp; BITAGENTS</small></div>
+        <span class="badge">EXPERIENCE PREVIEW · NO LIVE FUNDS</span>
+      </header>
+      <div class="layout">
+        <main>
+          <div class="notice">
+            Local API + real DCA strategy logic. Fixture balances and swaps.
+            Guided prompts; no live AI model.
+          </div>
+          <div class="eyebrow">Your idea. An agent that follows it.</div>
+          <h1>Put your strategy to work.</h1>
+          <p class="sub">
+            Describe the routine. Set the boundaries. Stay in control.
+          </p>
+          <div class="chat" id="chat">
+            <div class="bubble">
+              <div class="byline">Aomi</div>
+              I can help you build a recurring token-buying agent with the
+              BITAGENTS DCA skill. What would you like it to do?
+            </div>
+          </div>
+          <form class="composer" id="composer">
+            <input
+              id="prompt"
+              aria-label="Describe your strategy"
+              placeholder="Buy 25 USDC of SOL daily for 4 buys"
+              autocomplete="off"
+            /><button class="primary" type="submit">Create agent ↗</button>
+          </form>
+          <div class="caption">
+            Guided preview supports “Buy [amount] USDC of SOL daily for [count]
+            buys”. Other strategies need another skill.
+          </div>
+          <div id="review" class="card hidden" style="margin-top: 20px">
+            <div class="card-top">
+              <div class="skill">BITAGENTS / DCA skill</div>
+              <h2>Review your agent</h2>
+              <p>Nothing runs until you authorize this schedule.</p>
+            </div>
+            <div class="card-body">
+              <div class="fields">
+                <label>Agent name<input id="name" value="Steady SOL" /></label
+                ><label
+                  >Buy amount · USDC<input
+                    id="amount"
+                    type="number"
+                    min="1"
+                    value="25" /></label
+                ><label>Interval<input id="interval" value="1 day" /></label
+                ><label
+                  >Number of buys<input
+                    id="count"
+                    type="number"
+                    min="1"
+                    value="4" /></label
+                ><label
+                  >Total budget · USDC<input
+                    id="budget"
+                    type="number"
+                    min="1"
+                    value="100.50"
+                    step=".01" /></label
+                ><label
+                  >Max slippage · basis points<input
+                    id="slippage"
+                    type="number"
+                    min="1"
+                    max="5000"
+                    value="100"
+                /></label>
+              </div>
+              <div class="metrics">
+                <span>Strategy</span><strong>USDC → SOL · Solana</strong>
+              </div>
+              <div class="metrics">
+                <span>Platform fee</span
+                ><strong>0.5% per buy · included in budget</strong>
+              </div>
+              <p class="fine">
+                Authorizes future buys from your BITAGENTS agent wallet. First
+                run after one interval. Network costs also apply. Pause stops
+                future runs, not a trade already in flight.
+              </p>
+              <div class="actions">
+                <button id="authorize" class="primary">
+                  Authorize & activate</button
+                ><button id="discard">Discard</button>
+              </div>
+              <p id="review-error" class="error"></p>
+            </div>
+          </div>
+          <div id="agent" class="card hidden" style="margin-top: 20px">
+            <div class="card-top">
+              <div class="toolbar">
+                <h2 id="agent-name"></h2>
+                <span id="status" class="pill"></span>
+              </div>
+              <p id="agent-id"></p>
+            </div>
+            <div class="card-body">
+              <div id="details"></div>
+              <div class="actions">
+                <button id="preview">Preview next buy</button
+                ><button id="pause">Pause agent</button
+                ><button id="edit">Edit limits</button>
+              </div>
+              <div id="run-result"></div>
+              <div id="history"></div>
+              <div class="actions">
+                <button id="tick">Simulate scheduled run</button>
+              </div>
+              <p class="fine">
+                Preview control: advances one run through the Python accounting
+                flow using a fixture swap. No transaction is signed or sent.
+              </p>
+            </div>
+          </div>
+        </main>
+        <section class="right">
+          <div class="side-card">
+            <h3>Strategy account</h3>
+            <div class="balance">
+              1,000
+              <span style="font-size: 13px; color: var(--muted)">USDC</span>
+            </div>
+            <div class="skill">Fixture funds · local only</div>
+            <p class="fine">
+              Live agents use the user's BITAGENTS deposit wallet. Keys remain
+              with its signing service.
+            </p>
+          </div>
+          <div class="side-card">
+            <h3>From idea to agent</h3>
+            <ol class="steps">
+              <li>
+                <b>01 &nbsp; Describe</b>Your goal becomes clear parameters.
+              </li>
+              <li>
+                <b>02 &nbsp; Review & authorize</b>Amount, cadence, budget and
+                slippage.
+              </li>
+              <li>
+                <b>03 &nbsp; Run in the background</b>BITAGENTS keeps the
+                schedule.
+              </li>
+              <li>
+                <b>04 &nbsp; Stay in control</b>Inspect, edit or pause from
+                Aomi.
+              </li>
+            </ol>
+          </div>
+          <div class="side-card">
+            <h3>Connected strategy service</h3>
+            <div id="event-log">Checking available skills…</div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <script type="module" src="/preview.js"></script>
+  </body>
+</html>
