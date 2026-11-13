@@ -395,6 +395,12 @@ def require_wallet_session(
     return wallet
 
 
+import dca_agent as dca_strategy_service
+from strategy_api import DcaStrategy, create_strategy_router
+
+app.include_router(create_strategy_router(require_wallet_session, {"dca": DcaStrategy(dca_strategy_service)}))
+
+
 @app.on_event("startup")
 def _startup() -> None:
     if not db_configured():
