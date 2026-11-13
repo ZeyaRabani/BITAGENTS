@@ -131,9 +131,14 @@ npm exec --yes --package typescript -- tsc -p aomi-app/preview/tsconfig.json
 # Open http://localhost:8766
 ```
 
-Walkthrough: describe a recurring buy, review its fee-inclusive budget,
-authorize, preview, simulate a scheduled run, inspect history, pause, and edit
-limits. The server binds to loopback only and is not mounted in production.
+Walkthrough: describe a recurring buy in the persistent conversation, review
+and authorize its inline configuration card, then ask “Preview next buy”,
+“Simulate a scheduled run”, “How is my strategy doing?”, and “Pause my plan”.
+The plan and receipts remain alongside the chat. The guided parser handles
+these commands through the same API; it is not a live language model.
+Position summaries derive holdings from execution receipts and costs from the
+plan ledger. The fixed demo price does not establish real earnings. Editing
+limits also opens an inline approval card. The server binds to loopback only and is not mounted in production.
 
 ## Before a live pilot
 

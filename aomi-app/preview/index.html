@@ -424,6 +424,142 @@
           font-size: 8px;
         }
       }
+      .page-heading {
+        margin-top: 18px;
+        margin-bottom: 18px;
+        padding-bottom: 16px;
+      }
+      .layout {
+        grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+        align-items: start;
+      }
+      .command-body {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 265px);
+        min-height: 480px;
+        padding: 0;
+      }
+      .chat {
+        flex: 1;
+        max-height: none;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 20px;
+        gap: 18px;
+        scroll-behavior: smooth;
+      }
+      .bubble {
+        flex-shrink: 0;
+        max-width: 94%;
+        padding: 14px 16px;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+      .bubble.user {
+        align-self: flex-end;
+        background: #1a1714;
+        max-width: 85%;
+      }
+      .byline {
+        margin-bottom: 8px;
+      }
+      .composer {
+        margin: 0 16px;
+        padding-top: 14px;
+        flex-shrink: 0;
+      }
+      .examples {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin: 10px 16px 0;
+      }
+      .examples button {
+        font-size: 8px;
+        padding: 6px;
+      }
+      .caption {
+        margin: 10px 16px 14px;
+        font-size: 9px;
+      }
+      .chat .card {
+        flex-shrink: 0;
+        width: 100%;
+        margin: 0 !important;
+        background: var(--panel);
+      }
+      .chat .card-top {
+        padding: 10px 14px;
+      }
+      .chat .card-body {
+        padding: 12px 14px;
+      }
+      .chat .card-top p {
+        margin: 3px 0;
+      }
+      .chat .fields {
+        gap: 8px;
+      }
+      .chat .fields input {
+        padding: 7px 10px;
+      }
+      .chat .fine {
+        font-size: 10px;
+      }
+      .right {
+        max-height: calc(100vh - 240px);
+        overflow-y: auto;
+        padding-bottom: 20px;
+      }
+      .right #agent {
+        margin: 0 0 16px !important;
+      }
+      .right .side-card:last-child {
+        display: none;
+      }
+      .right .card-body {
+        padding: 12px;
+      }
+      .right .actions {
+        gap: 6px;
+      }
+      .right button {
+        font-size: 9px;
+        padding: 9px;
+      }
+      .right .metrics {
+        font-size: 10px;
+        padding: 7px 0;
+      }
+      .right #history .receipt {
+        font-size: 10px;
+      }
+      #position {
+        margin-top: 12px;
+        color: var(--warn);
+        font:
+          11px/1.7 "JetBrains Mono",
+          monospace;
+      }
+      @media (max-width: 800px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+        .command-body {
+          height: 640px;
+        }
+        .right {
+          max-height: none;
+          display: block;
+        }
+        .page-heading {
+          margin: 20px;
+        }
+        .chat {
+          padding: 12px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -451,10 +587,16 @@
         <main>
           <div class="command-panel">
             <div class="panel-title">
-              Command · DCA Agent <span>Solana</span>
+              Conversation · DCA Agent <span>Solana</span>
             </div>
             <div class="command-body">
-              <div class="chat" id="chat">
+              <div
+                class="chat"
+                id="chat"
+                role="log"
+                aria-label="Strategy conversation"
+                aria-live="polite"
+              >
                 <div class="bubble">
                   <div class="byline">Agent</div>
                   Create a recurring buy, check your plans, or adjust a
@@ -465,18 +607,27 @@
               <form class="composer" id="composer">
                 <input
                   id="prompt"
-                  aria-label="Command"
+                  aria-label="Message your agent"
                   placeholder="Buy 25 USDC of SOL daily for 4 buys"
                   autocomplete="off"
-                /><button class="primary" type="submit">Send</button>
+                /><button id="send" class="primary" type="submit">Send</button>
               </form>
               <div class="examples">
                 <button id="example" type="button">
-                  Buy 25 USDC of SOL daily for 4 buys
+                  Buy 25 USDC of SOL daily for 4 buys</button
+                ><button class="suggestion" data-prompt="Preview next buy">
+                  Preview next buy</button
+                ><button
+                  class="suggestion"
+                  data-prompt="How is my strategy doing?"
+                >
+                  How is my strategy doing?</button
+                ><button class="suggestion" data-prompt="Pause my plan">
+                  Pause my plan
                 </button>
               </div>
               <div class="caption">
-                Guided demo · fixture balances and trades · no live AI model
+                Guided conversation demo · simulated trades · no live AI model
               </div>
             </div>
           </div>
@@ -554,6 +705,7 @@
                 ><button id="edit">Edit plan</button>
               </div>
               <div id="run-result"></div>
+              <div id="position"></div>
               <div id="history"></div>
               <div class="actions">
                 <button id="tick">Simulate scheduled run</button>
