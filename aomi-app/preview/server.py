@@ -61,13 +61,18 @@ def auth(authorization: str | None = Header(default=None)):
     return wallet
 
 
-app = FastAPI(title="Aomi x BITAGENTS local experience preview")
+app = FastAPI(title="BIT Agents local experience preview")
 app.include_router(create_strategy_router(auth, {"dca": DcaStrategy(dca_agent)}))
 
 
 @app.get("/")
 def index():
     return FileResponse(HERE / "index.html")
+
+
+@app.get("/bit-agents-logo-transparent.png")
+def logo():
+    return FileResponse(ROOT / "frontend/public/bit-agents-logo-transparent.png")
 
 
 @app.get("/preview.js")

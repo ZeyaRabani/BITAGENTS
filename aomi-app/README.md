@@ -112,7 +112,13 @@ production signing, scheduler concurrency or blockchain confirmation.
 
 ## Local experience preview
 
-This is an executable UX proposal, not a deployed Aomi UI or a live model demo.
+This is a BIT Agents branded UX proposal, not a deployed UI or a live model demo.
+The customer-facing product remains BIT Agents; Aomi provides the app runtime.
+The preview follows `frontend/src/app/globals.css` theme tokens and fonts,
+`Nav.tsx` branding, `DcaAgentConsole.tsx` command input/Send/example pattern,
+and `DcaPlanPanel.tsx` edit fields (amount, interval, max buys, budget, slippage).
+It serves the existing BIT Agents logo asset directly. No Aomi branding appears
+in the customer-facing preview.
 It uses the same router, adapter and DCA service with in-memory persistence,
 fixture balances and fixture swaps. Its guided prompt parser accepts the shown
 example form; real Aomi uses model-driven typed tool calls instead. The local

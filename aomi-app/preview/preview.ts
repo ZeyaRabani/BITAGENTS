@@ -32,7 +32,12 @@ function show(id: string, visible: boolean) {
 function message(content: string, user = false) {
   const node = document.createElement("div");
   node.className = `bubble${user ? " user" : ""}`;
-  node.textContent = content;
+  const byline = document.createElement("div");
+  byline.className = "byline";
+  byline.textContent = user ? "You" : "Agent";
+  const body = document.createElement("div");
+  body.textContent = content;
+  node.append(byline, body);
   $("chat").append(node);
 }
 function log(line: string) {
@@ -94,6 +99,10 @@ function recalc() {
 }
 input("amount").addEventListener("input", recalc);
 input("count").addEventListener("input", recalc);
+$("example").onclick = () => {
+  input("prompt").value = "Buy 25 USDC of SOL daily for 4 buys";
+  input("prompt").focus();
+};
 $("composer").addEventListener("submit", (e) => {
   e.preventDefault();
   const prompt = input("prompt").value.trim();
@@ -105,7 +114,7 @@ $("composer").addEventListener("submit", (e) => {
     );
   if (!match) {
     message(
-      "This guided preview supports recurring SOL buys, not arbitrary strategies. Try “Buy 25 USDC of SOL daily for 4 buys”. Live Aomi will interpret the request through the skill’s typed tools.",
+      "This guided preview supports recurring SOL buys, not arbitrary strategies. Try “Buy 25 USDC of SOL daily for 4 buys”. Use the example command to explore this demo.",
     );
     return;
   }
@@ -142,7 +151,7 @@ $("authorize").onclick = () =>
       });
       plan = response.plan;
       message(
-        "Your agent is active. BITAGENTS will run it on schedule, even after this chat closes. You can preview the next buy or pause future runs here.",
+        "Your plan is active. BITAGENTS will run it on schedule, even after this chat closes. You can preview the next buy or pause future runs here.",
       );
     }
     show("review", false);
@@ -168,7 +177,7 @@ async function refresh() {
   text("agent-id", `BITAGENTS / DCA · ${plan.id}`);
   text("status", plan.status);
   $("status").classList.toggle("paused", plan.status === "paused");
-  text("pause", plan.status === "paused" ? "Resume agent" : "Pause agent");
+  text("pause", plan.status === "paused" ? "Resume plan" : "Pause plan");
   $<HTMLButtonElement>("tick").disabled = plan.status !== "active";
   $("details").replaceChildren(
     row("Each buy", `${money(plan.amount_per_buy)} USDC → SOL`),
@@ -228,8 +237,8 @@ $("pause").onclick = () =>
     await refresh();
     message(
       next === "pause"
-        ? "Agent paused. Future scheduled buys are stopped. Existing history and limits are preserved."
-        : "Agent resumed with its saved limits.",
+        ? "Plan paused. Future scheduled buys are stopped. Existing history and limits are preserved."
+        : "Plan resumed with its saved limits.",
     );
   });
 $("tick").onclick = () =>
@@ -257,7 +266,7 @@ async function boot() {
     const result = await api("/strategies");
     text(
       "event-log",
-      `${result.strategies.length} strategy skill available · DCA. API connected · fixture execution only`,
+      `${result.strategies.length} strategy available · DCA. Connected · preview mode`,
     );
   } catch (e) {
     message(String(e));

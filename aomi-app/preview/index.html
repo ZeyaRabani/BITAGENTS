@@ -3,17 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Aomi · Strategy studio</title>
+    <title>DCA Agent - BIT Agents</title>
     <style>
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
       :root {
         color-scheme: dark;
-        --bg: #0d0e12;
-        --panel: #16171d;
-        --line: #2a2b34;
-        --text: #eeeef5;
-        --muted: #9395a7;
-        --purple: #b5a1fa;
-        --green: #8bd7b1;
+        --bg: #0c0a09;
+        --panel: #151210;
+        --line: #2a2520;
+        --text: #f5efe6;
+        --muted: #9a8b7a;
+        --signal: #ff6b4a;
+        --warn: #f4a261;
       }
       * {
         box-sizing: border-box;
@@ -23,8 +24,7 @@
         background: var(--bg);
         color: var(--text);
         font:
-          15px/1.6 Inter,
-          ui-sans-serif,
+          14px/1.6 Inter,
           system-ui,
           sans-serif;
       }
@@ -36,452 +36,468 @@
         cursor: pointer;
         border: 1px solid var(--line);
         color: var(--text);
-        background: #22232c;
-        border-radius: 10px;
-        padding: 10px 17px;
+        background: transparent;
+        padding: 10px 14px;
+        font:
+          11px "JetBrains Mono",
+          monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
       }
       button:hover {
-        border-color: var(--purple);
+        border-color: var(--signal);
+        color: var(--signal);
       }
       button:disabled {
-        opacity: 0.5;
-        cursor: wait;
+        opacity: 0.4;
+        cursor: not-allowed;
       }
       button.primary {
-        background: var(--purple);
-        color: #1b1231;
-        border: 0;
-        font-weight: 650;
-      }
-      aside {
-        position: fixed;
-        width: 220px;
-        height: 100vh;
-        border-right: 1px solid var(--line);
-        padding: 30px 22px;
-        background: #111217;
-      }
-      .logo {
-        font-size: 29px;
+        background: var(--signal);
+        color: var(--bg);
+        border-color: var(--signal);
         font-weight: 700;
-        letter-spacing: -2px;
-      }
-      .logo span {
-        color: var(--purple);
-      }
-      .side-label {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 2px;
-        color: var(--muted);
-        margin: 43px 12px 12px;
-      }
-      .nav {
-        padding: 10px 12px;
-        color: var(--muted);
-        margin: 5px 0;
-        border-radius: 9px;
-      }
-      .nav.active {
-        background: #24202f;
-        color: #d1c3ff;
-      }
-      .side-bottom {
-        position: absolute;
-        bottom: 26px;
-        color: var(--muted);
-        font-size: 12px;
-      }
-      .workspace {
-        margin-left: 220px;
       }
       header {
-        height: 79px;
+        border-bottom: 1px solid var(--line);
+        background: var(--bg);
+        position: sticky;
+        top: 0;
+        z-index: 5;
+      }
+      .nav-inner {
+        max-width: 1280px;
+        margin: auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 32px;
+        height: 92px;
+      }
+      .nav-inner img {
+        width: 200px;
+        height: 80px;
+        object-fit: contain;
+        object-position: left;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .marketplace,
+      .wallet,
+      .badge {
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.14em;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+      }
+      .marketplace {
+        color: var(--signal);
+        border-color: var(--signal);
+      }
+      .wallet {
+        border-width: 2px;
+      }
+      .badge {
+        color: var(--warn);
+        white-space: nowrap;
+      }
+      .page-heading {
+        max-width: 1216px;
+        margin: 32px auto 24px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
         display: flex;
         align-items: center;
         justify-content: space-between;
-        padding: 0 42px;
-        border-bottom: 1px solid var(--line);
-      }
-      header small {
-        color: var(--muted);
-      }
-      .badge {
-        font-size: 11px;
-        letter-spacing: 0.4px;
-        padding: 5px 10px;
-        border: 1px solid #3e354d;
-        border-radius: 7px;
-        color: #d1b9ff;
-        background: #201a2a;
-      }
-      .layout {
-        max-width: 1200px;
-        padding: 30px 42px;
-        margin: auto;
-        display: grid;
-        grid-template-columns: minmax(450px, 1fr) 300px;
-        gap: 28px;
-      }
-      .eyebrow {
-        font-size: 11px;
-        letter-spacing: 2px;
-        color: var(--purple);
-        text-transform: uppercase;
+        gap: 20px;
       }
       h1 {
-        font-size: 32px;
-        line-height: 1.2;
-        letter-spacing: -1px;
-        margin: 10px 0 12px;
-        font-weight: 550;
-      }
-      p {
-        margin: 8px 0;
+        font:
+          700 36px/1.2 "Space Grotesk",
+          sans-serif;
+        margin: 0 0 8px;
       }
       .sub {
         color: var(--muted);
-        max-width: 550px;
+        margin: 0;
+        font-size: 13px;
       }
-      .notice {
-        padding: 11px 15px;
-        margin-bottom: 23px;
-        border: 1px solid var(--line);
-        border-radius: 9px;
-        color: #aca9bb;
-        font-size: 12px;
+      .layout {
+        max-width: 1280px;
+        padding: 0 32px 48px;
+        margin: auto;
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+        gap: 24px;
       }
-      .chat {
-        margin-top: 29px;
-        display: flex;
-        flex-direction: column;
-        gap: 18px;
-      }
-      .bubble {
-        max-width: 95%;
-        padding: 16px 19px;
-        border-radius: 13px;
-        background: var(--panel);
+      .command-panel,
+      .card,
+      .side-card {
+        background: #12100e66;
         border: 1px solid var(--line);
       }
-      .bubble.user {
-        align-self: flex-end;
-        background: #252030;
-        border-color: #3c304f;
-      }
-      .byline {
-        color: var(--purple);
-        font-size: 11px;
-        font-weight: 600;
-        margin-bottom: 7px;
-      }
-      .skill {
-        display: inline-flex;
-        gap: 8px;
-        align-items: center;
-        font-size: 11px;
-        color: var(--green);
-        margin: 2px 0 8px;
-      }
-      .skill:before {
-        content: "";
-        width: 6px;
-        height: 6px;
-        background: var(--green);
-        border-radius: 50%;
-      }
-      .card {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        overflow: hidden;
-      }
-      .card-top {
-        padding: 19px 22px;
+      .panel-title,
+      .side-card h3 {
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.22em;
+        color: var(--muted);
+        margin: 0;
+        padding: 12px 16px;
         border-bottom: 1px solid var(--line);
       }
-      .card-top h2 {
-        font-size: 18px;
-        font-weight: 550;
-        margin: 0;
+      .panel-title {
+        display: flex;
+        justify-content: space-between;
       }
-      .card-top p {
-        font-size: 12px;
-        color: var(--muted);
-        margin: 4px 0 0;
+      .panel-title span {
+        color: var(--signal);
       }
+      .command-body,
       .card-body {
-        padding: 20px 22px;
+        padding: 16px;
+      }
+      .chat {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-height: 250px;
+        overflow-y: auto;
+      }
+      .bubble {
+        padding: 12px 16px;
+        border: 1px solid #ff6b4a4d;
+        border-radius: 4px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .bubble.user {
+        border-color: var(--line);
+        color: var(--text);
+        background: #12100e99;
+      }
+      .byline {
+        color: var(--signal);
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.18em;
+        margin-bottom: 6px;
+      }
+      .composer {
+        display: flex;
+        gap: 12px;
+        margin-top: 16px;
+        padding-top: 16px;
+        border-top: 1px solid var(--line);
+      }
+      .composer input {
+        flex: 1;
+        min-width: 0;
+        border: 1px solid var(--line);
+        background: var(--bg);
+        color: var(--text);
+        padding: 12px 14px;
+        font:
+          12px "JetBrains Mono",
+          monospace;
+      }
+      .composer input:focus,
+      .fields input:focus {
+        outline: none;
+        border-color: var(--signal);
+      }
+      .examples {
+        margin-top: 12px;
+      }
+      .examples button {
+        font-size: 9px;
+        color: var(--muted);
+        padding: 8px;
+      }
+      .caption {
+        font:
+          9px "JetBrains Mono",
+          monospace;
+        color: var(--muted);
+        margin-top: 12px;
+      }
+      .card {
+        scroll-margin-top: 110px;
+      }
+      .card-top {
+        border-bottom: 1px solid var(--line);
+        padding: 14px 16px;
+      }
+      .card-top h2 {
+        font:
+          600 19px "Space Grotesk",
+          sans-serif;
+        margin: 4px 0;
+      }
+      .card-top p,
+      .fine {
+        font-size: 11px;
+        color: var(--muted);
+        margin: 6px 0;
+      }
+      .skill {
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        letter-spacing: 0.12em;
+        color: var(--signal);
+        text-transform: uppercase;
       }
       .fields {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 14px;
+        gap: 12px;
       }
       .fields label {
-        font-size: 11px;
-        color: var(--muted);
-        display: flex;
-        flex-direction: column;
+        display: grid;
         gap: 5px;
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--muted);
       }
       .fields input {
         width: 100%;
-        color: var(--text);
-        background: #0f1016;
         border: 1px solid var(--line);
-        padding: 9px 12px;
-        border-radius: 7px;
-        font-size: 14px;
+        background: var(--bg);
+        padding: 10px 12px;
+        color: var(--text);
+        font:
+          13px "JetBrains Mono",
+          monospace;
       }
       .metrics {
         display: flex;
         justify-content: space-between;
-        padding: 12px 0;
-        font-size: 13px;
+        gap: 12px;
+        padding: 10px 0;
         border-bottom: 1px solid var(--line);
-      }
-      .metrics:last-child {
-        border: 0;
+        font:
+          11px/1.6 "JetBrains Mono",
+          monospace;
       }
       .metrics span {
         color: var(--muted);
       }
       .metrics strong {
-        font-weight: 500;
+        font-weight: 400;
       }
       .actions {
         display: flex;
+        gap: 8px;
         flex-wrap: wrap;
-        gap: 9px;
-        margin-top: 18px;
-      }
-      .fine {
-        font-size: 11px;
-        color: var(--muted);
-        margin-top: 14px;
+        margin-top: 16px;
       }
       .pill {
-        display: inline-block;
-        background: #1b3027;
-        color: var(--green);
-        font-size: 11px;
-        padding: 3px 9px;
-        border-radius: 99px;
+        font:
+          10px "JetBrains Mono",
+          monospace;
+        text-transform: uppercase;
+        color: var(--signal);
+        padding: 4px 8px;
+        border: 1px solid #ff6b4a4d;
       }
       .pill.paused {
-        background: #332b1e;
-        color: #e2c68c;
-      }
-      .composer {
-        margin-top: 23px;
-        border: 1px solid #3b344d;
-        background: #15141c;
-        border-radius: 13px;
-        padding: 12px;
-        display: flex;
-        gap: 8px;
-      }
-      .composer input {
-        flex: 1;
-        min-width: 0;
-        border: 0;
-        background: none;
-        color: var(--text);
-        padding: 5px;
-        outline: none;
-      }
-      .caption {
-        font-size: 10px;
-        text-align: center;
-        color: var(--muted);
-        margin-top: 8px;
+        color: var(--warn);
+        border-color: #f4a26166;
       }
       .side-card {
-        padding: 22px;
-        background: #121319;
-        border: 1px solid var(--line);
-        border-radius: 13px;
-        margin-bottom: 18px;
-      }
-      .side-card h3 {
-        font-size: 12px;
-        font-weight: 500;
-        color: var(--muted);
-        margin: 0 0 13px;
+        margin-bottom: 20px;
       }
       .balance {
-        font-size: 25px;
-        font-weight: 500;
+        font:
+          700 28px "Space Grotesk",
+          sans-serif;
+      }
+      .balance small {
+        font:
+          12px "JetBrains Mono",
+          monospace;
+        color: var(--muted);
       }
       .steps {
         padding: 0;
         list-style: none;
-        font-size: 12px;
-      }
-      .steps li {
-        border-left: 1px solid #393343;
-        padding: 0 0 20px 17px;
+        font-size: 11px;
         color: var(--muted);
       }
-      .steps li:last-child {
-        padding-bottom: 0;
+      .steps li {
+        margin-bottom: 18px;
       }
       .steps b {
         display: block;
-        color: #ddd6ef;
-        font-weight: 500;
+        color: var(--text);
+        font:
+          11px "JetBrains Mono",
+          monospace;
+        margin-bottom: 5px;
+      }
+      #event-log {
+        font:
+          10px/1.8 "JetBrains Mono",
+          monospace;
+        color: var(--muted);
+        overflow-wrap: anywhere;
       }
       .receipt {
-        border-left: 2px solid var(--green);
-        padding: 8px 14px;
+        border: 1px solid #ff6b4a4d;
+        padding: 12px;
         margin-top: 12px;
-        font-size: 13px;
+        font:
+          11px/1.6 "JetBrains Mono",
+          monospace;
       }
       .receipt small {
-        color: var(--muted);
         display: block;
+        color: var(--muted);
+      }
+      #run-result {
+        font-size: 12px;
+        color: var(--warn);
+        margin-top: 12px;
       }
       .error {
-        color: #f6b5b5;
+        color: #ef4444;
       }
       .hidden {
         display: none !important;
       }
-      a {
-        color: var(--purple);
+      input:disabled {
+        opacity: 0.5;
       }
-      #event-log {
-        font:
-          10px/1.8 ui-monospace,
-          monospace;
-        color: #858295;
-        overflow-wrap: anywhere;
-      }
-      .toolbar {
-        display: flex;
-        gap: 12px;
-        align-items: center;
-      }
-      @media (max-width: 1000px) {
-        aside {
-          width: 170px;
-        }
-        .workspace {
-          margin-left: 170px;
-        }
+      @media (max-width: 800px) {
         .layout {
           grid-template-columns: 1fr;
-          padding: 24px;
+          padding: 0 20px 32px;
+        }
+        .page-heading {
+          margin: 24px 20px;
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .nav-inner {
+          padding: 8px 20px;
+        }
+        .nav-inner img {
+          width: 140px;
+        }
+        .marketplace {
+          display: none;
         }
         .right {
-          display: none;
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 16px;
         }
-        header {
-          padding: 0 24px;
+        .side-card:last-child {
+          display: none;
         }
       }
-      @media (max-width: 620px) {
-        aside {
-          display: none;
-        }
-        .workspace {
-          margin-left: 0;
-        }
-        .layout {
-          padding: 18px;
+      @media (max-width: 500px) {
+        .right {
           display: block;
         }
-        header {
-          padding: 0 18px;
-        }
-        .badge {
-          font-size: 9px;
-        }
-        h1 {
-          font-size: 27px;
-        }
         .fields {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: 1fr;
         }
-      }
-      header {
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        background: #0d0e12;
-      }
-      .card {
-        scroll-margin-top: 100px;
+        .composer {
+          flex-direction: column;
+        }
+        .wallet {
+          font-size: 8px;
+        }
       }
     </style>
   </head>
   <body>
-    <aside>
-      <div class="logo">aomi<span>✳</span></div>
-      <div class="side-label">Workspace</div>
-      <div class="nav">New conversation</div>
-      <div class="nav active">◈ &nbsp; My agents</div>
-      <div class="nav">Activity</div>
-      <div class="side-label">Strategy skills</div>
-      <div class="nav" style="color: #d1c3ff">↗ &nbsp; BITAGENTS</div>
-      <div class="side-bottom">
-        Personal workspace<br />Local experience preview
-      </div>
-    </aside>
     <div class="workspace">
       <header>
-        <div>Strategy studio &nbsp; <small>/ &nbsp; BITAGENTS</small></div>
-        <span class="badge">EXPERIENCE PREVIEW · NO LIVE FUNDS</span>
+        <div class="nav-inner">
+          <img src="/bit-agents-logo-transparent.png" alt="BIT Agents" />
+          <div class="toolbar">
+            <span class="marketplace">Marketplace</span
+            ><span class="wallet">Demo wallet · connected</span>
+          </div>
+        </div>
       </header>
+      <div class="page-heading">
+        <div>
+          <h1>DCA Agent</h1>
+          <p class="sub">
+            Automated recurring buys on Solana. Create and manage your plans
+            with natural language.
+          </p>
+        </div>
+        <span class="badge">LOCAL PREVIEW · NO LIVE FUNDS</span>
+      </div>
       <div class="layout">
         <main>
-          <div class="notice">
-            Local API + real DCA strategy logic. Fixture balances and swaps.
-            Guided prompts; no live AI model.
-          </div>
-          <div class="eyebrow">Your idea. An agent that follows it.</div>
-          <h1>Put your strategy to work.</h1>
-          <p class="sub">
-            Describe the routine. Set the boundaries. Stay in control.
-          </p>
-          <div class="chat" id="chat">
-            <div class="bubble">
-              <div class="byline">Aomi</div>
-              I can help you build a recurring token-buying agent with the
-              BITAGENTS DCA skill. What would you like it to do?
+          <div class="command-panel">
+            <div class="panel-title">
+              Command · DCA Agent <span>Solana</span>
             </div>
-          </div>
-          <form class="composer" id="composer">
-            <input
-              id="prompt"
-              aria-label="Describe your strategy"
-              placeholder="Buy 25 USDC of SOL daily for 4 buys"
-              autocomplete="off"
-            /><button class="primary" type="submit">Create agent ↗</button>
-          </form>
-          <div class="caption">
-            Guided preview supports “Buy [amount] USDC of SOL daily for [count]
-            buys”. Other strategies need another skill.
+            <div class="command-body">
+              <div class="chat" id="chat">
+                <div class="bubble">
+                  <div class="byline">Agent</div>
+                  Create a recurring buy, check your plans, or adjust a
+                  schedule. Tell me the token, amount, and interval to get
+                  started.
+                </div>
+              </div>
+              <form class="composer" id="composer">
+                <input
+                  id="prompt"
+                  aria-label="Command"
+                  placeholder="Buy 25 USDC of SOL daily for 4 buys"
+                  autocomplete="off"
+                /><button class="primary" type="submit">Send</button>
+              </form>
+              <div class="examples">
+                <button id="example" type="button">
+                  Buy 25 USDC of SOL daily for 4 buys
+                </button>
+              </div>
+              <div class="caption">
+                Guided demo · fixture balances and trades · no live AI model
+              </div>
+            </div>
           </div>
           <div id="review" class="card hidden" style="margin-top: 20px">
             <div class="card-top">
-              <div class="skill">BITAGENTS / DCA skill</div>
-              <h2>Review your agent</h2>
+              <div class="skill">DCA plan · Solana</div>
+              <h2>Review DCA plan</h2>
               <p>Nothing runs until you authorize this schedule.</p>
             </div>
             <div class="card-body">
               <div class="fields">
-                <label>Agent name<input id="name" value="Steady SOL" /></label
+                <label>Plan name<input id="name" value="Steady SOL" /></label
                 ><label
-                  >Buy amount · USDC<input
+                  >Amount per buy · USDC<input
                     id="amount"
                     type="number"
                     min="1"
                     value="25" /></label
                 ><label>Interval<input id="interval" value="1 day" /></label
                 ><label
-                  >Number of buys<input
+                  >Max buys<input
                     id="count"
                     type="number"
                     min="1"
@@ -494,7 +510,7 @@
                     value="100.50"
                     step=".01" /></label
                 ><label
-                  >Max slippage · basis points<input
+                  >Slippage bps<input
                     id="slippage"
                     type="number"
                     min="1"
@@ -516,7 +532,7 @@
               </p>
               <div class="actions">
                 <button id="authorize" class="primary">
-                  Authorize & activate</button
+                  Confirm & create plan</button
                 ><button id="discard">Discard</button>
               </div>
               <p id="review-error" class="error"></p>
@@ -534,8 +550,8 @@
               <div id="details"></div>
               <div class="actions">
                 <button id="preview">Preview next buy</button
-                ><button id="pause">Pause agent</button
-                ><button id="edit">Edit limits</button>
+                ><button id="pause">Pause plan</button
+                ><button id="edit">Edit plan</button>
               </div>
               <div id="run-result"></div>
               <div id="history"></div>
@@ -551,40 +567,42 @@
         </main>
         <section class="right">
           <div class="side-card">
-            <h3>Strategy account</h3>
-            <div class="balance">
-              1,000
-              <span style="font-size: 13px; color: var(--muted)">USDC</span>
+            <h3>Agent wallet · demo</h3>
+            <div class="card-body">
+              <div class="balance">1,000 <small>USDC</small></div>
+              <p class="fine">Available balance · fixture funds</p>
+              <div class="metrics">
+                <span>Network</span><strong>Solana</strong>
+              </div>
+              <div class="metrics">
+                <span>Platform fee</span><strong>0.5% per buy</strong>
+              </div>
             </div>
-            <div class="skill">Fixture funds · local only</div>
-            <p class="fine">
-              Live agents use the user's BITAGENTS deposit wallet. Keys remain
-              with its signing service.
-            </p>
           </div>
           <div class="side-card">
-            <h3>From idea to agent</h3>
-            <ol class="steps">
-              <li>
-                <b>01 &nbsp; Describe</b>Your goal becomes clear parameters.
-              </li>
-              <li>
-                <b>02 &nbsp; Review & authorize</b>Amount, cadence, budget and
-                slippage.
-              </li>
-              <li>
-                <b>03 &nbsp; Run in the background</b>BITAGENTS keeps the
-                schedule.
-              </li>
-              <li>
-                <b>04 &nbsp; Stay in control</b>Inspect, edit or pause from
-                Aomi.
-              </li>
-            </ol>
+            <h3>Agent actions · preview</h3>
+            <div class="card-body"><div id="event-log">Connecting…</div></div>
           </div>
           <div class="side-card">
-            <h3>Connected strategy service</h3>
-            <div id="event-log">Checking available skills…</div>
+            <h3>How it works</h3>
+            <div class="card-body">
+              <ol class="steps">
+                <li>
+                  <b>01 · Send a command</b>Choose a token, amount and cadence.
+                </li>
+                <li>
+                  <b>02 · Confirm your plan</b>Review the budget and max buys.
+                </li>
+                <li>
+                  <b>03 · Manage recurring buys</b>Track activity, edit or pause
+                  anytime.
+                </li>
+              </ol>
+              <p class="fine">
+                This local preview uses the strategy service with fixture swaps.
+                No funds move.
+              </p>
+            </div>
           </div>
         </section>
       </div>
