@@ -230,12 +230,12 @@ export const DCA_AGENT = {
   id: "dca",
   name: "DCA Agent",
   slug: "dca",
-  tagline: "Recurring buys",
+  tagline: "Recurring buys · live /strategies · Circle sign",
   description:
-    "Set up dollar-cost averaging on Solana.",
+    "Same guided DCA UI as the Aomi strategy app. Fund the wallet here; plans run on-chain through the Python scheduler.",
   status: "Running" as const,
-  task: "Monitoring 2 active DCA plans on devnet",
-  strategy: "dca-scheduler",
-  model: "meta-llama/llama-3.1-8b-instruct",
-  cluster: "devnet",
+  task: "Monitoring DCA plans on mainnet",
+  strategy: "aomi-strategy-ui + python-scheduler",
+  model: "Guided strategy UI",
+  cluster: "mainnet",
 };

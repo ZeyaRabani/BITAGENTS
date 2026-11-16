@@ -2,7 +2,10 @@
 BIT Agents API.
 
 Live agents: DCA, Hedge Fund, and Sniper. Each Jupiter swap is simulated on Aomi
-before that agent's Circle wallet signs. Chat uses OpenRouter.
+before that agent's Circle wallet signs.
+
+DCA is also exposed as an Aomi strategy skill through `/strategies/dca/...`.
+Aomi can own that conversation; BIT Agents keeps schedule, deposits, and signing.
 
 Run locally:
   cd agent/new
@@ -61,6 +64,8 @@ from dca_agent import (
     update_dca_plan_status,
 )
 from market_agents import AGENTS, run_market_agent, wallet_status
+import dca_agent as dca_strategy_service
+from strategy_api import DcaStrategy, create_strategy_router
 from deposit_ledger import (
     get_agent_wallet_info,
     get_user_balances,
@@ -258,6 +263,14 @@ def require_wallet_session(
     return wallet
 
 
+app.include_router(
+    create_strategy_router(
+        require_wallet_session,
+        {"dca": DcaStrategy(dca_strategy_service)},
+    )
+)
+
+
 @app.on_event("startup")
 def _startup() -> None:
     if not db_configured():
@@ -286,9 +299,11 @@ def health() -> dict[str, Any]:
             "dca": {
                 "path_prefix": "/",
                 "chat": "/chat",
+                "strategies": "/strategies/dca",
                 "llm": DCA_LLM_PROVIDER,
                 "model": MODEL,
                 "execution": "jupiter build, aomi simulate, circle sign",
+                "aomi_skill": "bitagents/dca",
             },
             "hedge-fund": {
                 "chat": "/hedge-fund/chat",

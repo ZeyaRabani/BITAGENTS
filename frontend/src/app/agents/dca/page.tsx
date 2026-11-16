@@ -5,12 +5,16 @@ import { DCA_AGENT } from "@/lib/dcaAgentSimulation";
 
 export const metadata: Metadata = {
   title: "DCA Agent - BIT Agents",
-  description: "Run the Solana DCA Agent - recurring buys, and plan management.",
+  description:
+    "Aomi strategy-app style DCA UI on Next.js. Live Solana schedules via the Python /strategies API.",
 };
 
 export default function DcaAgentPage() {
   return (
-    <AppShell title={DCA_AGENT.name}>
+    <AppShell
+      title={DCA_AGENT.name}
+      subtitle={`${DCA_AGENT.tagline} · ${DCA_AGENT.description}`}
+    >
       <DcaAgentConsole />
     </AppShell>
   );

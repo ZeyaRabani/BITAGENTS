@@ -21,11 +21,18 @@ from typing import Any, Callable, Optional
 
 import requests
 
-AOMI_API_URL = os.environ.get("AOMI_API_URL", "https://chat.aomi.dev").rstrip("/")
+AOMI_API_URL = os.environ.get("AOMI_API_URL", "https://aomi.chat").rstrip("/")
 AOMI_ACCESS_TOKEN = os.environ.get("AOMI_ACCESS_TOKEN", "").strip()
 AOMI_REFRESH_TOKEN = os.environ.get("AOMI_REFRESH_TOKEN", "").strip()
 AOMI_CLIENT_ID = os.environ.get("AOMI_OAUTH_CLIENT_ID", "").strip()
-AOMI_RESOURCE = os.environ.get("AOMI_RESOURCE", "https://chat.aomi.dev/v1/pipeline").strip()
+AOMI_RESOURCE = os.environ.get("AOMI_RESOURCE", f"{AOMI_API_URL}/v1/pipeline").strip()
+# Widget SIWS sessions are origin-bound. Mint and pipeline calls must use the same
+# host origin (scheme+host+port), not the Aomi API host.
+AOMI_WIDGET_ORIGIN = (
+    os.environ.get("AOMI_WIDGET_ORIGIN")
+    or os.environ.get("BITAGENTS_PUBLIC_URL")
+    or "http://localhost:3000"
+).rstrip("/")
 _ENV_PATH = Path(__file__).resolve().parent / ".env"
 _SESSION_PATH = Path(__file__).resolve().parent / ".aomi-wallet-sessions.json"
 _token_lock = threading.Lock()
@@ -96,11 +103,20 @@ def _refresh_access_token() -> Optional[str]:
             headers={"Accept": "application/json"},
             timeout=30,
         )
-        data = response.json()
-    except Exception:
-        return AOMI_ACCESS_TOKEN or None
+        data = response.json() if response.content else {}
+    except Exception as exc:
+        print(f"  ⚠️  Aomi OAuth refresh failed: {exc}")
+        return None
     if response.status_code >= 400 or not isinstance(data, dict) or not data.get("access_token"):
-        return AOMI_ACCESS_TOKEN or None
+        err = ""
+        if isinstance(data, dict):
+            err = str(data.get("error_description") or data.get("error") or "")[:160]
+        print(
+            f"  ⚠️  Aomi OAuth refresh rejected ({response.status_code})"
+            + (f": {err}" if err else "")
+            + f". resource={AOMI_RESOURCE}. Re-login or rely on Circle SIWS."
+        )
+        return None
     AOMI_ACCESS_TOKEN = str(data["access_token"])
     if data.get("refresh_token"):
         AOMI_REFRESH_TOKEN = str(data["refresh_token"])
@@ -108,6 +124,13 @@ def _refresh_access_token() -> Optional[str]:
         _expires_at = int(data["expires_at"])
     else:
         _expires_at = int(time.time()) + int(data.get("expires_in") or 300)
+    # Prefer JWT exp when present so we never keep a dead bearer as "fresh".
+    jwt_exp = _token_exp(AOMI_ACCESS_TOKEN)
+    if jwt_exp:
+        _expires_at = jwt_exp
+    if _expires_at and int(time.time()) >= _expires_at - 30:
+        print("  ⚠️  Aomi OAuth refresh returned an already-expired access token.")
+        return None
     try:
         _persist_tokens()
     except Exception:
@@ -127,8 +150,8 @@ def _widget_headers(token: Optional[str] = None) -> dict[str, str]:
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json",
-        "Origin": AOMI_API_URL,
-        "Referer": f"{AOMI_API_URL}/",
+        "Origin": AOMI_WIDGET_ORIGIN,
+        "Referer": f"{AOMI_WIDGET_ORIGIN}/",
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -220,10 +243,16 @@ def ensure_wallet_session(address: str, circle_wallet_id: str, *, force: bool = 
         if isinstance(current, dict):
             expires_at = int(current.get("expires_at") or 0)
             token = current.get("access_token")
-            if isinstance(token, str) and token and expires_at > int(time.time()) + 60:
+            origin = str(current.get("origin") or "")
+            if (
+                isinstance(token, str)
+                and token
+                and expires_at > int(time.time()) + 60
+                and origin == AOMI_WIDGET_ORIGIN
+            ):
                 return token
         minted = _mint_wallet_session(address, circle_wallet_id)
-        sessions[address] = minted
+        sessions[address] = {**minted, "origin": AOMI_WIDGET_ORIGIN}
         try:
             _write_sessions(sessions)
         except Exception:
@@ -243,8 +272,8 @@ def _headers(
         "Accept": "application/json",
     }
     if wallet_session:
-        headers["Origin"] = AOMI_API_URL
-        headers["Referer"] = f"{AOMI_API_URL}/"
+        headers["Origin"] = AOMI_WIDGET_ORIGIN
+        headers["Referer"] = f"{AOMI_WIDGET_ORIGIN}/"
     if idempotency_key:
         headers["Idempotency-Key"] = idempotency_key[:160]
     return headers
@@ -271,7 +300,7 @@ def _post(
 
     try:
         response = send(token)
-        if response.status_code == 401 and refresh:
+        if response.status_code in (401, 403) and refresh:
             response = send(refresh())
     except requests.RequestException as exc:
         return {"error": f"Aomi request failed: {exc}", "retryable": True}
@@ -288,6 +317,12 @@ def _post(
                 message = str(err.get("message") or err.get("code") or "")
             else:
                 message = str(err or data.get("message") or data.get("detail") or "")
+        if str(message).strip().lower() in {"unauthenticated", "unauthorized"}:
+            message = (
+                "Aomi unauthenticated for the pipeline call. "
+                "Circle buys need a fresh SIWS session for that agent wallet; "
+                "device-login AOMI_ACCESS_TOKEN alone is not the Circle fee payer."
+            )
         return {
             "error": message or f"Aomi {path} HTTP {response.status_code}",
             "status_code": response.status_code,
@@ -348,10 +383,27 @@ def _simulation_failed(simulation: Any) -> Optional[str]:
     err = simulation.get("error") or simulation.get("err")
     if err:
         return str(err)[:500]
-    status = str(simulation.get("status") or simulation.get("result") or "").lower()
-    if status in ("failed", "error", "reverted"):
-        return status
-    return None
+    for key in ("failure", "failureReason", "failure_reason", "message", "reason"):
+        val = simulation.get(key)
+        if isinstance(val, str) and val.strip():
+            low = val.strip().lower()
+            if low in {"ok", "success", "simulated", "passed"}:
+                continue
+            if any(token in low for token in ("fail", "error", "revert", "reject", "insufficient")):
+                return val.strip()[:500]
+    status_raw = simulation.get("status")
+    if not isinstance(status_raw, str):
+        # Do not stringify nested result objects; only accept plain status strings.
+        return None
+    status = status_raw.strip().lower()
+    if status not in ("failed", "error", "reverted"):
+        return None
+    logs = simulation.get("logs")
+    if isinstance(logs, list) and logs:
+        tail = " | ".join(str(line) for line in logs[-3:] if line)
+        if tail:
+            return f"{status}: {tail}"[:500]
+    return status
 
 
 def _plan_check(simulation: Any, plan: dict[str, Any]) -> Optional[str]:

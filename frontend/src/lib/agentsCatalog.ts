@@ -35,15 +35,15 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     name: "DCA Agent",
     category: "Trading",
     description:
-      "Recurring Jupiter buys. Each swap is simulated on Aomi before the Circle wallet signs it.",
-    tagline: "Jupiter buy · Aomi fork · Circle sign",
+      "Guided DCA UI from the Aomi strategy app, on Next.js. Creates live Solana schedules through /strategies; buys go Jupiter → Aomi gate → Circle.",
+    tagline: "Strategy UI · live mainnet · Circle sign",
     pricePerTask: "0.5% / tx",
     runs: "-",
     volumeSol: "-",
     rating: 4.9,
     iconId: "swap",
     available: true,
-    model: "meta-llama/llama-3.3-70b-instruct",
+    model: "Guided strategy UI",
     cluster: "mainnet",
   },
   {

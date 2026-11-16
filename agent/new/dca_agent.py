@@ -1290,6 +1290,19 @@ def execute_swap_buy(
 
         keypair = load_keypair()
         signing = resolve_dca_signing(user_wallet)
+        from circle_dca_wallets import circle_dca_enabled
+
+        # Live Aomi-gated buys must use the per-user Circle fee payer. Falling
+        # back to the shared local key + device OAuth token causes Aomi
+        # "unauthenticated" / wrong-payer failures.
+        if circle_dca_enabled() and signing.get("mode") != "circle":
+            return {
+                "error": (
+                    "Circle agent wallet is required for live DCA buys. "
+                    "The signed-in browser wallet is only for BIT Agents auth; "
+                    "Circle holds the per-user agent wallet that Aomi and Jupiter use."
+                )
+            }
         if signing.get("mode") == "circle":
             wallet_pubkey = signing["pubkey"]
             circle_wallet_id = signing["wallet_id"]
@@ -2544,7 +2557,9 @@ def _scheduler_loop(poll_seconds: int = SCHEDULER_POLL_SECONDS) -> None:
                 if result.get("status") == "success":
                     print(f"  ✅ Tx: {result.get('signature', 'ok')}")
                 else:
-                    print(f"  ⚠️  {result.get('error', result)}")
+                    step = result.get("aomi_step")
+                    suffix = f" (aomi_step={step})" if step else ""
+                    print(f"  ⚠️  {result.get('error', result)}{suffix}")
         except Exception as e:
             print(f"  ⚠️  Scheduler error: {e}")
         time.sleep(poll_seconds)

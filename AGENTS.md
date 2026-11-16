@@ -13,9 +13,13 @@ This is a Next.js frontend and Python backend application for Agent Marketplace.
 
 ## Repository Structure
 
-- `frontend/` — Next.js frontend
-- `agents/new/` — Python backend
+- `frontend/` - Next.js marketplace shell (wallet, deposits, plan inspection)
+- `agent/new/` - Python strategy API (auth, `/strategies`, scheduler, Circle, swap gate)
+- `aomi-app/` - Rust Aomi app for agent chat (`bitagents/dca` and future skills)
+- `.aomi/config.json` - Aomi Build discovery
 - `.env.example` - documented environment variables
+
+Marketplace agents are built on Aomi going forward. Python remains the strategy and custody service.
 
 ## Commands
 

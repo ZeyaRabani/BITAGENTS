@@ -1,8 +1,12 @@
 # How the DCA agent uses Aomi
 
-Aomi is the safety check in front of a live DCA buy. It does not hold keys, it does not sign, and it does not broadcast. Jupiter builds the swap, Aomi stages and simulates that exact transaction, and Circle signs only after Aomi commits.
+DCA is an Aomi agent with a Python strategy backend.
 
-This is Phase 1 and it applies to the DCA agent only. Chat still uses OpenRouter. Wallet login, deposits, and plan storage stay on BIT Agents.
+1. **Agent chat (Rust `aomi-app`, skill `bitagents/dca`)**: Aomi owns the conversation. Typed tools call this API at `/strategies/dca/...`.
+2. **Strategy API (Python `agents_api.py`)**: schedule, deposits, Circle wallets, execution history.
+3. **Swap gate (`aomi_pipeline.py`)**: before a live buy, Jupiter builds the swap, Aomi stages and simulates that exact transaction, and Circle signs only after Aomi commits. Aomi does not hold keys, sign, or broadcast.
+
+The Next.js page at `/agents/dca` uses the same guided strategy UI as `aomi-app/preview`, wired to the live `/strategies` API for real mainnet plans. Local `aomi-run` remains available for the Rust skill REPL. See `aomi-app/README.md`.
 
 ## What a buy does
 
@@ -22,7 +26,7 @@ Aomi accepts a venue-built transaction only when the fee payer is the Solana wal
 
 The pipeline stage body has no field that switches the payer. Naming another address with `userState`, `transaction.payer`, or `Aomi-Svm-Address` does not change the check. The session itself has to be that user's Circle address.
 
-`circle_sign_message` signs the Sign-In With Solana message. Aomi verifies it at `POST /api/auth/widget/siws/verify` and returns a widget bearer (`aomi_wst_...`). Pipeline calls send that bearer plus `Origin: https://chat.aomi.dev`. When the token is inside a minute of expiry, the agent wallet signs a new one.
+`circle_sign_message` signs the Sign-In With Solana message. Aomi verifies it at `POST /api/auth/widget/siws/verify` and returns a widget bearer (`aomi_wst_...`). Pipeline calls send that bearer plus `Origin`/`Referer` set to `AOMI_WIDGET_ORIGIN` (for local: `http://localhost:3000`). Widget sessions are origin-bound, so mint and stage must share that origin. When the token is inside a minute of expiry, the agent wallet signs a new one.
 
 The device-login values `AOMI_ACCESS_TOKEN` and `AOMI_REFRESH_TOKEN` remain for a buy that has no Circle wallet id. They are not used as the signer for a Circle-paid swap.
 
@@ -30,12 +34,17 @@ The device-login values `AOMI_ACCESS_TOKEN` and `AOMI_REFRESH_TOKEN` remain for 
 
 | Piece | Role |
 | --- | --- |
+| `strategy_api.py` | Authenticated `/strategies` adapter; DCA create/list/update/status/preview |
+| `aomi-app/` | Rust Aomi skill app that calls `/strategies/dca/...` (no preview UI) |
+| `.aomi/config.json` | Points Aomi Build at `aomi-app/aomi.toml` |
+| `frontend/.../DcaAgentConsole.tsx` | Next.js DCA UI over the same `/strategies` contract |
+| `frontend/.../api/agents/strategies/*` | Next proxies to the Python strategy service |
 | `aomi_pipeline.py` | Session cache, stage, simulate, plan check, commit |
-| `dca_agent.py` | Builds the Jupiter swap, calls `gate_swap`, then Circle-signs and broadcasts |
+| `dca_agent.py` | Plan service + Jupiter build; calls `gate_swap`, then Circle-signs and broadcasts |
 | `circle_dca_wallets.py` | Creates the per-user Circle wallet and signs the Aomi message and the transaction |
-| `.env.example` | `AOMI_API_URL`, `AOMI_DCA_MODE`, `AOMI_OAUTH_CLIENT_ID`, and the device-login token names |
+| `.env.example` | Gate `AOMI_*` vars, plus notes for Aomi app `BITAGENTS_*` credentials |
 
-Default API host is `https://chat.aomi.dev`. Default mode is `gate`.
+Default API host is `https://aomi.chat`. Default widget origin is `http://localhost:3000`. Default mode is `gate`.
 
 ## Hedge Fund and Sniper
 

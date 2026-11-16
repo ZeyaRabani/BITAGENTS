@@ -251,6 +251,93 @@ export async function proxySaveCustomInstructions(
   });
 }
 
+export async function proxyStrategiesCatalog(authToken: string): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/strategies`, {
+    cache: "no-store",
+    headers: buildHeaders(authToken),
+  });
+}
+
+export async function proxyStrategyPlans(
+  strategy: string,
+  authToken: string,
+  init?: { method?: string; body?: unknown }
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/strategies/${encodeURIComponent(strategy)}/plans`, {
+    method: init?.method ?? "GET",
+    cache: "no-store",
+    headers: buildHeaders(
+      authToken,
+      init?.body !== undefined ? { "Content-Type": "application/json" } : undefined
+    ),
+    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+  });
+}
+
+export async function proxyStrategyPlan(
+  strategy: string,
+  planId: string,
+  authToken: string,
+  init?: { method?: string; body?: unknown }
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/strategies/${encodeURIComponent(strategy)}/plans/${encodeURIComponent(planId)}`,
+    {
+      method: init?.method ?? "GET",
+      cache: "no-store",
+      headers: buildHeaders(
+        authToken,
+        init?.body !== undefined ? { "Content-Type": "application/json" } : undefined
+      ),
+      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    }
+  );
+}
+
+export async function proxyStrategyPlanStatus(
+  strategy: string,
+  planId: string,
+  action: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/strategies/${encodeURIComponent(strategy)}/plans/${encodeURIComponent(planId)}/status`,
+    {
+      method: "POST",
+      cache: "no-store",
+      headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ action }),
+    }
+  );
+}
+
+export async function proxyStrategyPlanExecutions(
+  strategy: string,
+  planId: string,
+  authToken: string
+): Promise<Response> {
+  return fetch(
+    `${getAgentsBaseUrl()}/strategies/${encodeURIComponent(strategy)}/plans/${encodeURIComponent(planId)}/executions`,
+    {
+      cache: "no-store",
+      headers: buildHeaders(authToken),
+    }
+  );
+}
+
+export async function proxyStrategyRun(
+  strategy: string,
+  body: { plan_id: string; mode?: "preview" },
+  authToken: string
+): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/strategies/${encodeURIComponent(strategy)}/run`, {
+    method: "POST",
+    cache: "no-store",
+    headers: buildHeaders(authToken, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 const MARKET_AGENT_SLUGS = new Set(["hedge-fund", "sniper"]);
 
 export function isMarketAgentSlug(slug: string): boolean {
