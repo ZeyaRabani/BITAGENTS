@@ -1,0 +1,345 @@
+type Plan = {
+  id: string;
+  name: string;
+  status: string;
+  input_token: string;
+  output_token: string;
+  amount_per_buy: number;
+  interval: string;
+  total_budget: number;
+  max_executions: number;
+  executions_count: number;
+  spent_so_far: number;
+  next_execution_at: string;
+  slippage_bps: number;
+};
+const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
+const input = (id: string) => $<HTMLInputElement>(id);
+let plan: Plan | undefined;
+let editing = false;
+let acquiredSol = 0;
+let totalCost = 0;
+$("chat").append($("review"));
+document.querySelector(".right")!.prepend($("agent"));
+function scrollChat() {
+  $("chat").scrollTop = $("chat").scrollHeight;
+}
+const money = (n: number) =>
+  n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+function text(id: string, value: string) {
+  $(id).textContent = value;
+}
+function show(id: string, visible: boolean) {
+  $(id).classList.toggle("hidden", !visible);
+}
+function message(content: string, user = false) {
+  const node = document.createElement("div");
+  node.className = `bubble${user ? " user" : ""}`;
+  const byline = document.createElement("div");
+  byline.className = "byline";
+  byline.textContent = user ? "You" : "Agent";
+  const body = document.createElement("div");
+  body.textContent = content;
+  node.append(byline, body);
+  $("chat").append(node);
+  scrollChat();
+}
+function log(line: string) {
+  const node = document.createElement("div");
+  node.textContent = line;
+  $("event-log").prepend(node);
+  while ($("event-log").children.length > 7)
+    $("event-log").lastElementChild?.remove();
+}
+async function api(path: string, method = "GET", body?: unknown) {
+  const response = await fetch(path, {
+    method,
+    headers: {
+      Authorization: "Bearer local-preview",
+      "Content-Type": "application/json",
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const result = await response.json();
+  log(`${response.status} ${method} ${path}`);
+  if (!response.ok) {
+    const detail =
+      typeof result.detail === "string"
+        ? result.detail
+        : JSON.stringify(result.detail);
+    throw new Error(detail || "The operation failed");
+  }
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+async function action(button: HTMLButtonElement, fn: () => Promise<void>) {
+  button.disabled = true;
+  try {
+    await fn();
+  } catch (e) {
+    message(e instanceof Error ? e.message : "Request failed");
+  } finally {
+    button.disabled = false;
+  }
+}
+function config() {
+  return {
+    name: input("name").value,
+    input_token: "USDC",
+    output_token: "SOL",
+    amount_per_buy: Number(input("amount").value),
+    interval: input("interval").value,
+    total_budget: Number(input("budget").value),
+    max_executions: Number(input("count").value),
+    slippage_bps: Number(input("slippage").value),
+  };
+}
+function recalc() {
+  input("budget").value = (
+    Number(input("amount").value) *
+    Number(input("count").value) *
+    1.005
+  ).toFixed(2);
+}
+input("amount").addEventListener("input", recalc);
+input("count").addEventListener("input", recalc);
+$("example").onclick = () => {
+  input("prompt").value = "Buy 25 USDC of SOL daily for 4 buys";
+  input("prompt").focus();
+};
+$("composer").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const prompt = input("prompt").value.trim();
+  if (!prompt) return;
+  input("prompt").value = "";
+  message(prompt, true);
+  const command = prompt.toLowerCase();
+  if (plan) {
+    await action($<HTMLButtonElement>("send"), async () => {
+      if (/preview/.test(command)) await previewBuy();
+      else if (/simulate|run.*demo/.test(command)) await simulateRun();
+      else if (/pause/.test(command)) await setPaused();
+      else if (/doing|performance|earned|profit|status/.test(command)) {
+        await refresh();
+        message(
+          `Your plan is ${plan!.status}: ${plan!.executions_count} of ${plan!.max_executions} buys completed. You accumulated ${acquiredSol.toFixed(6)} SOL for ${money(totalCost)} USDC including platform fees. At the fixed demo quote of 150 USDC/SOL, its value is ${money(acquiredSol * 150)} USDC. No realized profit: this is a simulated position, not verified earnings.`,
+        );
+      } else if (/edit|change/.test(command)) {
+        $("edit").click();
+      } else
+        message(
+          "You can ask: Preview next buy, Simulate a scheduled run, How is my strategy doing?, Edit my plan, or Pause my plan. This guided demo supports one plan per conversation.",
+        );
+    });
+    return;
+  }
+  const match =
+    /^buy\s+(\d+(?:\.\d+)?)\s+USDC\s+of\s+SOL\s+daily\s+for\s+(\d+)\s+buys\.?$/i.exec(
+      prompt,
+    );
+  if (!match) {
+    message(
+      "This guided preview supports recurring SOL buys, not arbitrary strategies. Try “Buy 25 USDC of SOL daily for 4 buys”. Use the example command to explore this demo.",
+    );
+    return;
+  }
+  input("amount").value = match[1];
+  input("count").value = match[2];
+  recalc();
+  editing = false;
+  message(
+    "I’ve prepared a recurring SOL strategy. Review the limits below. It will start after one interval and stop at the budget or execution cap.",
+  );
+  show("review", true);
+  $("chat").append($("review"));
+  scrollChat();
+});
+$("discard").onclick = () => {
+  show("review", false);
+  show("composer", true);
+  editing = false;
+};
+$("authorize").onclick = () =>
+  action($<HTMLButtonElement>("authorize"), async () => {
+    const configuration = config();
+    if (editing && plan) {
+      const { name, input_token, output_token, ...changes } = configuration;
+      await api(`/strategies/dca/plans/${plan.id}`, "PATCH", {
+        configuration: changes,
+      });
+      message(
+        "Your limits are updated. Future runs use the saved configuration.",
+      );
+    } else {
+      const response = await api("/strategies/dca/plans", "POST", {
+        configuration,
+      });
+      plan = response.plan;
+      message(
+        "Your plan is configured within your approved limits. In production, the scheduler runs in the background. Here, ask me to preview the next buy, then simulate a scheduled run to see the execution receipt.",
+      );
+    }
+    show("review", false);
+    editing = false;
+    await refresh();
+    scrollChat();
+    input("prompt").placeholder =
+      "Ask about your plan, preview a buy, or pause…";
+  });
+function row(label: string, value: string) {
+  const element = document.createElement("div");
+  element.className = "metrics";
+  const a = document.createElement("span");
+  a.textContent = label;
+  const b = document.createElement("strong");
+  b.textContent = value;
+  element.append(a, b);
+  return element;
+}
+async function refresh() {
+  if (!plan) return;
+  plan = (await api(`/strategies/dca/plans/${plan.id}`)) as Plan;
+  show("agent", true);
+  text("agent-name", plan.name);
+  text("agent-id", `BITAGENTS / DCA · ${plan.id}`);
+  text("status", plan.status);
+  $("status").classList.toggle("paused", plan.status === "paused");
+  text("pause", plan.status === "paused" ? "Resume plan" : "Pause plan");
+  $<HTMLButtonElement>("tick").disabled = plan.status !== "active";
+  $("details").replaceChildren(
+    row("Each buy", `${money(plan.amount_per_buy)} USDC → SOL`),
+    row("Schedule", `Every ${plan.interval}`),
+    row(
+      "Budget used",
+      `${money(plan.spent_so_far)} / ${money(plan.total_budget)} USDC`,
+    ),
+    row("Runs completed", `${plan.executions_count} / ${plan.max_executions}`),
+    row(
+      "Next run",
+      plan.status === "active"
+        ? new Date(plan.next_execution_at).toLocaleString("en-GB", {
+            timeZone: "UTC",
+          }) + " UTC"
+        : "Paused",
+    ),
+  );
+  const history = await api(`/strategies/dca/plans/${plan.id}/executions`);
+  acquiredSol = (history.executions || []).reduce(
+    (sum: number, run: { result: { output_amount?: number } }) =>
+      sum + (run.result.output_amount || 0),
+    0,
+  );
+  totalCost = plan.spent_so_far;
+  text(
+    "position",
+    acquiredSol
+      ? `SIMULATED POSITION · ${acquiredSol.toFixed(6)} SOL accumulated. Cost incl. fees: ${money(totalCost)} USDC. No realized profit.`
+      : "Awaiting the first scheduled buy.",
+  );
+  $("history").replaceChildren();
+  for (const run of (history.executions || []).slice().reverse()) {
+    const node = document.createElement("div");
+    node.className = "receipt";
+    const title = document.createElement("div");
+    title.textContent = `${run.result.status === "success" ? "Fixture run completed" : "Run failed"} · ${money(run.amount)} USDC`;
+    const note = document.createElement("small");
+    note.textContent = `${run.result.receipt || "No on-chain receipt"} · fee ${money(run.platform_fee)} USDC`;
+    node.append(title, note);
+    $("history").append(node);
+  }
+}
+async function previewBuy() {
+  if (!plan) return;
+  const result = await api("/strategies/dca/run", "POST", {
+    plan_id: plan.id,
+    mode: "preview",
+  });
+  const quote = `Preview: ${money(result.input_amount)} USDC buys approximately ${result.estimated_output} SOL, plus the 0.5% platform fee. Fixed demo price: 150 USDC/SOL. No trade submitted. Ask “Simulate a scheduled run” to see the demo execution.`;
+  text("run-result", quote);
+  message(quote);
+}
+async function setPaused() {
+  if (!plan) return;
+  await api(`/strategies/dca/plans/${plan.id}/status`, "POST", {
+    action: "pause",
+  });
+  await refresh();
+  message(
+    "Plan paused. Future buys are stopped; your accumulated position and execution history remain available.",
+  );
+}
+async function simulateRun() {
+  if (!plan) return;
+  if (plan.status !== "active") {
+    message(
+      "This plan is not active. Resume it before simulating another run.",
+    );
+    return;
+  }
+  const before = plan.executions_count;
+  await api(`/demo/tick/${plan.id}`, "POST");
+  await refresh();
+  if (plan.executions_count > before)
+    message(
+      `Simulated scheduled buy completed. You now hold ${acquiredSol.toFixed(6)} SOL; ${money(totalCost)} USDC used including platform fees. The receipt is in your plan panel. No real transaction was signed. Ask “How is my strategy doing?” for the result.`,
+    );
+  else
+    message(
+      "No new buy was executed. Your current plan and history are shown in the plan panel.",
+    );
+}
+$("preview").onclick = () =>
+  action($<HTMLButtonElement>("preview"), previewBuy);
+$("tick").onclick = () => action($<HTMLButtonElement>("tick"), simulateRun);
+$("pause").onclick = () =>
+  action($<HTMLButtonElement>("pause"), async () => {
+    if (!plan) return;
+    if (plan.status !== "paused") return setPaused();
+    await api(`/strategies/dca/plans/${plan.id}/status`, "POST", {
+      action: "resume",
+    });
+    await refresh();
+    message(
+      "Plan resumed with its saved limits. An overdue buy may run on the next scheduler tick.",
+    );
+  });
+document
+  .querySelectorAll<HTMLButtonElement>(".suggestion")
+  .forEach((button) => {
+    button.onclick = () => {
+      input("prompt").value = button.dataset.prompt || "";
+      input("prompt").focus();
+    };
+  });
+$("edit").onclick = () => {
+  if (!plan) return;
+  editing = true;
+  input("name").value = plan.name;
+  input("name").disabled = true;
+  input("amount").value = String(plan.amount_per_buy);
+  input("count").value = String(plan.max_executions);
+  input("budget").value = String(plan.total_budget);
+  input("interval").value = plan.interval;
+  input("slippage").value = String(plan.slippage_bps);
+  text("authorize", "Save & authorize changes");
+  show("review", true);
+  message("Review the updated limits before authorizing changes.");
+  $("chat").append($("review"));
+  scrollChat();
+};
+async function boot() {
+  try {
+    const result = await api("/strategies");
+    text(
+      "event-log",
+      `${result.strategies.length} strategy available · DCA. Connected · preview mode`,
+    );
+  } catch (e) {
+    message(String(e));
+  }
+}
+void boot();
