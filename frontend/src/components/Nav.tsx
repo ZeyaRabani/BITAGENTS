@@ -27,7 +27,11 @@ function appLinkClass(active: boolean) {
 export function Nav({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isMaintenance = pathname === "/maintenance";
-  const isPublicPage = pathname === "/" || pathname === "/coming-soon" || isMaintenance;
+  const isPublicPage =
+    pathname === "/" ||
+    pathname === "/signup" ||
+    pathname === "/coming-soon" ||
+    isMaintenance;
 
   return (
     <div className="min-h-screen bg-background">
@@ -50,12 +54,20 @@ export function Nav({ children }: { children: React.ReactNode }) {
                   </Link>
                 ))}
               </nav>
-              <Link
-                href="/agents"
-                className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
-              >
-                Launch App <ArrowUpRight size={16} />
-              </Link>
+              <div className="flex shrink-0 items-center gap-2">
+                <Link
+                  href="/signup"
+                  className="hidden border border-grid px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-signal sm:inline-flex"
+                >
+                  Sign up
+                </Link>
+                <Link
+                  href="/agents"
+                  className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
+                >
+                  Launch App <ArrowUpRight size={16} />
+                </Link>
+              </div>
             </>
           ) : (
             <div className="flex shrink-0 items-center gap-2 sm:gap-3">

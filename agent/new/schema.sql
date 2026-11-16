@@ -105,3 +105,20 @@ CREATE TABLE IF NOT EXISTS dca_platform_metrics (
     executions_24h      INTEGER NOT NULL DEFAULT 0,
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE IF NOT EXISTS waitlist_signups (
+    id                  VARCHAR(16) PRIMARY KEY,
+    email               VARCHAR(320) NOT NULL,
+    telegram            VARCHAR(128),
+    twitter             VARCHAR(128),
+    interest            VARCHAR(32) NOT NULL,
+    notify_when_ready   BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT waitlist_signups_email_unique UNIQUE (email),
+    CONSTRAINT waitlist_signups_interest_check CHECK (
+        interest IN ('make_agent', 'use_marketplace', 'both')
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_waitlist_signups_created ON waitlist_signups (created_at DESC);

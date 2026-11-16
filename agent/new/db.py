@@ -636,6 +636,23 @@ MIGRATION_STATEMENTS = [
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS capital DOUBLE PRECISION",
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS duration_days INTEGER",
     "ALTER TABLE yield_mandates ADD COLUMN IF NOT EXISTS yield_type VARCHAR(32) NOT NULL DEFAULT 'any'",
+    """
+    CREATE TABLE IF NOT EXISTS waitlist_signups (
+        id              VARCHAR(16) PRIMARY KEY,
+        email           VARCHAR(320) NOT NULL,
+        telegram        VARCHAR(128),
+        twitter         VARCHAR(128),
+        interest        VARCHAR(32) NOT NULL,
+        notify_when_ready BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT waitlist_signups_email_unique UNIQUE (email),
+        CONSTRAINT waitlist_signups_interest_check CHECK (
+            interest IN ('make_agent', 'use_marketplace', 'both')
+        )
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_waitlist_signups_created ON waitlist_signups (created_at DESC)",
 ]
 
 
@@ -2730,3 +2747,81 @@ def list_yield_rebalances(user_wallet: str, limit: int = 20) -> list[dict[str, A
             item["created_at"] = item["created_at"].isoformat()
         out.append(item)
     return out
+
+
+WAITLIST_INTERESTS = frozenset({"make_agent", "use_marketplace", "both"})
+
+
+def create_waitlist_signup(
+    *,
+    email: str,
+    interest: str,
+    telegram: Optional[str] = None,
+    twitter: Optional[str] = None,
+    notify_when_ready: bool = True,
+) -> dict[str, Any]:
+    """Insert or update a waitlist signup keyed by email."""
+    init_db()
+    email_norm = (email or "").strip().lower()
+    interest_norm = (interest or "").strip().lower()
+    telegram_norm = (telegram or "").strip() or None
+    twitter_norm = (twitter or "").strip() or None
+    if not email_norm or "@" not in email_norm or "." not in email_norm.split("@")[-1]:
+        return {"error": "A valid email is required."}
+    if len(email_norm) > 320:
+        return {"error": "Email is too long."}
+    if interest_norm not in WAITLIST_INTERESTS:
+        return {
+            "error": "Interest must be make_agent, use_marketplace, or both.",
+        }
+    if telegram_norm and len(telegram_norm) > 128:
+        return {"error": "Telegram handle is too long."}
+    if twitter_norm and len(twitter_norm) > 128:
+        return {"error": "Twitter / X handle is too long."}
+
+    signup_id = uuid.uuid4().hex[:16]
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO waitlist_signups (
+                    id, email, telegram, twitter, interest, notify_when_ready
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (email) DO UPDATE SET
+                    telegram = EXCLUDED.telegram,
+                    twitter = EXCLUDED.twitter,
+                    interest = EXCLUDED.interest,
+                    notify_when_ready = EXCLUDED.notify_when_ready,
+                    updated_at = NOW()
+                RETURNING
+                    id, email, telegram, twitter, interest, notify_when_ready,
+                    created_at, updated_at,
+                    (xmax = 0) AS inserted
+                """,
+                (
+                    signup_id,
+                    email_norm,
+                    telegram_norm,
+                    twitter_norm,
+                    interest_norm,
+                    bool(notify_when_ready),
+                ),
+            )
+            row = cur.fetchone()
+    if not row:
+        return {"error": "Could not save signup."}
+    item = dict(row)
+    inserted = bool(item.pop("inserted", True))
+    for key in ("created_at", "updated_at"):
+        if hasattr(item.get(key), "isoformat"):
+            item[key] = item[key].isoformat()
+    return {
+        "status": "created" if inserted else "updated",
+        "signup": item,
+        "message": (
+            "You're on the list. We'll notify you when features ship."
+            if inserted
+            else "Your signup was updated. We'll notify you when features ship."
+        ),
+    }

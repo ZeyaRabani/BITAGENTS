@@ -41,6 +41,7 @@ from deposit_ledger import (
 from db import (
     append_chat_messages,
     assert_chat_session_access,
+    create_waitlist_signup,
     db_configured,
     delete_chat_session,
     get_custom_instructions,
@@ -259,7 +260,7 @@ app.add_middleware(
 # Scheduled maintenance: 10 Sep 2026, 1:00–3:30 PM IST (07:30–10:00 UTC).
 _MAINTENANCE_START_UTC = datetime(2026, 9, 10, 7, 30, 0, tzinfo=timezone.utc)
 _MAINTENANCE_END_UTC = datetime(2026, 9, 10, 10, 0, 0, tzinfo=timezone.utc)
-_MAINTENANCE_ALLOW_PATHS = {"/health", "/docs", "/openapi.json", "/redoc"}
+_MAINTENANCE_ALLOW_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/signup"}
 
 
 def _maintenance_active() -> bool:
@@ -308,6 +309,14 @@ class AuthVerifyResponse(BaseModel):
     token: str
     user_wallet: str
     expires_at: str
+
+
+class WaitlistSignupRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+    telegram: Optional[str] = Field(default=None, max_length=128)
+    twitter: Optional[str] = Field(default=None, max_length=128)
+    interest: str = Field(min_length=3, max_length=32)
+    notify_when_ready: bool = True
 
 
 class ChatRequest(BaseModel):
@@ -564,6 +573,23 @@ def auth_logout(
     if authorization and authorization.startswith("Bearer "):
         revoke_session_token(authorization.removeprefix("Bearer ").strip())
     return {"ok": True}
+
+
+@app.post("/signup")
+def waitlist_signup(
+    body: WaitlistSignupRequest,
+    _: None = Depends(require_internal_key),
+) -> dict[str, Any]:
+    result = create_waitlist_signup(
+        email=body.email,
+        telegram=body.telegram,
+        twitter=body.twitter,
+        interest=body.interest,
+        notify_when_ready=body.notify_when_ready,
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
 
 
 # ─── DCA agent routes ─────────────────────────────────────────────────────────

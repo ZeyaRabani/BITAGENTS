@@ -13,9 +13,9 @@ export function Hero() {
                         <a href="/agents" className="group inline-flex items-center gap-2 bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
                             Explore Agents <span className="transition group-hover:translate-x-0.5">→</span>
                         </a>
-                        {/* <a href="/agents" className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
-                            Monitor Agents
-                        </a> */}
+                        <a href="/signup" className="inline-flex items-center gap-2 border border-grid bg-surface/40 px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-foreground transition hover:border-signal">
+                            Get notified
+                        </a>
                     </div>
                     {/* <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-grid pt-8">
                         {[

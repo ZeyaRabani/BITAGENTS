@@ -868,4 +868,18 @@ export async function proxySaveCustomInstructions(
   });
 }
 
+export async function proxyWaitlistSignup(body: {
+  email: string;
+  telegram?: string;
+  twitter?: string;
+  interest: string;
+  notify_when_ready?: boolean;
+}): Promise<Response> {
+  return fetch(`${getAgentsBaseUrl()}/signup`, {
+    method: "POST",
+    headers: buildHeaders(undefined, { "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+}
+
 export { getAuthToken, getAgentsBaseUrl, buildHeaders };

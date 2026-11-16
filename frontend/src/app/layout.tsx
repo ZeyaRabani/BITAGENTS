@@ -2,6 +2,7 @@ import "./globals.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import { constructMetadata } from '@/lib/utils';
 import dynamic from "next/dynamic";
+import { AgentsApiKeepAlive } from "@/components/AgentsApiKeepAlive";
 import { Nav } from "@/components/Nav";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="dark">
       <body className="bg-background text-foreground">
         <SolanaProviders>
+          <AgentsApiKeepAlive />
           <Nav>{children}</Nav>
         </SolanaProviders>
         <Toaster />
