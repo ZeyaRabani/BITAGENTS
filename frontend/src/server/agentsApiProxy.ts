@@ -370,4 +370,70 @@ export async function proxyMarketAgentChat(
   });
 }
 
+// Agent builder (/builder/*). Compose waits on an LLM; give these a long timeout.
+const BUILDER_TIMEOUT_MS = 180_000;
+
+export async function proxyBuilder(
+  path: string,
+  options: { method?: "GET" | "POST"; body?: unknown; authToken?: string } = {}
+): Promise<Response> {
+  const method = options.method ?? "GET";
+  const hasBody = options.body !== undefined;
+  return fetch(`${getAgentsBaseUrl()}/builder${path}`, {
+    method,
+    cache: "no-store",
+    headers: buildHeaders(
+      options.authToken,
+      hasBody ? { "Content-Type": "application/json" } : undefined
+    ),
+    body: hasBody ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(BUILDER_TIMEOUT_MS),
+  });
+}
+
+export async function relayBuilder(
+  path: string,
+  options: { method?: "GET" | "POST"; body?: unknown; authToken?: string } = {}
+): Promise<Response> {
+  let res: Response;
+  try {
+    res = await proxyBuilder(path, options);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "request failed";
+    return Response.json(
+      { detail: `Cannot reach the agent API at ${getAgentsBaseUrl()}: ${reason}` },
+      { status: 503 }
+    );
+  }
+  const text = await res.text();
+  try {
+    return Response.json(text.trim() ? JSON.parse(text) : {}, { status: res.status });
+  } catch {
+    return Response.json(
+      {
+        detail: `Agent API returned non-JSON (HTTP ${res.status}): ${text.trim().slice(0, 240)}`,
+      },
+      { status: 502 }
+    );
+  }
+}
+
+export function builderAuthRequired(): Response {
+  return Response.json(
+    { detail: "Wallet sign-in required. Connect your wallet and authenticate." },
+    { status: 401 }
+  );
+}
+
+export async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
+  try {
+    const body = (await request.json()) as unknown;
+    return body && typeof body === "object" && !Array.isArray(body)
+      ? (body as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export { getAuthToken, getAgentsBaseUrl, buildHeaders };

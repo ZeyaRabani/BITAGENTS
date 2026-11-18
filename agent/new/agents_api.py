@@ -270,6 +270,11 @@ app.include_router(
     )
 )
 
+from agent_builder import store as builder_store
+from agent_builder.api import make_router as make_builder_router
+
+app.include_router(make_builder_router(require_wallet_session, require_internal_key))
+
 
 @app.on_event("startup")
 def _startup() -> None:
@@ -277,9 +282,11 @@ def _startup() -> None:
         raise RuntimeError("DATABASE_URL is not set. Add your Neon connection string to agent/new/.env")
     try:
         init_db()
+        builder_store.init()
     except Exception as exc:
         raise RuntimeError(f"Neon database init failed: {exc}") from exc
     print("  database ready")
+    print("  agent builder routes mounted at /builder")
     if internal_api_configured():
         print("  internal API key enabled")
     else:

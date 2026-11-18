@@ -1,0 +1,10 @@
+[app]
+name         = "{{APP}}"
+display_name = {{DISPLAY_NAME_JSON}}
+public       = false
+
+# Every user of this agent gets their own Aomi agent wallet on Solana.
+[wallets]
+agent    = true
+families = ["svm"]
+suggest  = "instant"

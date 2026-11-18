@@ -57,6 +57,17 @@ _MAX_BUY = re.compile(r"\bmax buy(?:\s+to)?\s+([0-9]*\.?[0-9]+)", re.I)
 _SLIP = re.compile(r"\b(?:max )?slip(?:page)?(?:\s+to)?\s+([0-9]+)\s*(?:bps)?", re.I)
 _CONFIRM = re.compile(r"\b(yes|confirm|proceed|go ahead|do it)\b", re.I)
 _DECLINE = re.compile(r"\b(no|cancel|stop)\b", re.I)
+_WALLET = re.compile(
+    r"\b(?:show|get|check|what(?:'s| is)|display|view)?\s*(?:my\s+)?(?:hedge\s*fund\s+|sniper\s+|agent\s+)?wallet\b"
+    r"|\bbalance\b|\bagent\s+address\b",
+    re.I,
+)
+_STRATEGY = re.compile(
+    r"\b(?:create|build|launch|set\s*up|start)\b.*\b(?:strateg|portfolio|basket|allocation)\b"
+    r"|\b(?:horizon|capital)\b|\bxom\b|\bjpm\b|\bxstock",
+    re.I,
+)
+_DISCLAIMER = "Not financial advice. DYOR."
 
 
 def agent_spec(slug: str) -> Optional[dict[str, str]]:
@@ -382,20 +393,65 @@ def _run_tool(slug: str, name: str, args: dict[str, Any], user_wallet: str, sess
     return {"error": f"Unknown tool {name}"}
 
 
+def _format_wallet(status: dict[str, Any]) -> str:
+    if status.get("error"):
+        return f"{status['error']}\n\n{_DISCLAIMER}"
+    addr = status.get("agent_wallet") or "not provisioned yet"
+    bal = status.get("sol_balance")
+    bal_s = f"{bal:.6f} SOL" if isinstance(bal, (int, float)) else "unavailable"
+    err = status.get("balance_error")
+    lines = [
+        f"**{status.get('agent') or 'Agent'} wallet**",
+        f"• Address: `{addr}`",
+        f"• Balance: **{bal_s}**",
+        f"• Cluster: {status.get('cluster') or 'unknown'}",
+        f"• Execution: {status.get('execution') or 'jupiter → aomi → circle'}",
+    ]
+    if err:
+        lines.append(f"• Note: {err}")
+    lines.append(f"\n{_DISCLAIMER}")
+    return "\n".join(lines)
+
+
+def _strategy_redirect(slug: str) -> str:
+    if slug == "hedge-fund":
+        return (
+            "This Hedge Fund chat does **SOL ↔ token swaps** from its Circle wallet "
+            "(Jupiter build → Aomi simulate → Circle sign). "
+            "It does **not** create multi-name stock baskets like XOM/JPM.\n\n"
+            "For a live/paper basket strategy (xStocks, horizon, capital), use **Launch Agent** "
+            "(`/launch-agent`), then open it under **My Agents**.\n\n"
+            "Here you can say e.g. `Buy 0.01 SOL of JUP`, `Sell 1 JUP to SOL`, or "
+            "`Show my hedge fund wallet`.\n\n"
+            f"{_DISCLAIMER}"
+        )
+    return (
+        "Sniper only does sized SOL entries into a token after a renounce check. "
+        "For a basket strategy, use **Launch Agent** (`/launch-agent`).\n\n"
+        f"{_DISCLAIMER}"
+    )
+
+
 def _system(slug: str) -> str:
     spec = AGENTS[slug]
     extra = (
         "Sniper spends SOL only. Refuse a buy when the user is above their max buy. "
         "Tell them a mint with mint or freeze authority will be rejected."
         if slug == "sniper"
-        else "You may buy SOL into a token, or sell a token amount back to SOL."
+        else (
+            "You may buy SOL into a token, or sell a token amount back to SOL. "
+            "You do not create multi-name stock strategies; tell the user to use Launch Agent for that."
+        )
     )
     return (
         f"You are the {spec['name']} on BIT Agents. {spec['focus']}. {extra} "
         "Every live swap is built by Jupiter, simulated on Aomi, then signed by this agent's Circle wallet. "
         "Never claim a swap was sent unless execute_swap returns a signature. "
         "Before execute_swap, tell the user the tokens, amount, and that Aomi will simulate it, then wait for yes. "
-        "Read-only tools can run immediately. End with: Not financial advice. DYOR."
+        "When the user asks for the wallet or balance, call get_agent_wallet and report the address and SOL. "
+        "Read-only tools can run immediately. "
+        f"Always answer the request first; never reply with only '{_DISCLAIMER}'. "
+        f"End helpful replies with: {_DISCLAIMER}"
     )
 
 
@@ -464,6 +520,24 @@ def run_market_agent(
         ]
         return settings_reply, history, []
 
+    if _WALLET.search(text):
+        status = wallet_status(slug, user_wallet)
+        reply = _format_wallet(status)
+        actions.append({"tool": "get_agent_wallet", "args": {}, "result": json.dumps(status)})
+        history = history + [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": reply},
+        ]
+        return reply, history, actions
+
+    if _STRATEGY.search(text):
+        reply = _strategy_redirect(slug)
+        history = history + [
+            {"role": "user", "content": text},
+            {"role": "assistant", "content": reply},
+        ]
+        return reply, history, []
+
     messages = [{"role": "system", "content": _system(slug)}, *history[-12:], {"role": "user", "content": text}]
     for _ in range(4):
         response = call_llm(
@@ -477,7 +551,17 @@ def run_market_agent(
         tool_calls = message.get("tool_calls") or []
         content = str(message.get("content") or "").strip()
         if not tool_calls:
-            reply = content or "I could not complete that. Not financial advice. DYOR."
+            bare = re.sub(r"\s+", " ", content).strip().rstrip(".")
+            if not content or bare.lower() == _DISCLAIMER.lower().rstrip("."):
+                status = wallet_status(slug, user_wallet)
+                reply = (
+                    "I can show the agent wallet, quote a swap, or stage a SOL buy / token sell. "
+                    "Try `Show my hedge fund wallet` or `Buy 0.01 SOL of JUP`.\n\n"
+                    + _format_wallet(status)
+                )
+                actions.append({"tool": "get_agent_wallet", "args": {}, "result": json.dumps(status)})
+            else:
+                reply = content if _DISCLAIMER.lower() in content.lower() else f"{content}\n\n{_DISCLAIMER}"
             history = history + [
                 {"role": "user", "content": text},
                 {"role": "assistant", "content": reply},
@@ -507,7 +591,7 @@ def run_market_agent(
                     {"role": "assistant", "content": reply},
                 ]
                 return reply, history, actions
-    reply = "I stopped after several tool calls. Ask again with the token and amount. Not financial advice. DYOR."
+    reply = f"I stopped after several tool calls. Ask again with the token and amount.\n\n{_DISCLAIMER}"
     history = history + [
         {"role": "user", "content": text},
         {"role": "assistant", "content": reply},
@@ -517,12 +601,12 @@ def run_market_agent(
 
 def _format_result(result: dict[str, Any]) -> str:
     if result.get("error"):
-        return f"{result['error']}\n\nNot financial advice. DYOR."
+        return f"{result['error']}\n\n{_DISCLAIMER}"
     signature = result.get("signature")
     if signature:
         return (
             f"Swap sent from the agent wallet. Signature: {signature}. "
-            "Aomi simulated it before Circle signed.\n\nNot financial advice. DYOR."
+            f"Aomi simulated it before Circle signed.\n\n{_DISCLAIMER}"
         )
     status = result.get("status") or "finished"
-    return f"Swap {status}.\n\nNot financial advice. DYOR."
+    return f"Swap {status}.\n\n{_DISCLAIMER}"

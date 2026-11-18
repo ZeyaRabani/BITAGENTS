@@ -13,7 +13,7 @@ export default function HedgeFundAgentPage() {
       <MarketAgentConsole
         slug="hedge-fund"
         title="Hedge Fund Agent"
-        intro="Connected to the Hedge Fund agent. Ask for a SOL buy or a token sell. Each swap is simulated on Aomi before this agent's Circle wallet signs."
+        intro="Connected to the Hedge Fund agent. This chat does SOL ↔ token swaps from its Circle wallet (Jupiter → Aomi simulate → Circle sign). For XOM/JPM-style baskets, use Launch Agent."
         prompts={[
           "Buy 0.01 SOL of JUP",
           "Sell 1 JUP to SOL",

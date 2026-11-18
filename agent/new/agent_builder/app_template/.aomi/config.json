@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "platform": "{{PLATFORM}}",
+  "applications": ["aomi.toml"]
+}
