@@ -53,20 +53,29 @@ Aomi is the **agent runtime and transaction gate**. BIT Agents owns the **market
 │                         BIT Agents Strategy API (Python)                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Auth / sessions     │  Agent builder        │  Built-in agents             │
-│  Circle custody      │  Spec compose/compile │  DCA · Hedge · Sniper · …    │
-│  Fee ledger / sweep  │  Paper + live evaluate│  Schedulers                  │
-│  Capability plugins  │  Marketplace catalog  │  Keep-alive / health         │
+│  Custody (two paths, │  Spec compose/compile │  DCA · Hedge · Sniper · …    │
+│  see below)          │  Paper + live evaluate│  Schedulers                  │
+│  Fee ledger / sweep  │  Marketplace catalog  │  Keep-alive / health         │
+│  Capability plugins  │                       │                               │
 └───────────┬───────────────────────┬───────────────────────┬─────────────────┘
             │                       │                       │
             │ tools / HTTP          │ SIWS + pipeline       │ Jupiter / RPC
             v                       v                       v
-┌───────────────────────┐ ┌─────────────────────────┐ ┌───────────────────────┐
-│  Aomi (runtime)       │ │  Aomi SVM pipeline      │ │  Solana + venues      │
-│  - Chat / skills      │ │  - stage                │ │  - Jupiter swaps      │
-│  - Hosted apps        │ │  - simulate (fork)      │ │  - SPL / programs     │
-│  - Schedules          │ │  - commit (no broadcast)│ │  - future: DeFi, NFTs │
-│  - Agent wallets UX   │ │  - Circle signs after   │ │  - xStocks / oracles  │
-└───────────────────────┘ └─────────────────────────┘ └───────────────────────┘
+┌───────────────────────┐ ┌─────────────────────────────┐ ┌───────────────────────┐
+│  Aomi (runtime)       │ │  Aomi SVM pipeline          │ │  Solana + venues      │
+│  - Chat / skills      │ │  - stage                    │ │  - Jupiter swaps      │
+│  - Hosted apps        │ │  - simulate (fork)          │ │  - SPL / programs     │
+│  - Schedules          │ │  - commit                   │ │  - future: DeFi, NFTs │
+│  - Agent wallets UX   │ │                              │ │  - xStocks / oracles  │
+│                       │ │  Legacy built-ins (DCA ·    │ │                       │
+│                       │ │  Volume · Hedge · Sniper):  │ │                       │
+│                       │ │  Circle signs after commit  │ │                       │
+│                       │ │                              │ │                       │
+│                       │ │  Agent builder (new):       │ │                       │
+│                       │ │  Aomi/Para agent wallet      │ │                       │
+│                       │ │  signs directly - no        │ │                       │
+│                       │ │  Circle step                │ │                       │
+└───────────────────────┘ └─────────────────────────────┘ └───────────────────────┘
             │
             v
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -74,14 +83,21 @@ Aomi is the **agent runtime and transaction gate**. BIT Agents owns the **market
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Two custody paths exist today, not one. Built-in agents created before the Aomi
+agent-builder (DCA, Volume, Hedge, Sniper) still sign through Circle, with Aomi
+only staging and simulating. Agents made through the Aomi agent-builder are
+custodied and signed by an Aomi/Para agent wallet directly - Circle is never in
+that path. Existing Circle-custodied users are not forced to move; see section
+9 (Current State -> Target State) for the migration stance.
+
 ### Layer responsibilities
 
 | Layer | Owns | Does not own |
 |-------|------|--------------|
 | **Frontend** | UX, listing, composer, shared console, wallet connect | Keys, fee math, swap building |
-| **Python API** | Specs, custody, fees, evaluation, plugs for missing skills | Browser UI, Aomi core runtime |
-| **Aomi** | Agent chat, skills packaging, schedule, tx stage/sim/commit | Marketplace pricing, Circle custody |
-| **Circle** | Per-agent wallets, message + tx signing | Strategy decisions |
+| **Python API** | Specs, fees, evaluation, plugs for missing skills | Browser UI, Aomi core runtime, agent-builder custody |
+| **Aomi** | Agent chat, skills packaging, schedule, tx stage/sim/commit, and wallet custody + signing for agent-builder agents | Marketplace pricing, custody for legacy built-in agents |
+| **Circle** | Per-agent wallets, message + tx signing, for legacy built-in agents (DCA, Volume, Hedge, Sniper) only | Strategy decisions, agent-builder custody |
 | **Venues / RPC** | Quotes, chain state, broadcast after sign | Agent intent |
 
 ---
@@ -99,7 +115,9 @@ Every agent on the platform - built-in or user-created - conforms to the same co
 │  identity: id, slug, name, owner_wallet, visibility, price       │
 │  runtime:  aomi_app / skill / hosted_app_ref                     │
 │  mode:     paper | live                                          │
-│  custody:  Circle agent wallet (per user × agent type/instance)  │
+│  custody:  Circle agent wallet (legacy built-ins) or             │
+│            Aomi/Para agent wallet (agent builder) - per user     │
+│            × agent type/instance, never mixed within one agent   │
 │  capability_set: tools the agent may call                        │
 │  limits:   spend caps, slippage, schedule, compliance hooks      │
 │  ui:       Shared Agent Console (same shell for all agents)      │
@@ -344,7 +362,8 @@ Aligned with `docs/PAYMENTS.md`. Blueprint summary:
 | Area | Status |
 |------|--------|
 | Next.js marketplace shell | Live |
-| Wallet auth + Circle custody | Live (DCA / market agents) |
+| Wallet auth + Circle custody | Live (legacy built-ins: DCA / Volume / Hedge / Sniper) |
+| Aomi/Para agent wallet custody + direct signing | Live (agent-builder agents only, via `aomi_bridge`) |
 | Aomi pipeline gate for swaps | Live (`aomi_pipeline`) |
 | DCA agent UI + strategy API | Live |
 | Hedge Fund / Sniper (SOL↔token via Aomi gate) | Live |
