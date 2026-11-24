@@ -4,7 +4,7 @@ Circle developer-controlled wallets for per-user agent addresses.
 Each (user_wallet, agent_type) pair gets a persistent Solana wallet created once
 and stored in Postgres. Entity-secret ciphertext uses RSA-OAEP SHA-256.
 
-Agent types: dca | easya | volume | hedge_fund
+Agent types: dca | easya | volume | hedge_fund | builder | sniper | …
 
 Docs:
   https://developers.circle.com/wallets/dev-controlled/create-your-first-wallet
@@ -39,6 +39,7 @@ AGENT_TYPES = (
     "creator_pay",
     "jupiter_trade",
     "sniper",
+    "builder",
 )
 AGENT_TYPE_LABELS = {
     "dca": "DCA",
@@ -50,6 +51,7 @@ AGENT_TYPE_LABELS = {
     "creator_pay": "CreatorPay",
     "jupiter_trade": "JupiterTrade",
     "sniper": "Sniper",
+    "builder": "Builder",
 }
 
 _wallet_set_lock = threading.Lock()
@@ -103,6 +105,9 @@ def normalize_agent_type(agent_type: str) -> str:
         "hedge-fund": "hedge_fund",
         "hedge_fund": "hedge_fund",
         "sniper": "sniper",
+        "builder": "builder",
+        "custom": "builder",
+        "agent-builder": "builder",
     }
     value = aliases.get(value, value)
     if value not in AGENT_TYPES:

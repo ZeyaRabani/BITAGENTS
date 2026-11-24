@@ -37,6 +37,7 @@ import {
   type BuilderEvaluation,
   type BuilderHolding,
   type BuilderOrder,
+  type BuilderLiveExecuteResult,
   type BuilderRun,
   type BuilderSignal,
   type ChatEvent,
@@ -119,8 +120,17 @@ export function CustomAgentConsole({ agentId }: { agentId: string }) {
               agentId={agent.id}
               token={token}
               quote={agent.spec.limits.quote}
+              mode={agent.mode ?? "paper"}
+              ready={agent.build_status === "ready"}
+              isOwner={Boolean(wallet) && wallet === agent.owner_wallet}
               defaultWallet={aomi?.wallet?.address ?? phantomAddress}
-              defaultWalletSource={aomi?.wallet?.address ? "Aomi agent wallet" : phantomAddress ? "connected wallet" : null}
+              defaultWalletSource={
+                aomi?.wallet?.address
+                  ? "Circle / Aomi agent wallet"
+                  : phantomAddress
+                    ? "connected wallet"
+                    : null
+              }
               onRun={bumpActivity}
             />
             {!aomi?.hosted && (
@@ -140,6 +150,7 @@ export function CustomAgentConsole({ agentId }: { agentId: string }) {
               refreshTick={activityTick}
               state={aomi}
               onState={setAomi}
+              onExecuted={bumpActivity}
             />
             <LimitsPanel limits={agent.spec.limits} />
             <StrategyPanel agent={agent} />
@@ -162,7 +173,7 @@ const MODE_COPY: Record<AgentMode, { label: string; text: string }> = {
   },
   live: {
     label: "Live",
-    text: "Runs are staged for the agent wallet to sign. The wallet needs USDC and SOL.",
+    text: "Mainnet trades: Jupiter builds the swap, Aomi stages/simulates/commits, then the Circle agent wallet signs and we broadcast. Fund that wallet with USDC and SOL.",
   },
 };
 
@@ -201,7 +212,7 @@ function ModePanel({
     if (
       next === "live" &&
       !window.confirm(
-        "Switch this strategy to live? Live runs are staged for the agent wallet to sign and spend real funds."
+        "Switch this strategy to live? Live runs spend real mainnet funds after Aomi simulates the swap and the Circle agent wallet signs."
       )
     ) {
       return;
@@ -614,6 +625,9 @@ function SignalsPanel({
   agentId,
   token,
   quote,
+  mode,
+  ready,
+  isOwner,
   defaultWallet,
   defaultWalletSource,
   onRun,
@@ -621,14 +635,19 @@ function SignalsPanel({
   agentId: string;
   token: string | null;
   quote: string;
+  mode: AgentMode;
+  ready: boolean;
+  isOwner: boolean;
   defaultWallet: string | null;
   defaultWalletSource: string | null;
   onRun: () => void;
 }) {
   const [override, setOverride] = useState("");
   const [busy, setBusy] = useState(false);
+  const [execBusy, setExecBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<BuilderEvaluation | null>(null);
+  const [liveResult, setLiveResult] = useState<BuilderLiveExecuteResult | null>(null);
 
   const target = override.trim() || defaultWallet || "";
 
@@ -646,6 +665,27 @@ function SignalsPanel({
     }
   }
 
+  async function executeLive() {
+    if (!token || execBusy || !isOwner || mode !== "live" || !ready) return;
+    if (
+      !window.confirm(
+        "Execute this strategy live on Solana mainnet? Aomi will simulate each swap, then the Circle agent wallet signs."
+      )
+    ) {
+      return;
+    }
+    setExecBusy(true);
+    setError(null);
+    try {
+      setLiveResult(await builderApi.executeLive(agentId, token));
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setExecBusy(false);
+      onRun();
+    }
+  }
+
   const signals = evaluation?.signals ?? [];
   const notes = evaluation?.notes ?? [];
   const orders = evaluation?.orders ?? [];
@@ -654,11 +694,11 @@ function SignalsPanel({
   return (
     <Panel title="Signals">
       <div className="space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <input
             value={override}
             onChange={(event) => setOverride(event.target.value)}
-            disabled={busy}
+            disabled={busy || execBusy}
             spellCheck={false}
             placeholder={defaultWallet ?? "Solana wallet address to evaluate"}
             className={`${INPUT} min-w-0 flex-1 text-xs`}
@@ -666,12 +706,42 @@ function SignalsPanel({
           <button
             type="button"
             onClick={() => void check()}
-            disabled={busy || !token || !target}
+            disabled={busy || execBusy || !token || !target}
             className={BTN_PRIMARY}
           >
             {busy ? "Checking…" : "Check signals now"}
           </button>
+          {isOwner && mode === "live" && ready && (
+            <button
+              type="button"
+              onClick={() => void executeLive()}
+              disabled={busy || execBusy || !token}
+              className={BTN_GHOST}
+            >
+              {execBusy ? "Executing…" : "Execute live on mainnet"}
+            </button>
+          )}
         </div>
+        {liveResult && (
+          <div className="space-y-1 border border-grid p-3 font-mono text-xs text-muted-foreground">
+            <p className="text-foreground">{liveResult.message ?? liveResult.status}</p>
+            <p>Wallet {shortAddress(liveResult.agent_wallet)} · {liveResult.execution}</p>
+            {liveResult.fills.map((fill) => (
+              <p key={fill.index} className="break-all">
+                #{fill.index} {fill.side} {fill.symbol ?? fill.token_symbol}: {fill.status}
+                {fill.explorer_url ? (
+                  <>
+                    {" · "}
+                    <a href={fill.explorer_url} target="_blank" rel="noreferrer" className="text-signal underline">
+                      explorer
+                    </a>
+                  </>
+                ) : null}
+                {fill.error ? ` · ${fill.error}` : ""}
+              </p>
+            ))}
+          </div>
+        )}
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           {override.trim()
             ? "Evaluating the address typed above."
@@ -770,17 +840,54 @@ function HostedAomiPanel({
   hosted,
   ready,
   reason,
+  wallet,
+  liveExecute,
+  agentId,
+  token,
+  quote,
+  onExecuted,
 }: {
   hosted: NonNullable<AomiState["hosted"]>;
   ready: boolean;
   reason?: string;
+  wallet?: AomiState["wallet"];
+  liveExecute?: boolean;
+  agentId: string;
+  token: string | null;
+  quote: string;
+  onExecuted: () => void;
 }) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<BuilderLiveExecuteResult | null>(null);
 
   async function copyPrompt(text: string) {
     await navigator.clipboard.writeText(text);
     setCopied(text);
     window.setTimeout(() => setCopied(null), 1500);
+  }
+
+  async function runLive() {
+    if (!token || busy) return;
+    if (
+      !window.confirm(
+        "Execute this strategy live on Solana mainnet? Aomi will simulate the swap, then the Circle agent wallet will sign."
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await builderApi.executeLive(agentId, token);
+      setResult(next);
+      onExecuted();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -791,10 +898,38 @@ function HostedAomiPanel({
         </p>
         {reason && <p className="break-words text-muted-foreground">{reason}</p>}
         <p className="text-muted-foreground">
-          This strategy is run by the BIT Agents agent in Aomi. Your agent wallet, signing and schedule live there. Runs appear in the run log
-          on this page.
+          Chat and schedules can run in Aomi. Live mainnet trades from this site use Jupiter → Aomi gate → Circle sign →
+          broadcast.
         </p>
         <Field label="Aomi app">{hosted.app}</Field>
+        {wallet?.address && (
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground">Circle agent wallet</div>
+            <p className="mt-1 break-all text-foreground">{wallet.address}</p>
+            <div className="mt-2 grid grid-cols-2 gap-4">
+              <Field label="On-chain SOL">{wallet.sol ?? "-"}</Field>
+              <Field label={`On-chain ${quote}`}>{wallet.cash_usd ?? "-"}</Field>
+            </div>
+          </div>
+        )}
+        {liveExecute && token && (
+          <button type="button" onClick={() => void runLive()} disabled={busy} className={BTN_PRIMARY}>
+            {busy ? "Executing on mainnet…" : "Execute live on mainnet"}
+          </button>
+        )}
+        {error && <p className="break-words text-warn">{error}</p>}
+        {result && (
+          <div className="space-y-1 border border-grid p-2 text-muted-foreground">
+            <p className="text-foreground">{result.message ?? result.status}</p>
+            {result.fills.map((fill) => (
+              <p key={fill.index} className="break-all">
+                #{fill.index} {fill.side} {fill.symbol ?? fill.token_symbol}: {fill.status}
+                {fill.signature ? ` · ${fill.signature}` : ""}
+                {fill.error ? ` · ${fill.error}` : ""}
+              </p>
+            ))}
+          </div>
+        )}
         <div>
           <div className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground">To run it once, say this in Aomi</div>
           <p className="mt-1 break-all text-foreground">{hosted.prompt}</p>
@@ -835,6 +970,7 @@ function AomiWalletPanel({
   refreshTick,
   state,
   onState,
+  onExecuted,
 }: {
   agentId: string;
   token: string | null;
@@ -842,6 +978,7 @@ function AomiWalletPanel({
   refreshTick: number;
   state: AomiState | null;
   onState: (state: AomiState | null) => void;
+  onExecuted: () => void;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -900,7 +1037,19 @@ function AomiWalletPanel({
   const address = state?.wallet?.address;
 
   if (state?.hosted) {
-    return <HostedAomiPanel hosted={state.hosted} ready={state.connected} reason={state.reason} />;
+    return (
+      <HostedAomiPanel
+        hosted={state.hosted}
+        ready={state.connected}
+        reason={state.reason}
+        wallet={state.wallet}
+        liveExecute={state.live_execute}
+        agentId={agentId}
+        token={token}
+        quote={quote}
+        onExecuted={onExecuted}
+      />
+    );
   }
 
   return (

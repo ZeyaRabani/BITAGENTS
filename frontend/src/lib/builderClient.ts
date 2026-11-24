@@ -52,8 +52,34 @@ export type BuilderBuild = {
   finished_at?: number;
 };
 
-/** paper: runs are simulated on mainnet against a paper balance. live: runs are staged for the agent wallet to sign. */
+/** paper: runs are simulated on mainnet against a paper balance. live: Aomi gate then Circle signs on mainnet. */
 export type AgentMode = "paper" | "live";
+
+export type BuilderLiveFill = {
+  index: number;
+  side?: string;
+  symbol?: string;
+  token_symbol?: string;
+  usd?: number;
+  status: string;
+  signature?: string;
+  explorer_url?: string;
+  error?: string;
+  aomi_digest?: string;
+  aomi_step?: string;
+  agent_wallet?: string;
+};
+
+export type BuilderLiveExecuteResult = {
+  status: string;
+  mode: AgentMode;
+  cluster: string;
+  execution?: string;
+  agent_wallet?: string;
+  message?: string;
+  fills: BuilderLiveFill[];
+  decision?: BuilderEvaluation;
+};
 
 export type BuilderAgent = {
   id: string;
@@ -230,6 +256,8 @@ export type AomiState = {
   paper?: PaperBook;
   /** Set when agents run on a hosted Aomi: the wallet and chat live there, not on this site. */
   hosted?: { app: string; chat_url: string; prompt: string; schedule_prompt?: string };
+  /** True when BIT Agents can run live mainnet trades (Aomi gate → Circle sign). */
+  live_execute?: boolean;
 };
 
 export type ChatEvent = {
@@ -338,6 +366,8 @@ export const builderApi = {
     call<{ runs: BuilderRun[] }>(`${agentPath(id)}/runs`, { signal }),
   preview: (id: string, wallet: string, token: string) =>
     call<BuilderEvaluation>(`${agentPath(id)}/preview`, { method: "POST", body: { wallet }, token }),
+  executeLive: (id: string, token: string) =>
+    call<BuilderLiveExecuteResult>(`${agentPath(id)}/execute`, { method: "POST", token }),
   aomi: (id: string, token: string, signal?: AbortSignal) =>
     call<AomiState>(`${agentPath(id)}/aomi`, { token, signal }),
   createAomiWallet: (id: string, token: string) =>

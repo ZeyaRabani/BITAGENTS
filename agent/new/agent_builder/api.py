@@ -238,6 +238,16 @@ def make_router(require_wallet_session, require_internal_key) -> APIRouter:
         """What the strategy would do for a wallet right now. Never builds a transaction."""
         return evaluate(_agent(agent_id), body.wallet, False, "preview")
 
+    @r.post("/agents/{agent_id}/execute")
+    def execute_(agent_id: str, wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+        """Live mainnet run: Jupiter build → Aomi stage/simulate/commit → Circle sign → broadcast."""
+        from .execute import execute_live
+
+        a = _agent(agent_id)
+        if a["owner_wallet"] != wallet:
+            raise HTTPException(403, "Only the creator can execute this strategy on-chain.")
+        return execute_live(a, wallet)
+
     @r.post("/agents/{agent_id}/evaluate", dependencies=[Depends(require_app_key)])
     def evaluate_(agent_id: str, body: EvaluateBody) -> dict[str, Any]:
         """Called by the agent's Aomi app. Returns the decision and unsigned swap instructions."""
@@ -269,6 +279,40 @@ def make_router(require_wallet_session, require_internal_key) -> APIRouter:
         return {"app": app, "chat_url": f"{chat}?app={app}&lock_app=1", "prompt": f"Run strategy {agent['id']}",
                 "schedule_prompt": f"Run strategy {agent['id']} every {agent['spec']['strategy']['schedule_minutes']} minutes"}
 
+    def _circle_builder_wallet(user_wallet: str) -> Optional[dict[str, Any]]:
+        """Circle custody wallet used for BIT Agents live execute (Aomi gate, then Circle sign)."""
+        try:
+            from circle_dca_wallets import circle_dca_enabled, resolve_agent_signing_context
+            from dca_agent import _is_mainnet
+            from solana_rpc import sol_rpc
+
+            if not circle_dca_enabled():
+                return None
+            signing = resolve_agent_signing_context(user_wallet, "builder")
+            pubkey = signing.get("pubkey")
+            if not pubkey:
+                return None
+            sol = None
+            try:
+                sol = int(sol_rpc("getBalance", [pubkey]).get("value") or 0) / 1_000_000_000
+            except Exception:
+                sol = None
+            cash = 0.0
+            try:
+                held, _ = market.holdings(pubkey)
+                cash = next((h.amount for h in held if h.mint == market.USDC["mint"]), 0.0)
+            except Exception:
+                pass
+            return {
+                "address": pubkey,
+                "sol": sol,
+                "cash_usd": cash,
+                "cluster": "mainnet" if _is_mainnet() else "devnet",
+                "execution": "jupiter → aomi gate → circle sign",
+            }
+        except Exception:
+            return None
+
     def _local_only(agent: dict[str, Any]) -> None:
         if _hosted(agent):
             raise HTTPException(409, "This strategy runs on Aomi. Open it there to create a wallet and chat.")
@@ -277,10 +321,22 @@ def make_router(require_wallet_session, require_internal_key) -> APIRouter:
     def aomi_state(agent_id: str, wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
         a = _agent(agent_id)
         hosted = _hosted(a)
+        circle = _circle_builder_wallet(wallet)
         if hosted:
-            return {"connected": a["build_status"] == "ready", "app": hosted["app"], "mode": a["mode"], "hosted": hosted,
-                    "reason": None if a["build_status"] == "ready" else "Deploy the strategy first."}
-        return _with_balances(aomi_bridge.state(wallet, a["app_name"]), a)
+            return {
+                "connected": a["build_status"] == "ready",
+                "app": hosted["app"],
+                "mode": a["mode"],
+                "hosted": hosted,
+                "wallet": circle,
+                "live_execute": bool(circle) and a["mode"] == "live" and a["build_status"] == "ready",
+                "reason": None if a["build_status"] == "ready" else "Deploy the strategy first.",
+            }
+        st = _with_balances(aomi_bridge.state(wallet, a["app_name"]), a)
+        if circle and not st.get("wallet"):
+            st["wallet"] = circle
+        st["live_execute"] = a["mode"] == "live" and a["build_status"] == "ready"
+        return st
 
     @r.post("/agents/{agent_id}/aomi/wallet")
     def aomi_wallet(agent_id: str, wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
