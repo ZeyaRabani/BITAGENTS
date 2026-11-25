@@ -425,6 +425,24 @@ export function builderAuthRequired(): Response {
   );
 }
 
+export async function proxyFibOhlc(
+  path: string,
+  options: { method?: "GET" | "POST"; body?: unknown; authToken?: string } = {}
+): Promise<Response> {
+  const method = options.method ?? "GET";
+  const hasBody = options.body !== undefined;
+  return fetch(`${getAgentsBaseUrl()}/fib-ohlc${path}`, {
+    method,
+    cache: "no-store",
+    headers: buildHeaders(
+      options.authToken,
+      hasBody ? { "Content-Type": "application/json" } : undefined
+    ),
+    body: hasBody ? JSON.stringify(options.body) : undefined,
+    signal: AbortSignal.timeout(120_000),
+  });
+}
+
 export async function readJsonBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const body = (await request.json()) as unknown;

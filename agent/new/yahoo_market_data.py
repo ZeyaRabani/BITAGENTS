@@ -414,6 +414,61 @@ def fetch_yahoo_daily_prices(yahoo_symbol: str, start_date: str, end_date: str) 
         return {"error": f"Yahoo Finance fetch failed for {yahoo_symbol}: {exc}"}
 
 
+def fetch_yahoo_daily_ohlc(
+    yahoo_symbol: str,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    lookback_days: int = 120,
+) -> dict[str, Any]:
+    """Daily OHLC bars for Fibonacci / backtest engines."""
+    try:
+        import yfinance as yf
+    except ImportError:
+        return {"error": "yfinance is not installed. Run: pip install yfinance"}
+
+    try:
+        end_dt = datetime.strptime(end_date[:10], "%Y-%m-%d") if end_date else datetime.now(timezone.utc)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone.utc)
+        if start_date:
+            start_dt = datetime.strptime(start_date[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        else:
+            start_dt = end_dt - timedelta(days=max(10, int(lookback_days)))
+        end_plus = (end_dt + timedelta(days=2)).strftime("%Y-%m-%d")
+        hist = yf.Ticker(yahoo_symbol).history(
+            start=start_dt.strftime("%Y-%m-%d"),
+            end=end_plus,
+            auto_adjust=True,
+        )
+        if hist is None or hist.empty:
+            return {"error": f"Yahoo Finance returned no OHLC bars for {yahoo_symbol}"}
+        need = ("Open", "High", "Low", "Close")
+        if any(col not in hist.columns for col in need):
+            return {"error": f"Yahoo OHLC columns missing for {yahoo_symbol}"}
+
+        bars: list[dict[str, Any]] = []
+        for idx, row in hist.iterrows():
+            ts = idx.to_pydatetime()
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            o, h, l, c = float(row["Open"]), float(row["High"]), float(row["Low"]), float(row["Close"])
+            if min(o, h, l, c) <= 0:
+                continue
+            bars.append({
+                "date": ts.date().isoformat(),
+                "open": o,
+                "high": h,
+                "low": l,
+                "close": c,
+            })
+        if len(bars) < 2:
+            return {"error": f"Insufficient Yahoo OHLC history for {yahoo_symbol}"}
+        return {"bars": bars, "source": "yahoo_finance", "yahoo_symbol": yahoo_symbol}
+    except Exception as exc:
+        return {"error": f"Yahoo OHLC fetch failed for {yahoo_symbol}: {exc}"}
+
+
 def fetch_yahoo_news(symbols: list[str], limit_per_symbol: int = 3) -> list[dict[str, Any]]:
     """Recent Yahoo Finance headlines for the selected assets."""
     try:

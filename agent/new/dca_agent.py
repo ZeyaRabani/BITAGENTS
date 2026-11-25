@@ -1023,7 +1023,7 @@ def _execute_jupiter_swap_v2(
         # ── 4. Compile MessageV0 with LUTs + sign ──────────────────────────────
         try:
             payer = SPubkey.from_string(wallet_pubkey)
-            msg   = MessageV0.try_compile(payer, instructions, luts, blockhash)
+            msg = MessageV0.try_compile(payer, instructions, luts, blockhash)
             from aomi_pipeline import gate_swap
 
             gated = gate_swap(
@@ -1069,10 +1069,10 @@ def _execute_jupiter_swap_v2(
         # ── 5. Send via RPC (skipPreflight mirrors Node.js) ───────────────────
         # Avoid minContextSlot — public RPCs often drop or delay those sends.
         send_opts: dict[str, Any] = {
-            "encoding":            "base64",
-            "skipPreflight":       True,
+            "encoding": "base64",
+            "skipPreflight": True,
             "preflightCommitment": "confirmed",
-            "maxRetries":          5,
+            "maxRetries": 5,
         }
         try:
             sig = sol_rpc("sendTransaction", [encoded, send_opts])
@@ -1089,7 +1089,7 @@ def _execute_jupiter_swap_v2(
         # ── 6. Poll for confirmation (rebroadcast on the way) ─────────────────
         confirm = _confirm_transaction(sig, timeout_s=75, encoded_tx=encoded)
         if not confirm["confirmed"]:
-            err     = confirm.get("error", "unknown")
+            err = confirm.get("error", "unknown")
             if (_is_blockhash_error(err) or _is_confirmation_timeout(err) or confirm.get("retryable")) and attempt < 3:
                 print(f"    ⚠️  Swap not confirmed (attempt {attempt}/3): {err} — resigning…")
                 time.sleep(0.5 * attempt)
@@ -1102,8 +1102,8 @@ def _execute_jupiter_swap_v2(
         print("    Status: ✅ Success")
         explorer_cluster = "mainnet" if _is_mainnet() else "devnet"
         return {
-            "status":       "success",
-            "signature":    sig,
+            "status": "success",
+            "signature": sig,
             "explorer_url": f"https://explorer.solana.com/tx/{sig}?cluster={explorer_cluster}",
             **aomi_meta,
         }

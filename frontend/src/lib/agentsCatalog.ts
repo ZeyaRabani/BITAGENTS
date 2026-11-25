@@ -1,14 +1,15 @@
 import type { LucideIcon } from "lucide-react";
-import { ArrowLeftRight, Crosshair, Landmark } from "lucide-react";
+import { ArrowLeftRight, Crosshair, Landmark, CandlestickChart } from "lucide-react";
 
 export type AgentCategory = "Monitor" | "Research" | "Alerts" | "Automation" | "Trading";
 
-export type AgentIconId = "swap" | "fund" | "sniper";
+export type AgentIconId = "swap" | "fund" | "sniper" | "fib";
 
 export const AGENT_ICONS: Record<AgentIconId, LucideIcon> = {
   swap: ArrowLeftRight,
   fund: Landmark,
   sniper: Crosshair,
+  fib: CandlestickChart,
 };
 
 export type MarketplaceAgent = {
@@ -79,6 +80,23 @@ export const FEATURED_AGENTS: MarketplaceAgent[] = [
     available: true,
     model: "meta-llama/llama-3.3-70b-instruct",
     cluster: "mainnet",
+  },
+  {
+    id: "fib-ohlc",
+    slug: "fib-ohlc",
+    name: "Fibonacci OHLC",
+    category: "Trading",
+    description:
+      "Chat-driven paper Fibonacci strategy on daily Yahoo OHLC. Prior-day range, 61.8% entry, 1:3 risk reward, longs/shorts. Default BTC. Paper only.",
+    tagline: "Chat · Fib 61.8% · paper only",
+    pricePerTask: "Paper",
+    runs: "-",
+    volumeSol: "-",
+    rating: 4.6,
+    iconId: "fib",
+    available: true,
+    model: "Rules engine",
+    cluster: "yahoo",
   },
 ];
 

@@ -326,6 +326,13 @@ def health() -> dict[str, Any]:
                 "model": MODEL,
                 "execution": "jupiter build, aomi simulate, circle sign",
             },
+            "fib-ohlc": {
+                "chat": "/fib-ohlc/chat",
+                "paper": "/fib-ohlc/paper",
+                "backtest": "/fib-ohlc/backtest",
+                "mode": "paper",
+                "execution": "yahoo daily OHLC fib 61.8% · 1:3 R:R paper",
+            },
         },
         "aomi_configured": aomi_configured(),
         "database": "neon_postgres" if db_configured() else "unconfigured",
@@ -637,6 +644,102 @@ def sniper_chat(
     auth_wallet: str = Depends(require_wallet_session),
 ) -> ChatResponse:
     return _market_chat("sniper", body, auth_wallet)
+
+
+class FibBody(BaseModel):
+    asset: Optional[str] = Field(default="BTC", max_length=32)
+    lookback_days: int = Field(default=120, ge=20, le=500)
+    notional_usd: float = Field(default=1000.0, gt=0, le=1_000_000)
+
+
+@app.get("/fib-ohlc/health")
+def fib_ohlc_health() -> dict[str, Any]:
+    return {
+        "status": "ok",
+        "agent": "fib-ohlc",
+        "mode": "paper+backtest",
+        "default_asset": "BTC",
+        "risk_reward": "1:3",
+        "fib_entry": 0.618,
+    }
+
+
+@app.get("/fib-ohlc/inspect")
+def fib_ohlc_inspect(
+    asset: str = Query(default="BTC"),
+    lookback_days: int = Query(default=120, ge=20, le=500),
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    from fib_ohlc_strategy import inspect_asset
+
+    _ = auth_wallet
+    result = inspect_asset(asset, lookback_days=lookback_days)
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/fib-ohlc/paper")
+def fib_ohlc_paper(
+    body: FibBody,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    from fib_ohlc_strategy import run_paper
+
+    result = run_paper(
+        wallet=auth_wallet,
+        asset=body.asset,
+        notional_usd=body.notional_usd,
+        lookback_days=body.lookback_days,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/fib-ohlc/backtest")
+def fib_ohlc_backtest(
+    body: FibBody,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> dict[str, Any]:
+    from fib_ohlc_strategy import backtest
+
+    _ = auth_wallet
+    result = backtest(
+        asset=body.asset,
+        lookback_days=body.lookback_days,
+        notional_usd=body.notional_usd,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/fib-ohlc/book")
+def fib_ohlc_book(auth_wallet: str = Depends(require_wallet_session)) -> dict[str, Any]:
+    from fib_ohlc_strategy import paper_book
+
+    return paper_book(auth_wallet)
+
+
+@app.post("/fib-ohlc/chat", response_model=ChatResponse)
+def fib_ohlc_chat(
+    body: ChatRequest,
+    auth_wallet: str = Depends(require_wallet_session),
+) -> ChatResponse:
+    from fib_ohlc_strategy import run_chat
+
+    session_id = body.session_id or str(uuid.uuid4())
+    access_error = assert_chat_session_access(session_id, auth_wallet)
+    if access_error:
+        raise HTTPException(status_code=403, detail=access_error)
+    user_message = body.message.strip()
+    try:
+        reply, actions = run_chat(auth_wallet, user_message)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    append_chat_messages(session_id, user_message, reply, actions, user_wallet=auth_wallet)
+    return ChatResponse(reply=reply, session_id=session_id, actions=actions)
 
 
 @app.get("/v1/custom-instructions/{agent_type}")
