@@ -1,21 +1,25 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/AppShell";
-import { HedgeFundConsole } from "@/components/agents/HedgeFundConsole";
-import { HEDGE_FUND } from "@/lib/hedgeFundConfig";
+import { MarketAgentConsole } from "@/components/agents/MarketAgentConsole";
 
 export const metadata: Metadata = {
   title: "Hedge Fund Agent - BIT Agents",
-  description: HEDGE_FUND.description,
-  robots: { index: false, follow: false },
+  description: "Buy and sell from a Circle wallet after Aomi simulates the swap.",
 };
 
-export default function HedgeFundPage() {
+export default function HedgeFundAgentPage() {
   return (
-    <AppShell
-      title={HEDGE_FUND.name}
-      subtitle={`${HEDGE_FUND.tagline} · stocks & crypto paper trading`}
-    >
-      <HedgeFundConsole />
+    <AppShell title="Hedge Fund Agent">
+      <MarketAgentConsole
+        slug="hedge-fund"
+        title="Hedge Fund Agent"
+        intro="Connected to the Hedge Fund agent. This chat does SOL ↔ token swaps from its Circle wallet (Jupiter → Aomi simulate → Circle sign). For XOM/JPM-style baskets, use Launch Agent."
+        prompts={[
+          "Buy 0.01 SOL of JUP",
+          "Sell 1 JUP to SOL",
+          "Show my hedge fund wallet",
+        ]}
+      />
     </AppShell>
   );
 }

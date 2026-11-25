@@ -1,34 +1,83 @@
+"use client";
+
+import type { ReactNode } from "react";
+import { useUiDesign } from "@/components/ui-design/UiDesignProvider";
+
+/** Same clear product story on every look - only layout changes. */
+const HEADLINE = (
+  <>
+    Use and Create
+    <br />
+    <span className="text-signal">Agents on Solana</span>
+  </>
+);
+
+const SUB =
+  "1. Pick an agent  ·  2. Connect your wallet  ·  3. Fund it and go live";
+
+function Ctas({ center = false }: { center?: boolean }) {
+  return (
+    <div
+      id="hero-cta"
+      className={`ui-hero-cta mt-10 flex flex-wrap items-center gap-3 ${center ? "justify-center" : ""}`}
+    >
+      <a href="/signup" className="ui-cta-primary group">
+        Sign up <span className="transition group-hover:translate-x-0.5">→</span>
+      </a>
+    </div>
+  );
+}
+
+function Badge({ children }: { children: ReactNode }) {
+  return <div className="ui-hero-badge">{children}</div>;
+}
+
+function Brand() {
+  return <p className="mt-5 font-display text-3xl tracking-tight text-signal sm:text-4xl">BITAGENTS</p>;
+}
+
+function Steps({ className = "" }: { className?: string }) {
+  return (
+    <p className={`mt-6 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg ${className}`}>
+      {SUB}
+    </p>
+  );
+}
+
 export function Hero() {
+  const { designId } = useUiDesign();
+
+  if (designId === 5) {
     return (
-        <section id="top" className="relative overflow-hidden border-b border-grid">
-            <div className="mx-auto grid max-w-7xl gap-12 px-6 py-10 lg:grid-cols-[1.15fr_1fr] lg:items-center">
-                <div>
-                    <h1 className="mt-6 font-display text-5xl font-bold leading-[0.95] tracking-tight md:text-6xl lg:text-7xl">
-                        The Marketplace For <span className="text-signal">Autonomous AI Agents</span>.
-                    </h1>
-                    <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground">
-                        BIT Agents is the on-chain marketplace where users discover, and run specialized AI agents for wallet monitoring, research, automation, and on-chain workflows.
-                    </p>
-                    <div id="hero-cta" className="mt-10 flex flex-wrap gap-3">
-                        <a href="/signup" className="group inline-flex items-center gap-2 bg-signal px-5 py-3 text-sm font-mono font-semibold uppercase tracking-[0.14em] text-primary-foreground transition hover:opacity-90">
-                            Sign up <span className="transition group-hover:translate-x-0.5">→</span>
-                        </a>
-                    </div>
-                    {/* <dl className="mt-12 grid max-w-lg grid-cols-3 gap-6 border-t border-grid pt-8">
-                        {[
-                            ["48", "Live agents"],
-                            ["12.4k", "Tasks executed"],
-                            ["99.2%", "Uptime · 30d"],
-                        ].map(([v, k]) => (
-                            <div key={k}>
-                                <dt className="text-[10px] font-mono uppercase tracking-[0.18em] text-muted-foreground">{k}</dt>
-                                <dd className="mt-1 font-display text-2xl font-bold tabular-nums">{v}</dd>
-                            </div>
-                        ))}
-                    </dl> */}
-                </div>
-                {/* <HeroPanel /> */}
-            </div>
-        </section>
+      <section id="top" className="ui-hero relative overflow-hidden">
+        
+        <div className='hidden md:block absolute top-1/4 left-1/3 w-160 h-96 bg-primary/10 rounded-full blur-3xl z-[-1]' />
+        {/* <div className='hidden md:block absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent/5 rounded-full blur-3xl z-[-1]' /> */}
+
+        <div className="ui-hero-inner mx-auto w-full max-w-6xl px-6 py-20 md:py-24">
+          <div className="flex flex-col items-center justify-center">
+            <h1 className="mt-4 font-display text-5xl font-bold leading-[0.95] tracking-tight sm:text-6xl md:text-7xl text-center">
+              {HEADLINE}
+            </h1>
+            {/* <Steps /> */}
+            <Ctas />
+          </div>
+        </div>
+      </section>
     );
+  }
+
+  // Default - centered original composition
+  return (
+    <section id="top" className="ui-hero relative overflow-hidden">
+      <div className="ui-hero-inner mx-auto max-w-4xl px-6 pb-24 pt-20 text-center md:pb-28 md:pt-24">
+        <p className="mt-6 font-display text-3xl tracking-tight text-signal sm:text-4xl">BITAGENTS</p>
+        <h1 className="mx-auto mt-4 font-display text-5xl font-bold leading-[0.95] tracking-tight sm:text-6xl md:text-7xl">
+          {HEADLINE}
+        </h1>
+        <Steps className="mx-auto" />
+        <Ctas center />
+      </div>
+    </section>
+  );
 }

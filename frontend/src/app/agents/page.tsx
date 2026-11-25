@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { AgentMarketplace } from "@/components/agents/AgentMarketplace";
+import { AgentDirectory } from "@/components/agents/AgentDirectory";
 
 export const metadata: Metadata = {
-  title: "Agent Marketplace - BIT Agents",
-  description: "Discover and deploy autonomous AI agents on the BIT Agents marketplace.",
+  title: "Agent Marketplace - BITAGENTS",
+  description: "Discover and deploy autonomous AI agents on the BITAGENTS marketplace.",
 };
 
 export default function AgentsPage() {
-  return <AgentMarketplace />;
+  return <AgentDirectory />;
 }

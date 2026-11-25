@@ -17,7 +17,7 @@ export function Footer() {
       title: "Protocol",
       items: [
         { label: "Sign up", href: "/signup" },
-        { label: "Token Utility", href: "/utility" },
+        { label: "Gitbook", href: "https://gitbook.bitagents.app/", external: true },
         { label: "Roadmap", href: "#" },
       ],
     },
@@ -77,8 +77,8 @@ export function Footer() {
             ))}
           </div>
         </div>
-        <div className="mt-14 border-t border-grid pt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
-          <span>© 2026 BIT Agents · All rights reserved</span>
+        <div className="mt-14 pt-6 font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">
+          <span>© 2026 BITAGENTS · All rights reserved</span>
         </div>
       </div>
     </footer>
