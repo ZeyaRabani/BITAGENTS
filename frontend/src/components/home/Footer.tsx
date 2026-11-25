@@ -16,8 +16,7 @@ export function Footer() {
     {
       title: "Protocol",
       items: [
-        { label: "Agents", href: "/agents" },
-        { label: "Analytics", href: "/analytics" },
+        { label: "Sign up", href: "/signup" },
         { label: "Token Utility", href: "/utility" },
         { label: "Roadmap", href: "#" },
       ],

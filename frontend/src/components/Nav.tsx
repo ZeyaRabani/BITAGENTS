@@ -1,7 +1,6 @@
 "use client";
 
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -57,15 +56,9 @@ export function Nav({ children }: { children: React.ReactNode }) {
               <div className="flex shrink-0 items-center gap-2">
                 <Link
                   href="/signup"
-                  className="hidden border border-grid px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-foreground transition hover:border-signal sm:inline-flex"
+                  className="inline-flex shrink-0 items-center justify-center bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
                 >
                   Sign up
-                </Link>
-                <Link
-                  href="/agents"
-                  className="inline-flex shrink-0 items-center justify-center gap-2 bg-signal px-3 py-2 text-xs font-mono font-semibold uppercase tracking-[0.12em] text-primary-foreground transition hover:opacity-90 sm:px-4 sm:text-sm"
-                >
-                  Launch App <ArrowUpRight size={16} />
                 </Link>
               </div>
             </>
