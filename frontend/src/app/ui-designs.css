@@ -180,7 +180,7 @@ html[data-ui-design="5"] .ui-hero {
   /* background:
     radial-gradient(ellipse 50% 40% at 72% 22%, var(--accent-glow), transparent 55%),
     linear-gradient(180deg, #171717 0%, #111111 100%); */
-  border-bottom: 1px solid var(--grid);
+  /* border-bottom: 1px solid var(--grid); */
 }
 
 html[data-ui-design="5"] .ui-hero-badge {
