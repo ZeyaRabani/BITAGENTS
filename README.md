@@ -1,5 +1,12 @@
 # BITAGENTS
 
+## Aomi strategy integration
+
+The [Aomi app and strategy service](aomi-app/README.md) expose the Python DCA
+strategy as an Aomi skill. Aomi handles agent configuration and chat; BITAGENTS
+keeps the schedule, wallet service and execution history. The same directory
+includes a local, explicitly simulated experience preview.
+
 BITAGENTS is an AI Agent Marketplace powered by a decentralized compute marketplace.
 
 The MVP proves the full loop on Solana devnet:

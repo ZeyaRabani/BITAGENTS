@@ -1,0 +1,4 @@
+[app]
+name = "bitagents"
+display_name = "BITAGENTS"
+public = false
